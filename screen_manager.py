@@ -6,6 +6,7 @@ import datetime
 import logging
 import sys
 from pathlib import Path
+import subprocess
 
 sys.path.append(str(Path(__file__).resolve().parent / "src"))
 from stock_indicator import indicators
@@ -45,6 +46,18 @@ def screen(parameter, debug_parameter, symbols_dir: Path | str = Path("US-Stock-
     start_time = time.time()
 
     symbols_dir = Path(symbols_dir)
+    if not symbols_dir.exists():
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "https://github.com/rreichel3/US-Stock-Symbols.git",
+                str(symbols_dir),
+            ],
+            check=True,
+        )
+        if not symbols_dir.exists():
+            raise FileNotFoundError(f"Failed to clone repository into {symbols_dir}")
 
     # Read JSON files
     amex_df = pd.read_json(symbols_dir / "amex" / "amex_tickers.json")
