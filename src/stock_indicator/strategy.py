@@ -54,7 +54,7 @@ def evaluate_ema_sma_cross_strategy(
         # Remove trailing ticker identifiers such as "_riv" so that column names
         # are reduced to plain identifiers like "open" and "close"
         price_data_frame.columns = [
-            re.sub(r"_(open|close|high|low|volume)_.*", r"\1", column_name)
+            re.sub(r"(open|close|high|low|volume)_[a-z0-9]+$", r"\1", column_name)
             for column_name in price_data_frame.columns
         ]
         required_columns = {"open", "close"}
@@ -80,8 +80,8 @@ def evaluate_ema_sma_cross_strategy(
             (price_data_frame["ema_previous"] >= price_data_frame["sma_previous"])
             & (price_data_frame["ema_value"] < price_data_frame["sma_value"])
         )
-        price_data_frame["entry_signal"] = price_data_frame["cross_up"].shift(1).fillna(False)
-        price_data_frame["exit_signal"] = price_data_frame["cross_down"].shift(1).fillna(False)
+        price_data_frame["entry_signal"] = price_data_frame["cross_up"].shift(1, fill_value=False)
+        price_data_frame["exit_signal"] = price_data_frame["cross_down"].shift(1, fill_value=False)
 
         def entry_rule(current_row: pandas.Series) -> bool:
             return bool(current_row["entry_signal"])
