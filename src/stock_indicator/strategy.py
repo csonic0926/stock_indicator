@@ -14,6 +14,7 @@ import pandas
 from .indicators import ema, kalman_filter, sma, rsi
 from .simulator import (
     calculate_maximum_concurrent_positions,
+    calculate_annual_returns,
     simulate_trades,
     SimulationResult,
     simulate_portfolio_balance,
@@ -39,6 +40,7 @@ class StrategyMetrics:
     holding_period_standard_deviation: float
     maximum_concurrent_positions: int
     final_balance: float
+    annual_returns: Dict[int, float]
 
 
 def load_price_data(csv_file_path: Path) -> pandas.DataFrame:
@@ -185,6 +187,7 @@ def calculate_metrics(
     holding_period_list: List[int],
     maximum_concurrent_positions: int = 0,
     final_balance: float = 0.0,
+    annual_returns: Dict[int, float] | None = None,
 ) -> StrategyMetrics:
     """Compute summary metrics for a list of simulated trades."""
     # TODO: review
@@ -202,6 +205,7 @@ def calculate_metrics(
             holding_period_standard_deviation=0.0,
             maximum_concurrent_positions=maximum_concurrent_positions,
             final_balance=final_balance,
+            annual_returns={} if annual_returns is None else annual_returns,
         )
 
     winning_trade_count = sum(
@@ -234,6 +238,7 @@ def calculate_metrics(
         ),
         maximum_concurrent_positions=maximum_concurrent_positions,
         final_balance=final_balance,
+        annual_returns={} if annual_returns is None else annual_returns,
     )
 
 
@@ -342,6 +347,9 @@ def evaluate_combined_strategy(
     maximum_concurrent_positions = calculate_maximum_concurrent_positions(
         simulation_results
     )
+    annual_returns = calculate_annual_returns(
+        all_trades, starting_cash, maximum_positions
+    )
     final_balance = simulate_portfolio_balance(
         all_trades, starting_cash, maximum_positions
     )
@@ -352,6 +360,7 @@ def evaluate_combined_strategy(
         holding_period_list,
         maximum_concurrent_positions,
         final_balance,
+        annual_returns,
     )
 
 
@@ -500,6 +509,7 @@ def evaluate_ema_sma_cross_strategy(
             holding_period_standard_deviation=0.0,
             maximum_concurrent_positions=maximum_concurrent_positions,
             final_balance=0.0,
+            annual_returns={},
         )
 
     winning_trade_count = sum(
@@ -530,6 +540,7 @@ def evaluate_ema_sma_cross_strategy(
         ),
         maximum_concurrent_positions=maximum_concurrent_positions,
         final_balance=0.0,
+        annual_returns={},
     )
 
 
@@ -671,6 +682,7 @@ def evaluate_kalman_channel_strategy(
             holding_period_standard_deviation=0.0,
             maximum_concurrent_positions=maximum_concurrent_positions,
             final_balance=0.0,
+            annual_returns={},
         )
 
     winning_trade_count = sum(
@@ -703,4 +715,5 @@ def evaluate_kalman_channel_strategy(
         ),
         maximum_concurrent_positions=maximum_concurrent_positions,
         final_balance=0.0,
+        annual_returns={},
     )

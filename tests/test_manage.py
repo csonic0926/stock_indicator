@@ -131,6 +131,7 @@ def test_start_simulate(monkeypatch: pytest.MonkeyPatch) -> None:
             holding_period_standard_deviation=1.0,
             maximum_concurrent_positions=2,
             final_balance=123.45,
+            annual_returns={},
         )
 
     monkeypatch.setattr(
@@ -183,6 +184,7 @@ def test_start_simulate_different_strategies(monkeypatch: pytest.MonkeyPatch) ->
             holding_period_standard_deviation=0.0,
             maximum_concurrent_positions=0,
             final_balance=0.0,
+            annual_returns={},
         )
 
     monkeypatch.setattr(
@@ -232,6 +234,7 @@ def test_start_simulate_supports_rsi_strategy(
             holding_period_standard_deviation=0.0,
             maximum_concurrent_positions=0,
             final_balance=0.0,
+            annual_returns={},
         )
 
     monkeypatch.setattr(
@@ -280,6 +283,7 @@ def test_start_simulate_accepts_stop_loss_argument(
             holding_period_standard_deviation=0.0,
             maximum_concurrent_positions=0,
             final_balance=0.0,
+            annual_returns={},
         )
 
     monkeypatch.setattr(

@@ -16,6 +16,7 @@ from stock_indicator.simulator import (
     SimulationResult,
     Trade,
     calculate_maximum_concurrent_positions,
+    calculate_annual_returns,
     simulate_trades,
     simulate_portfolio_balance,
 )
@@ -282,3 +283,31 @@ def test_simulate_portfolio_balance_allocates_proportional_cash() -> None:
     )
     expected_final_balance = 150.0 - TRADE_COMMISSION * 2
     assert pytest.approx(final_balance, rel=1e-6) == expected_final_balance
+
+
+def test_calculate_annual_returns_computes_yearly_returns() -> None:
+    trade_one = Trade(
+        entry_date=pandas.Timestamp("2023-01-10"),
+        exit_date=pandas.Timestamp("2023-03-10"),
+        entry_price=100.0,
+        exit_price=110.0,
+        profit=10.0 - TRADE_COMMISSION,
+        holding_period=1,
+    )
+    trade_two = Trade(
+        entry_date=pandas.Timestamp("2024-02-15"),
+        exit_date=pandas.Timestamp("2024-06-15"),
+        entry_price=200.0,
+        exit_price=220.0,
+        profit=20.0 - TRADE_COMMISSION,
+        holding_period=1,
+    )
+    annual_returns = calculate_annual_returns(
+        [trade_one, trade_two], starting_cash=1000.0, maximum_positions=1
+    )
+    first_year_end = 1000.0 * (110.0 / 100.0) - TRADE_COMMISSION
+    expected_return_2023 = (first_year_end - 1000.0) / 1000.0
+    second_year_end = first_year_end * (220.0 / 200.0) - TRADE_COMMISSION
+    expected_return_2024 = (second_year_end - first_year_end) / first_year_end
+    assert pytest.approx(annual_returns[2023], rel=1e-6) == expected_return_2023
+    assert pytest.approx(annual_returns[2024], rel=1e-6) == expected_return_2024

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Iterable, List
+from typing import Callable, Dict, Iterable, List
 
 import pandas
 
@@ -232,3 +232,86 @@ def simulate_portfolio_balance(
             open_trades[trade] = allocation
             cash_balance -= allocation
     return cash_balance
+
+
+# TODO: review
+def calculate_annual_returns(
+    trades: Iterable[Trade],
+    starting_cash: float,
+    maximum_positions: int,
+) -> Dict[int, float]:
+    """Compute yearly portfolio returns for a series of trades.
+
+    The portfolio balance is simulated using the same allocation logic as
+    :func:`simulate_portfolio_balance`. The function records the portfolio
+    value at the start and end of each calendar year and calculates the return
+    for that year.
+
+    Parameters
+    ----------
+    trades: Iterable[Trade]
+        Collection of trades containing entry and exit information.
+    starting_cash: float
+        Initial cash available for trading.
+    maximum_positions: int
+        Maximum number of concurrent positions allowed.
+
+    Returns
+    -------
+    Dict[int, float]
+        Mapping of year to return percentage for that year. The value is
+        expressed as a decimal where ``0.10`` represents a ten percent return.
+    """
+    events: List[tuple[pandas.Timestamp, int, Trade]] = []
+    for trade in trades:
+        events.append((trade.entry_date, 1, trade))
+        events.append((trade.exit_date, 0, trade))
+    events.sort(key=lambda event_tuple: (event_tuple[0], event_tuple[1]))
+
+    cash_balance = starting_cash
+    open_trades: dict[Trade, float] = {}
+    annual_returns: Dict[int, float] = {}
+
+    current_year = events[0][0].year if events else None
+    year_start_value = cash_balance
+
+    for event_timestamp, event_type, trade in events:
+        if current_year is None:
+            current_year = event_timestamp.year
+            year_start_value = cash_balance + sum(open_trades.values())
+
+        while event_timestamp.year > current_year:
+            year_end_value = cash_balance + sum(open_trades.values())
+            if year_start_value == 0:
+                annual_returns[current_year] = 0.0
+            else:
+                annual_returns[current_year] = (
+                    (year_end_value - year_start_value) / year_start_value
+                )
+            year_start_value = year_end_value
+            current_year += 1
+
+        if event_type == 0:
+            if trade in open_trades:
+                invested_amount = open_trades.pop(trade)
+                cash_balance += invested_amount * (
+                    trade.exit_price / trade.entry_price
+                )
+                cash_balance -= TRADE_COMMISSION
+        else:
+            if len(open_trades) >= maximum_positions or cash_balance <= 0:
+                continue
+            allocation = cash_balance / (maximum_positions - len(open_trades))
+            open_trades[trade] = allocation
+            cash_balance -= allocation
+
+    if current_year is not None:
+        year_end_value = cash_balance + sum(open_trades.values())
+        if year_start_value == 0:
+            annual_returns[current_year] = 0.0
+        else:
+            annual_returns[current_year] = (
+                (year_end_value - year_start_value) / year_start_value
+            )
+
+    return annual_returns
