@@ -522,6 +522,38 @@ def test_evaluate_combined_strategy_reports_maximum_positions(
     assert result.maximum_concurrent_positions == 2
 
 
+def test_evaluate_combined_strategy_handles_adjusted_close_column(
+    tmp_path: Path,
+) -> None:
+    """The dollar volume filter should handle files with an Adj Close column."""
+
+    date_index = pandas.date_range("2020-01-01", periods=60, freq="D")
+    price_value_list = [100.0] * 60
+    volume_value_list = [1_000_000] * 60
+    price_data_frame = pandas.DataFrame(
+        {
+            "Date": date_index,
+            "Open": price_value_list,
+            "High": price_value_list,
+            "Low": price_value_list,
+            "Close": price_value_list,
+            "Adj Close": price_value_list,
+            "Volume": volume_value_list,
+        }
+    )
+    csv_file_path = tmp_path / "adjusted_close.csv"
+    price_data_frame.to_csv(csv_file_path, index=False)
+
+    result = evaluate_combined_strategy(
+        tmp_path,
+        "ema_sma_cross",
+        "ema_sma_cross",
+        minimum_average_dollar_volume=1.0,
+    )
+
+    assert result.total_trades == 0
+
+
 def test_attach_ema_sma_cross_and_rsi_signals_filters_by_rsi(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

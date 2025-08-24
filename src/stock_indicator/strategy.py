@@ -68,6 +68,10 @@ def load_price_data(csv_file_path: Path) -> pandas.DataFrame:
         )
         for column_name in price_data_frame.columns
     ]
+    # Remove duplicate columns such as "adj_close" that normalize to the same name.
+    price_data_frame = price_data_frame.loc[
+        :, ~price_data_frame.columns.duplicated()
+    ]
     required_columns = {"open", "close"}
     missing_column_names = [
         required_column
@@ -300,12 +304,12 @@ def evaluate_combined_strategy(
             dollar_volume_series = price_data_frame["close"] * price_data_frame["volume"]
             if dollar_volume_series.empty:
                 continue
-            recent_average_dollar_volume = (
+            recent_average_dollar_volume = float(
                 dollar_volume_series.rolling(window=50).mean().iloc[-1] / 1_000_000
             )
-            if pandas.isna(recent_average_dollar_volume) or (
-                recent_average_dollar_volume < minimum_average_dollar_volume
-            ):
+            if pandas.isna(recent_average_dollar_volume):
+                continue
+            if recent_average_dollar_volume < minimum_average_dollar_volume:
                 continue
         SUPPORTED_STRATEGIES[buy_strategy_name](price_data_frame)
         if buy_strategy_name != sell_strategy_name:
