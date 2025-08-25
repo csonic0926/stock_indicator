@@ -325,6 +325,54 @@ def test_start_simulate_dollar_volume_threshold_and_rank(
     assert recorded_values["rank"] == 6
 
 
+def test_start_simulate_dollar_volume_large_threshold_and_rank(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The command should parse and forward a large threshold with ranking."""
+    # TODO: review
+    import stock_indicator.manage as manage_module
+
+    recorded_values: dict[str, float | int | None] = {}
+
+    from stock_indicator.strategy import StrategyMetrics
+
+    def fake_evaluate(
+        data_directory: Path,
+        buy_strategy_name: str,
+        sell_strategy_name: str,
+        minimum_average_dollar_volume: float | None,
+        top_dollar_volume_rank: int | None = None,
+        stop_loss_percentage: float = 1.0,
+    ) -> StrategyMetrics:
+        recorded_values["threshold"] = minimum_average_dollar_volume
+        recorded_values["rank"] = top_dollar_volume_rank
+        return StrategyMetrics(
+            total_trades=0,
+            win_rate=0.0,
+            mean_profit_percentage=0.0,
+            profit_percentage_standard_deviation=0.0,
+            mean_loss_percentage=0.0,
+            loss_percentage_standard_deviation=0.0,
+            mean_holding_period=0.0,
+            holding_period_standard_deviation=0.0,
+            maximum_concurrent_positions=0,
+            final_balance=0.0,
+            annual_returns={},
+            annual_trade_counts={},
+        )
+
+    monkeypatch.setattr(
+        manage_module.strategy, "evaluate_combined_strategy", fake_evaluate
+    )
+
+    shell = manage_module.StockShell(stdout=io.StringIO())
+    shell.onecmd(
+        "start_simulate dollar_volume>10000,6th ema_sma_cross ema_sma_cross"
+    )
+    assert recorded_values["threshold"] == 10000.0
+    assert recorded_values["rank"] == 6
+
+
 def test_start_simulate_supports_rsi_strategy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
