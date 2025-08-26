@@ -18,9 +18,11 @@ from stock_indicator.simulator import (
     Trade,
     calculate_maximum_concurrent_positions,
     calculate_annual_returns,
+    calculate_annual_returns_with_withdrawal,
     calculate_annual_trade_counts,
     simulate_trades,
     simulate_portfolio_balance,
+    simulate_and_withdraw,
 )
 
 
@@ -310,6 +312,62 @@ def test_simulate_portfolio_balance_invests_additional_share_when_cash_available
     )
     expected_final_balance = 159.0
     assert pytest.approx(final_balance, rel=1e-6) == expected_final_balance
+
+
+def test_simulate_and_withdraw_deducts_cash_each_year() -> None:
+    """Yearly withdrawals should reduce the final cash balance."""
+    trade_first = Trade(
+        entry_date=pandas.Timestamp("2023-01-10"),
+        exit_date=pandas.Timestamp("2023-01-20"),
+        entry_price=10.0,
+        exit_price=20.0,
+        profit=10.0,
+        holding_period=10,
+    )
+    trade_second = Trade(
+        entry_date=pandas.Timestamp("2024-02-10"),
+        exit_date=pandas.Timestamp("2024-02-20"),
+        entry_price=10.0,
+        exit_price=20.0,
+        profit=10.0,
+        holding_period=10,
+    )
+    final_balance = simulate_and_withdraw(
+        [trade_first, trade_second], 100.0, 1, 100.0
+    )
+    expected_final_balance = 88.0
+    assert pytest.approx(final_balance, rel=1e-6) == expected_final_balance
+
+
+def test_calculate_annual_returns_with_withdrawal_accounts_for_deductions() -> None:
+    """Annual returns should be computed prior to withdrawals."""
+    trade_first = Trade(
+        entry_date=pandas.Timestamp("2023-01-10"),
+        exit_date=pandas.Timestamp("2023-01-20"),
+        entry_price=10.0,
+        exit_price=20.0,
+        profit=10.0,
+        holding_period=10,
+    )
+    trade_second = Trade(
+        entry_date=pandas.Timestamp("2024-02-10"),
+        exit_date=pandas.Timestamp("2024-02-20"),
+        entry_price=10.0,
+        exit_price=20.0,
+        profit=10.0,
+        holding_period=10,
+    )
+    annual_returns = calculate_annual_returns_with_withdrawal(
+        [trade_first, trade_second],
+        starting_cash=100.0,
+        eligible_symbol_count=1,
+        simulation_start=pandas.Timestamp("2023-01-01"),
+        annual_withdrawal=100.0,
+    )
+    expected_return_2023 = (199.0 - 100.0) / 100.0
+    expected_return_2024 = (188.0 - 99.0) / 99.0
+    assert pytest.approx(annual_returns[2023], rel=1e-6) == expected_return_2023
+    assert pytest.approx(annual_returns[2024], rel=1e-6) == expected_return_2024
 
 
 def test_calculate_annual_returns_computes_yearly_returns() -> None:

@@ -16,8 +16,10 @@ from .simulator import (
     SimulationResult,
     Trade,
     calculate_annual_returns,
+    calculate_annual_returns_with_withdrawal,
     calculate_annual_trade_counts,
     calculate_maximum_concurrent_positions,
+    simulate_and_withdraw,
     simulate_portfolio_balance,
     simulate_trades,
 )
@@ -398,6 +400,7 @@ def evaluate_combined_strategy(
     top_dollar_volume_rank: int | None = None,  # TODO: review
     starting_cash: float = 3000.0,
     stop_loss_percentage: float = 1.0,
+    annual_withdrawal: float = 0.0,
 ) -> StrategyMetrics:
     """Evaluate a combination of strategies for entry and exit signals.
 
@@ -422,6 +425,10 @@ def evaluate_combined_strategy(
         Fractional loss from the entry price that triggers an exit on the next
         bar's opening price. Values greater than or equal to ``1.0`` disable
         the stop-loss mechanism.
+    annual_withdrawal: float, default 0.0
+        Amount of cash removed from the portfolio at the end of each calendar
+        year during balance simulation. A value of ``0.0`` disables
+        withdrawals.
     """
     # TODO: review
 
@@ -542,13 +549,30 @@ def evaluate_combined_strategy(
     )
     if simulation_start_date is None:
         simulation_start_date = pandas.Timestamp.now()
-    annual_returns = calculate_annual_returns(
-        all_trades, starting_cash, eligible_symbol_count, simulation_start_date
-    )
+    if annual_withdrawal > 0:
+        annual_returns = calculate_annual_returns_with_withdrawal(
+            all_trades,
+            starting_cash,
+            eligible_symbol_count,
+            simulation_start_date,
+            annual_withdrawal,
+        )
+    else:
+        annual_returns = calculate_annual_returns(
+            all_trades, starting_cash, eligible_symbol_count, simulation_start_date
+        )
     annual_trade_counts = calculate_annual_trade_counts(all_trades)
-    final_balance = simulate_portfolio_balance(
-        all_trades, starting_cash, eligible_symbol_count
-    )
+    if annual_withdrawal > 0:
+        final_balance = simulate_and_withdraw(
+            all_trades,
+            starting_cash,
+            eligible_symbol_count,
+            annual_withdrawal,
+        )
+    else:
+        final_balance = simulate_portfolio_balance(
+            all_trades, starting_cash, eligible_symbol_count
+        )
     return calculate_metrics(
         trade_profit_list,
         profit_percentage_list,

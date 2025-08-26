@@ -46,3 +46,16 @@ The `start_simulate` command accepts the following strategies:
 Not every strategy supports both buying and selling. Only the first six
 strategies in the list can be used for buying. All seven strategies can be
 used for selling.
+
+## Annual withdrawal simulation
+
+To run a simulation that withdraws a fixed amount of cash at the end of each
+year, use the `start_simulate_withdraw` command:
+
+```
+start_simulate_withdraw=5000,1000
+```
+
+The first number specifies the starting cash and the second number is the cash
+withdrawn at each year end. The command evaluates the default `ema_sma_cross`
+strategy for both entry and exit signals and reports the resulting metrics.

@@ -27,6 +27,7 @@ class StockShell(cmd.Cmd):
     intro = "Stock Indicator shell. Type help or ? to list commands."
     prompt = "(stock-indicator) "
 
+
     def do_update_symbols(self, argument_line: str) -> None:  # noqa: D401
         """update_symbols
         Download the latest list of ticker symbols."""
@@ -211,6 +212,74 @@ class StockShell(cmd.Cmd):
             "Defaults to 1.0.\n"
             f"Available buy strategies: {available_buy}.\n"
             f"Available sell strategies: {available_sell}.\n"
+        )
+
+    def do_start_simulate_withdraw(self, argument_line: str) -> None:  # noqa: D401
+        """start_simulate_withdraw STARTING_CASH,WITHDRAWAL
+        Evaluate default strategies and withdraw cash annually."""
+
+        argument_string = argument_line.strip()
+        if argument_string.startswith("="):
+            argument_string = argument_string[1:]
+        if not argument_string:
+            self.stdout.write(
+                "usage: start_simulate_withdraw=STARTING_CASH,WITHDRAWAL\n"
+            )
+            return
+        argument_parts = argument_string.split(",")
+        if len(argument_parts) != 2:
+            self.stdout.write(
+                "usage: start_simulate_withdraw=STARTING_CASH,WITHDRAWAL\n"
+            )
+            return
+        try:
+            starting_cash = float(argument_parts[0])
+            withdrawal_amount = float(argument_parts[1])
+        except ValueError:
+            self.stdout.write(
+                "usage: start_simulate_withdraw=STARTING_CASH,WITHDRAWAL\n"
+            )
+            return
+        start_date_string = determine_start_date(DATA_DIRECTORY)
+        evaluation_metrics = strategy.evaluate_combined_strategy(
+            DATA_DIRECTORY,
+            "ema_sma_cross",
+            "ema_sma_cross",
+            starting_cash=starting_cash,
+            annual_withdrawal=withdrawal_amount,
+        )
+        self.stdout.write(f"Simulation start date: {start_date_string}\n")
+        self.stdout.write(
+            (
+                f"Trades: {evaluation_metrics.total_trades}, "
+                f"Win rate: {evaluation_metrics.win_rate:.2%}, "
+                f"Mean profit %: {evaluation_metrics.mean_profit_percentage:.2%}, "
+                f"Profit % Std Dev: {evaluation_metrics.profit_percentage_standard_deviation:.2%}, "
+                f"Mean loss %: {evaluation_metrics.mean_loss_percentage:.2%}, "
+                f"Loss % Std Dev: {evaluation_metrics.loss_percentage_standard_deviation:.2%}, "
+                f"Mean holding period: {evaluation_metrics.mean_holding_period:.2f} bars, "
+                f"Holding period Std Dev: {evaluation_metrics.holding_period_standard_deviation:.2f} bars, "
+                f"Max concurrent positions: {evaluation_metrics.maximum_concurrent_positions}, "
+                f"Final balance: {evaluation_metrics.final_balance:.2f}\n"
+            )
+        )
+        for year, annual_return in sorted(
+            evaluation_metrics.annual_returns.items()
+        ):
+            trade_count = evaluation_metrics.annual_trade_counts.get(year, 0)
+            self.stdout.write(
+                f"Year {year}: {annual_return:.2%}, trade: {trade_count}\n"
+            )
+
+    def help_start_simulate_withdraw(self) -> None:  # noqa: D401
+        """Display help for the start_simulate_withdraw command."""
+        self.stdout.write(
+            "start_simulate_withdraw=STARTING_CASH,WITHDRAWAL\n"
+            "Evaluate the default ema_sma_cross strategy for both buying and "
+            "selling while withdrawing WITHDRAWAL at the end of each year.\n"
+            "Parameters:\n"
+            "  STARTING_CASH: Initial cash available for trading.\n"
+            "  WITHDRAWAL: Cash amount removed annually.\n"
         )
 
 # TODO: review

@@ -245,6 +245,76 @@ def simulate_portfolio_balance(
     return cash_balance
 
 
+def simulate_and_withdraw(
+    trades: Iterable[Trade],
+    starting_cash: float,
+    eligible_symbol_count: int,
+    annual_withdrawal: float,
+) -> float:
+    """Simulate capital allocation with yearly cash withdrawals.
+
+    This function mirrors :func:`simulate_portfolio_balance` but deducts
+    ``annual_withdrawal`` from the cash balance at the end of each calendar
+    year. The withdrawal only affects available cash and does not force the
+    closure of open positions.
+
+    Parameters
+    ----------
+    trades:
+        Collection of trades containing entry and exit information.
+    starting_cash:
+        Initial cash available for trading.
+    eligible_symbol_count:
+        Total number of symbols considered for trading. This value is typically
+        produced by
+        :func:`stock_indicator.volume.count_symbols_with_average_dollar_volume_above`.
+    annual_withdrawal:
+        Amount of cash removed from the portfolio at the end of each calendar
+        year. When the cash balance is less than the withdrawal amount, the
+        balance is reduced to zero.
+
+    Returns
+    -------
+    float
+        Cash balance after executing all trades and annual withdrawals.
+    """
+    events: List[tuple[pandas.Timestamp, int, Trade]] = []
+    for trade in trades:
+        events.append((trade.entry_date, 1, trade))
+        events.append((trade.exit_date, 0, trade))
+    events.sort(key=lambda event_tuple: (event_tuple[0], event_tuple[1]))
+    cash_balance = starting_cash
+    open_trades: dict[Trade, float] = {}
+    current_year = events[0][0].year if events else pandas.Timestamp.now().year
+    for event_timestamp, event_type, trade in events:
+        while event_timestamp.year > current_year:
+            cash_balance = max(cash_balance - annual_withdrawal, 0.0)
+            current_year += 1
+        if event_type == 0:
+            if trade in open_trades:
+                invested_amount = open_trades.pop(trade)
+                cash_balance += invested_amount * (
+                    trade.exit_price / trade.entry_price
+                )
+                cash_balance -= TRADE_COMMISSION
+        else:
+            remaining_slots = eligible_symbol_count - len(open_trades)
+            if remaining_slots <= 0 or cash_balance <= 0:
+                continue
+            budget_per_position = cash_balance / remaining_slots
+            share_count = math.floor(budget_per_position / trade.entry_price)
+            if share_count <= 0:
+                continue
+            invested_amount = share_count * trade.entry_price
+            if cash_balance - invested_amount >= trade.entry_price:
+                share_count += 1
+                invested_amount = share_count * trade.entry_price
+            open_trades[trade] = invested_amount
+            cash_balance -= invested_amount
+    cash_balance = max(cash_balance - annual_withdrawal, 0.0)
+    return cash_balance
+
+
 def calculate_annual_returns(
     trades: Iterable[Trade],
     starting_cash: float,
@@ -315,6 +385,99 @@ def calculate_annual_returns(
                 continue
             budget_per_position = cash_balance / remaining_slots
             # TODO: review
+            share_count = math.floor(
+                budget_per_position / completed_trade.entry_price
+            )
+            if share_count <= 0:
+                continue
+            invested_amount = share_count * completed_trade.entry_price
+            if cash_balance - invested_amount >= completed_trade.entry_price:
+                share_count += 1
+                invested_amount = share_count * completed_trade.entry_price
+            open_trades[completed_trade] = invested_amount
+            cash_balance -= invested_amount
+
+    year_end_value = cash_balance + sum(open_trades.values())
+    if year_start_value == 0:
+        annual_returns[current_year] = 0.0
+    else:
+        annual_returns[current_year] = (
+            (year_end_value - year_start_value) / year_start_value
+        )
+
+    return annual_returns
+
+
+def calculate_annual_returns_with_withdrawal(
+    trades: Iterable[Trade],
+    starting_cash: float,
+    eligible_symbol_count: int,
+    simulation_start: pandas.Timestamp,
+    annual_withdrawal: float,
+) -> Dict[int, float]:
+    """Compute yearly portfolio returns with annual cash withdrawals.
+
+    The logic matches :func:`calculate_annual_returns` but subtracts
+    ``annual_withdrawal`` from the cash balance at the end of each calendar
+    year before the next year's calculation begins. The withdrawal does not
+    alter the invested value of open positions.
+
+    Parameters
+    ----------
+    trades:
+        Collection of trades containing entry and exit information.
+    starting_cash:
+        Initial cash available for trading.
+    eligible_symbol_count:
+        Total number of symbols considered for trading.
+    simulation_start:
+        Timestamp indicating the first day of the simulation.
+    annual_withdrawal:
+        Amount of cash removed from the portfolio at the end of each year.
+
+    Returns
+    -------
+    Dict[int, float]
+        Mapping of year to return percentage for that year.
+    """
+    events: List[tuple[pandas.Timestamp, int, Trade]] = []
+    for completed_trade in trades:
+        events.append((completed_trade.entry_date, 1, completed_trade))
+        events.append((completed_trade.exit_date, 0, completed_trade))
+    events.sort(key=lambda event_tuple: (event_tuple[0], event_tuple[1]))
+
+    cash_balance = starting_cash
+    open_trades: dict[Trade, float] = {}
+    annual_returns: Dict[int, float] = {}
+
+    current_year = simulation_start.year
+    year_start_value = cash_balance
+
+    for event_timestamp, event_type, completed_trade in events:
+        while event_timestamp.year > current_year:
+            year_end_value = cash_balance + sum(open_trades.values())
+            if year_start_value == 0:
+                annual_returns[current_year] = 0.0
+            else:
+                annual_returns[current_year] = (
+                    (year_end_value - year_start_value) / year_start_value
+                )
+            cash_balance = max(cash_balance - annual_withdrawal, 0.0)
+            year_start_value = cash_balance + sum(open_trades.values())
+            current_year += 1
+
+        if event_type == 0:
+            if completed_trade in open_trades:
+                invested_amount = open_trades.pop(completed_trade)
+                cash_balance += invested_amount * (
+                    completed_trade.exit_price / completed_trade.entry_price
+                )
+                cash_balance -= TRADE_COMMISSION
+        else:
+            remaining_slots = eligible_symbol_count - len(open_trades)
+            if remaining_slots <= 0 or cash_balance <= 0:
+                continue
+            budget_per_position = cash_balance / remaining_slots
             share_count = math.floor(
                 budget_per_position / completed_trade.entry_price
             )
