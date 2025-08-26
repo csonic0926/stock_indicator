@@ -68,3 +68,26 @@ def test_count_symbols_with_average_dollar_volume_above_requires_volume_column(
 
     with pytest.raises(ValueError, match="Volume column is required"):
         count_symbols_with_average_dollar_volume_above(tmp_path, 1)
+
+
+def test_count_symbols_with_average_dollar_volume_above_computes_value_correctly(
+    tmp_path: Path,
+) -> None:
+    """The function should compute the correct 50-day average dollar volume."""
+
+    date_index = pandas.date_range("2020-01-01", periods=60, freq="D")
+    price_values = [10.0] * 60
+    volume_values = [1_000_000.0] * 60
+    data_frame = pandas.DataFrame(
+        {"Date": date_index, "open": price_values, "close": price_values, "volume": volume_values}
+    )
+    data_frame.to_csv(tmp_path / "single.csv", index=False)
+
+    below_threshold_result = count_symbols_with_average_dollar_volume_above(
+        tmp_path, 9.9
+    )
+    above_threshold_result = count_symbols_with_average_dollar_volume_above(
+        tmp_path, 10.1
+    )
+    assert below_threshold_result == 1
+    assert above_threshold_result == 0

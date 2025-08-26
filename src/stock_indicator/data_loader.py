@@ -1,10 +1,8 @@
 """Functions for downloading historical stock market data.
 
 The :func:`download_history` utility normalizes all column names in the
-returned data frame to ``snake_case``. Starting with ``yfinance`` version
-``0.2.51``, the ``download`` function returns a ``close`` column that already
-reflects any dividends or stock splits, so no separate adjusted closing price
-is provided.
+returned data frame to ``snake_case`` and adjusts prices and volume to account
+for dividends and stock splits.
 """
 # TODO: review
 
@@ -75,6 +73,9 @@ def download_history(
                 return cached_frame
             start = next_download_date.strftime("%Y-%m-%d")
 
+    download_options = dict(download_options)
+    download_options["auto_adjust"] = False
+
     maximum_attempts = 3
     for attempt_number in range(1, maximum_attempts + 1):
         try:
@@ -87,10 +88,23 @@ def download_history(
             )
             if isinstance(downloaded_frame.columns, pandas.MultiIndex):
                 downloaded_frame.columns = downloaded_frame.columns.get_level_values(0)
+
+            adjustment_ratio = (
+                downloaded_frame["Adj Close"] / downloaded_frame["Close"]
+            )
+            for price_column_name in ["Open", "High", "Low", "Close"]:
+                downloaded_frame[price_column_name] = (
+                    downloaded_frame[price_column_name] * adjustment_ratio
+                )
+            downloaded_frame["Volume"] = (
+                downloaded_frame["Volume"] / adjustment_ratio
+            )
+            downloaded_frame = downloaded_frame.drop(columns=["Adj Close"])
             downloaded_frame.columns = [
                 str(column_name).lower().replace(" ", "_")
                 for column_name in downloaded_frame.columns
             ]
+
             if not cached_frame.empty:
                 downloaded_frame = pandas.concat([cached_frame, downloaded_frame])
             if cache_path is not None:

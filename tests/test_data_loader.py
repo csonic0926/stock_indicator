@@ -21,14 +21,24 @@ from stock_indicator.data_loader import download_history
 
 
 def test_download_history_returns_dataframe(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The function should return data provided by yfinance."""
-    raw_dataframe = pandas.DataFrame({"Close": [1.0, 2.0]})
+    """The function should adjust price and volume data provided by yfinance."""
+    raw_dataframe = pandas.DataFrame(
+        {
+            "Open": [100.0, 200.0],
+            "High": [110.0, 210.0],
+            "Low": [90.0, 190.0],
+            "Close": [100.0, 200.0],
+            "Adj Close": [50.0, 100.0],
+            "Volume": [1000.0, 2000.0],
+        }
+    )
 
     def stubbed_download(
         symbol: str,
         start: str,
         end: str,
         progress: bool = False,
+        auto_adjust: bool = False,
     ) -> pandas.DataFrame:
         return raw_dataframe
 
@@ -37,8 +47,16 @@ def test_download_history_returns_dataframe(monkeypatch: pytest.MonkeyPatch) -> 
     )
     monkeypatch.setattr("stock_indicator.symbols.load_symbols", lambda: ["TEST"])
     result_dataframe = download_history("TEST", "2021-01-01", "2021-01-02")
-    expected_dataframe = raw_dataframe.rename(
-        columns=lambda name: name.lower().replace(" ", "_")
+
+    adjustment_ratio = raw_dataframe["Adj Close"] / raw_dataframe["Close"]
+    expected_dataframe = pandas.DataFrame(
+        {
+            "open": raw_dataframe["Open"] * adjustment_ratio,
+            "high": raw_dataframe["High"] * adjustment_ratio,
+            "low": raw_dataframe["Low"] * adjustment_ratio,
+            "close": raw_dataframe["Close"] * adjustment_ratio,
+            "volume": raw_dataframe["Volume"] / adjustment_ratio,
+        }
     )
     pandas.testing.assert_frame_equal(result_dataframe, expected_dataframe)
 
@@ -49,8 +67,12 @@ def test_download_history_flattens_multiindex_columns(
     """The function should flatten MultiIndex columns and normalize their names."""
     raw_dataframe = pandas.DataFrame(
         {
-            ("Close", "TEST"): [1.0],
-            ("Open", "TEST"): [1.5],
+            ("Open", "TEST"): [100.0],
+            ("High", "TEST"): [110.0],
+            ("Low", "TEST"): [90.0],
+            ("Close", "TEST"): [100.0],
+            ("Adj Close", "TEST"): [50.0],
+            ("Volume", "TEST"): [1000.0],
         }
     )
 
@@ -59,6 +81,7 @@ def test_download_history_flattens_multiindex_columns(
         start: str,
         end: str,
         progress: bool = False,
+        auto_adjust: bool = False,
     ) -> pandas.DataFrame:
         return raw_dataframe
 
@@ -67,7 +90,16 @@ def test_download_history_flattens_multiindex_columns(
     )
     monkeypatch.setattr("stock_indicator.symbols.load_symbols", lambda: ["TEST"])
     result_dataframe = download_history("TEST", "2021-01-01", "2021-01-02")
-    assert list(result_dataframe.columns) == ["close", "open"]
+    expected_frame = pandas.DataFrame(
+        {
+            "open": [50.0],
+            "high": [55.0],
+            "low": [45.0],
+            "close": [50.0],
+            "volume": [2000.0],
+        }
+    )
+    pandas.testing.assert_frame_equal(result_dataframe, expected_frame)
 
 
 def test_download_history_retries_on_failure(
@@ -75,13 +107,23 @@ def test_download_history_retries_on_failure(
 ) -> None:
     """The function should retry and log warnings on temporary failures."""
     call_counter = {"count": 0}
-    raw_dataframe = pandas.DataFrame({"Close": [1.0]})
+    raw_dataframe = pandas.DataFrame(
+        {
+            "Open": [100.0],
+            "High": [110.0],
+            "Low": [90.0],
+            "Close": [100.0],
+            "Adj Close": [50.0],
+            "Volume": [1000.0],
+        }
+    )
 
     def flaky_download(
         symbol: str,
         start: str,
         end: str,
         progress: bool = False,
+        auto_adjust: bool = False,
     ) -> pandas.DataFrame:
         call_counter["count"] += 1
         if call_counter["count"] < 3:
@@ -96,8 +138,14 @@ def test_download_history_retries_on_failure(
         result_dataframe = download_history("TEST", "2021-01-01", "2021-01-02")
 
     assert call_counter["count"] == 3
-    expected_dataframe = raw_dataframe.rename(
-        columns=lambda name: name.lower().replace(" ", "_")
+    expected_dataframe = pandas.DataFrame(
+        {
+            "open": [50.0],
+            "high": [55.0],
+            "low": [45.0],
+            "close": [50.0],
+            "volume": [2000.0],
+        }
     )
     pandas.testing.assert_frame_equal(result_dataframe, expected_dataframe)
     assert "Attempt 1 to download data for TEST failed" in caplog.text
@@ -113,6 +161,7 @@ def test_download_history_raises_after_max_attempts(
         start: str,
         end: str,
         progress: bool = False,
+        auto_adjust: bool = False,
     ) -> pandas.DataFrame:
         raise ValueError("permanent error")
 
@@ -140,7 +189,16 @@ def test_download_history_forwards_optional_arguments(
         **options: str,
     ) -> pandas.DataFrame:
         captured_arguments.update(options)
-        return pandas.DataFrame()
+        return pandas.DataFrame(
+            {
+                "Open": [100.0],
+                "High": [110.0],
+                "Low": [90.0],
+                "Close": [100.0],
+                "Adj Close": [100.0],
+                "Volume": [1000.0],
+            }
+        )
 
     monkeypatch.setattr(
         "stock_indicator.data_loader.yfinance.download", stubbed_download
@@ -155,14 +213,27 @@ def test_download_history_uses_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     symbol_name = "TEST"
     cache_file_path = tmp_path / "TEST.csv"
     existing_frame = pandas.DataFrame(
-        {"close": [1.0, 2.0]},
+        {
+            "open": [50.0, 60.0],
+            "high": [55.0, 65.0],
+            "low": [45.0, 55.0],
+            "close": [50.0, 60.0],
+            "volume": [2000.0, 3000.0],
+        },
         index=pandas.to_datetime(["2023-01-01", "2023-01-02"]),
     )
     existing_frame.to_csv(cache_file_path)
 
     captured_arguments: dict[str, str] = {}
     downloaded_raw_frame = pandas.DataFrame(
-        {"Close": [3.0, 4.0]},
+        {
+            "Open": [100.0, 120.0],
+            "High": [110.0, 130.0],
+            "Low": [90.0, 110.0],
+            "Close": [100.0, 120.0],
+            "Adj Close": [50.0, 60.0],
+            "Volume": [1000.0, 1200.0],
+        },
         index=pandas.to_datetime(["2023-01-03", "2023-01-04"]),
     )
 
@@ -171,6 +242,7 @@ def test_download_history_uses_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: 
         start: str,
         end: str,
         progress: bool = False,
+        auto_adjust: bool = False,
     ) -> pandas.DataFrame:
         captured_arguments["start"] = start
         captured_arguments["end"] = end
