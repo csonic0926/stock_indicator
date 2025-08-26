@@ -640,6 +640,49 @@ def test_evaluate_combined_strategy_reports_maximum_positions(
     assert result.maximum_concurrent_positions == 2
 
 
+def test_evaluate_combined_strategy_skips_sp500_symbol(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """evaluate_combined_strategy should ignore the S&P 500 index symbol."""
+
+    import stock_indicator.strategy as strategy_module
+    from stock_indicator.symbols import SP500_SYMBOL
+
+    date_index = pandas.date_range("2020-01-01", periods=60, freq="D")
+    pandas.DataFrame(
+        {
+            "Date": date_index,
+            "open": [1.0] * 60,
+            "close": [1.0] * 60,
+            "symbol": ["AAA"] * 60,
+        }
+    ).to_csv(tmp_path / "AAA.csv", index=False)
+    pandas.DataFrame(
+        {
+            "Date": date_index,
+            "open": [1.0] * 60,
+            "close": [1.0] * 60,
+            "symbol": [SP500_SYMBOL] * 60,
+        }
+    ).to_csv(tmp_path / f"{SP500_SYMBOL}.csv", index=False)
+
+    processed_symbol_names: list[str] = []
+
+    def fake_simulate_trades(
+        data: pandas.DataFrame, *args: object, **kwargs: object
+    ) -> SimulationResult:
+        processed_symbol_names.append(data["symbol"].iloc[0])
+        return SimulationResult(trades=[], total_profit=0.0)
+
+    monkeypatch.setattr(strategy_module, "simulate_trades", fake_simulate_trades)
+    monkeypatch.setattr(strategy_module, "BUY_STRATEGIES", {"noop": lambda frame: None})
+    monkeypatch.setattr(strategy_module, "SELL_STRATEGIES", {"noop": lambda frame: None})
+    monkeypatch.setattr(strategy_module, "SUPPORTED_STRATEGIES", {"noop": lambda frame: None})
+
+    strategy_module.evaluate_combined_strategy(tmp_path, "noop", "noop")
+    assert processed_symbol_names == ["AAA"]
+
+
 def test_attach_20_50_sma_cross_signals_mark_crosses() -> None:
     """The 20/50 SMA cross signals should mark upward and downward crosses."""
     # TODO: review

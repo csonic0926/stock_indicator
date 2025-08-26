@@ -21,6 +21,7 @@ from .simulator import (
     simulate_portfolio_balance,
     simulate_trades,
 )
+from .symbols import SP500_SYMBOL
 
 
 LONG_TERM_SMA_WINDOW: int = 150
@@ -497,6 +498,8 @@ def evaluate_combined_strategy(
     symbol_frames: List[tuple[Path, pandas.DataFrame]] = []  # TODO: review
     latest_dollar_volumes: List[tuple[Path, float]] = []  # TODO: review
     for csv_file_path in data_directory.glob("*.csv"):
+        if csv_file_path.stem == SP500_SYMBOL:
+            continue  # Skip the S&P 500 index; it is used for benchmarking only.
         price_data_frame = load_price_data(csv_file_path)
         if price_data_frame.empty:
             continue
@@ -733,6 +736,8 @@ def evaluate_ema_sma_cross_strategy(
     holding_period_list: List[int] = []
     simulation_results: List[SimulationResult] = []
     for csv_path in data_directory.glob("*.csv"):
+        if csv_path.stem == SP500_SYMBOL:
+            continue  # Skip the S&P 500 index; it is not a tradable asset.
         price_data_frame = pandas.read_csv(
             csv_path, parse_dates=["Date"], index_col="Date"
         )
@@ -916,6 +921,8 @@ def evaluate_kalman_channel_strategy(
     holding_period_list: List[int] = []
     simulation_results: List[SimulationResult] = []
     for csv_path in data_directory.glob("*.csv"):
+        if csv_path.stem == SP500_SYMBOL:
+            continue  # Skip the S&P 500 index; it is not a tradable asset.
         price_data_frame = pandas.read_csv(
             csv_path, parse_dates=["Date"], index_col="Date"
         )
