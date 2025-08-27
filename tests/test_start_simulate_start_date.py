@@ -29,9 +29,8 @@ def test_start_simulate_accepts_start_date(monkeypatch: pytest.MonkeyPatch, tmp_
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
@@ -63,7 +62,7 @@ def test_start_simulate_accepts_start_date(monkeypatch: pytest.MonkeyPatch, tmp_
 
     output_buffer = io.StringIO()
     shell = manage_module.StockShell(stdout=output_buffer)
-    shell.onecmd("start_simulate start=2020-05-06 dollar_volume>0 noop noop")
+    shell.onecmd("start_simulate start=2020-05-06 dollar_volume>0%,0% noop noop")
 
     assert recorded_arguments["start_date"] == pandas.Timestamp("2020-05-06")
     assert start_date_called["called"] is False

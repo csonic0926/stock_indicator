@@ -65,12 +65,12 @@ def test_start_simulate_retains_trade_above_threshold(
 
     output_buffer = io.StringIO()
     shell = manage_module.StockShell(stdout=output_buffer)
-    shell.onecmd("start_simulate dollar_volume>2000 noop noop")
+    shell.onecmd("start_simulate dollar_volume>1%,-0.2% noop noop")
     first_output = output_buffer.getvalue()
 
     output_buffer.truncate(0)
     output_buffer.seek(0)
-    shell.onecmd("start_simulate dollar_volume>3000 noop noop")
+    shell.onecmd("start_simulate dollar_volume>2%,-0.2% noop noop")
     second_output = output_buffer.getvalue()
 
     expected_entry = "2018-12-13 MSFT open"

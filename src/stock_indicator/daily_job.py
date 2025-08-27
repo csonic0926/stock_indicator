@@ -155,11 +155,7 @@ def main() -> None:
     parser.add_argument(
         "argument_line",
         help=(
-            "Task description: 'dollar_volume>NUMBER BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]', "
-            "'dollar_volume>NUMBER% BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]', "
-            "'dollar_volume=RANKth BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]', "
-            "'dollar_volume>NUMBER,RANKth BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]', or "
-            "'dollar_volume>NUMBER%,RANKth BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]'"
+            "Task description: 'dollar_volume>N%,K% BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]'"
         ),
     )
     parsed_arguments = parser.parse_args()

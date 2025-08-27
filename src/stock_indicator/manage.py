@@ -158,57 +158,24 @@ class StockShell(cmd.Cmd):
                 return
         else:
             stop_loss_percentage = 1.0
-        minimum_average_dollar_volume: float | None = None  # TODO: review
-        minimum_average_dollar_volume_ratio: float | None = None  # TODO: review
-        top_dollar_volume_rank: int | None = None  # TODO: review
-        combined_percentage_match = re.fullmatch(
-            r"dollar_volume>(\d+(?:\.\d{1,2})?)%,(\d+)th",
+        minimum_average_dollar_volume_ratio: float | None = None
+        dollar_volume_ratio_increment: float = 0.0
+        percentage_match = re.fullmatch(
+            r"dollar_volume>(\d+(?:\.\d{1,2})?)%,(-?\d+(?:\.\d{1,2})?)%",
             volume_filter,
         )
-        if combined_percentage_match is not None:
+        if percentage_match is not None:
             minimum_average_dollar_volume_ratio = (
-                float(combined_percentage_match.group(1)) / 100
+                float(percentage_match.group(1)) / 100
             )
-            top_dollar_volume_rank = int(combined_percentage_match.group(2))
+            dollar_volume_ratio_increment = (
+                float(percentage_match.group(2)) / 100
+            )
         else:
-            combined_match = re.fullmatch(
-                r"dollar_volume>(\d+(?:\.\d+)?),(\d+)th",
-                volume_filter,
+            self.stdout.write(
+                "unsupported filter; expected dollar_volume>N%,K%\n",
             )
-            if combined_match is not None:
-                minimum_average_dollar_volume = float(combined_match.group(1))
-                top_dollar_volume_rank = int(combined_match.group(2))
-            else:
-                percentage_match = re.fullmatch(
-                    r"dollar_volume>(\d+(?:\.\d{1,2})?)%",
-                    volume_filter,
-                )
-                if percentage_match is not None:
-                    minimum_average_dollar_volume_ratio = (
-                        float(percentage_match.group(1)) / 100
-                    )
-                else:
-                    volume_match = re.fullmatch(
-                        r"dollar_volume>(\d+(?:\.\d+)?)",
-                        volume_filter,
-                    )
-                    if volume_match is not None:
-                        minimum_average_dollar_volume = float(volume_match.group(1))
-                    else:
-                        rank_match = re.fullmatch(
-                            r"dollar_volume=(\d+)th",
-                            volume_filter,
-                        )
-                        if rank_match is not None:
-                            top_dollar_volume_rank = int(rank_match.group(1))
-                        else:
-                            self.stdout.write(
-                                "unsupported filter; expected dollar_volume>NUMBER, "
-                                "dollar_volume>NUMBER%, dollar_volume=RANKth, "
-                                "dollar_volume>NUMBER,RANKth, or "
-                                "dollar_volume>NUMBER%,RANKth\n",
-                            )
-                            return
+            return
         try:  # TODO: review
             buy_base_name, _, _ = strategy.parse_strategy_name(buy_strategy_name)
             sell_base_name, _, _ = strategy.parse_strategy_name(sell_strategy_name)
@@ -229,9 +196,8 @@ class StockShell(cmd.Cmd):
             DATA_DIRECTORY,
             buy_strategy_name,
             sell_strategy_name,
-            minimum_average_dollar_volume=minimum_average_dollar_volume,
-            top_dollar_volume_rank=top_dollar_volume_rank,
             minimum_average_dollar_volume_ratio=minimum_average_dollar_volume_ratio,
+            dollar_volume_ratio_increment=dollar_volume_ratio_increment,
             starting_cash=starting_cash_value,
             withdraw_amount=withdraw_amount,
             stop_loss_percentage=stop_loss_percentage,
@@ -389,19 +355,17 @@ class StockShell(cmd.Cmd):
             "  starting_cash: Initial cash balance for the simulation. Defaults to 3000.\n"
             "  withdraw: Amount deducted from cash at each year end. Defaults to 0.\n"
             "  start: Date in YYYY-MM-DD format to begin the simulation. Defaults to the earliest available date.\n"
-            "  DOLLAR_VOLUME_FILTER: Use dollar_volume>NUMBER (in millions),\n"
-            "    dollar_volume>N% to require the 50-day average dollar volume to\n"
-            "    exceed N percent of the total market, dollar_volume=Nth to\n"
-            "    select the N symbols with the highest previous-day dollar\n"
-            "    volume, or combine the threshold with ranking using\n"
-            "    dollar_volume>NUMBER,Nth or dollar_volume>N%,Nth.\n"
+            "  DOLLAR_VOLUME_FILTER: Use dollar_volume>N%,K% to require the\n"
+            "    50-day average dollar volume to exceed N percent of the total\n"
+            "    market, adjusting the threshold by K percent every five years\n"
+            "    before 2021.\n"
             "  BUY_STRATEGY: Name of the buying strategy.\n"
             "  SELL_STRATEGY: Name of the selling strategy.\n"
             "  STOP_LOSS: Fractional loss that triggers an exit on the next day's open. Defaults to 1.0.\n"
             "Strategies may be suffixed with _N to set the window size to N; the default window size is 40 when no suffix is provided.\n"
             "Slope-aware strategies follow the ema_sma_signal_with_slope_n_k pattern and accept _LOWER_UPPER bounds after the optional window size; both bounds are floating-point numbers and may be negative.\n"
-            "Example: start_simulate start=1990-01-01 dollar_volume>50 ema_sma_cross_20 ema_sma_cross_20\n"
-            "Another example: start_simulate dollar_volume>1 ema_sma_signal_with_slope_-0.1_1.2 ema_sma_signal_with_slope_-0.1_1.2\n"
+            "Example: start_simulate start=1990-01-01 dollar_volume>2.4%,-0.2% ema_sma_cross_20 ema_sma_cross_20\n"
+            "Another example: start_simulate dollar_volume>1%,-0.1% ema_sma_signal_with_slope_-0.1_1.2 ema_sma_signal_with_slope_-0.1_1.2\n"
             f"Available buy strategies: {available_buy}.\n"
             f"Available sell strategies: {available_sell}.\n"
         )

@@ -125,12 +125,12 @@ def test_find_signal_prints_recalculated_signals(monkeypatch: pytest.MonkeyPatch
     output_buffer = io.StringIO()
     shell = manage_module.StockShell(stdout=output_buffer)
     shell.onecmd(
-        "find_signal 2024-01-10 dollar_volume>1 ema_sma_cross ema_sma_cross 1.0"
+        "find_signal 2024-01-10 dollar_volume>1%,-0.2% ema_sma_cross ema_sma_cross 1.0"
     )
 
     assert recorded_arguments == {
         "date": "2024-01-10",
-        "filter": "dollar_volume>1",
+        "filter": "dollar_volume>1%,-0.2%",
         "buy": "ema_sma_cross",
         "sell": "ema_sma_cross",
         "stop": 1.0,
@@ -207,18 +207,16 @@ def test_start_simulate(monkeypatch: pytest.MonkeyPatch) -> None:
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
         start_date: pandas.Timestamp | None = None,
     ) -> StrategyMetrics:
         call_record["strategies"] = (buy_strategy_name, sell_strategy_name)
-        volume_record["threshold"] = minimum_average_dollar_volume
-        if minimum_average_dollar_volume_ratio is not None:
-            volume_record["ratio"] = minimum_average_dollar_volume_ratio
+        volume_record["ratio"] = minimum_average_dollar_volume_ratio
+        volume_record["increment"] = dollar_volume_ratio_increment
         stop_loss_record["value"] = stop_loss_percentage
         assert starting_cash == 3000.0
         assert withdraw_amount == 0.0
@@ -315,9 +313,10 @@ def test_start_simulate(monkeypatch: pytest.MonkeyPatch) -> None:
 
     output_buffer = io.StringIO()
     shell = manage_module.StockShell(stdout=output_buffer)
-    shell.onecmd("start_simulate dollar_volume>500 ema_sma_cross ema_sma_cross")
+    shell.onecmd("start_simulate dollar_volume>2.41%,-0.2% ema_sma_cross ema_sma_cross")
     assert call_record["strategies"] == ("ema_sma_cross", "ema_sma_cross")
-    assert volume_record["threshold"] == 500.0
+    assert volume_record["ratio"] == pytest.approx(0.0241)
+    assert volume_record["increment"] == pytest.approx(-0.002)
     assert stop_loss_record["value"] == 1.0
     assert "Simulation start date: 2019-01-01" in output_buffer.getvalue()
     assert (
@@ -358,9 +357,8 @@ def test_start_simulate_filters_early_googl_trades(
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
@@ -438,7 +436,7 @@ def test_start_simulate_filters_early_googl_trades(
 
     output_buffer = io.StringIO()
     shell = manage_module.StockShell(stdout=output_buffer)
-    shell.onecmd("start_simulate dollar_volume>0 ema_sma_cross ema_sma_cross")
+    shell.onecmd("start_simulate dollar_volume>0%,0% ema_sma_cross ema_sma_cross")
     output_string = output_buffer.getvalue()
     assert "GOOGL" not in output_string
     assert "Year 2013" not in output_string
@@ -451,7 +449,6 @@ def test_start_simulate_different_strategies(monkeypatch: pytest.MonkeyPatch) ->
     import stock_indicator.manage as manage_module
 
     call_arguments: dict[str, tuple[str, str]] = {}
-    threshold_record: dict[str, float] = {}
     stop_loss_record: dict[str, float] = {}
 
     from stock_indicator.strategy import StrategyMetrics
@@ -460,16 +457,14 @@ def test_start_simulate_different_strategies(monkeypatch: pytest.MonkeyPatch) ->
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
         start_date: pandas.Timestamp | None = None,
     ) -> StrategyMetrics:
         call_arguments["strategies"] = (buy_strategy_name, sell_strategy_name)
-        threshold_record["threshold"] = minimum_average_dollar_volume
         stop_loss_record["value"] = stop_loss_percentage
         assert starting_cash == 3000.0
         assert withdraw_amount == 0.0
@@ -497,12 +492,11 @@ def test_start_simulate_different_strategies(monkeypatch: pytest.MonkeyPatch) ->
     )
 
     shell = manage_module.StockShell(stdout=io.StringIO())
-    shell.onecmd("start_simulate dollar_volume>0 ema_sma_cross kalman_filtering")
+    shell.onecmd("start_simulate dollar_volume>0%,0% ema_sma_cross kalman_filtering")
     assert call_arguments["strategies"] == (
         "ema_sma_cross",
         "kalman_filtering",
     )
-    assert threshold_record["threshold"] == 0.0
     assert stop_loss_record["value"] == 1.0
 
 
@@ -518,9 +512,8 @@ def test_start_simulate_accepts_start_date(monkeypatch: pytest.MonkeyPatch) -> N
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
@@ -553,61 +546,10 @@ def test_start_simulate_accepts_start_date(monkeypatch: pytest.MonkeyPatch) -> N
     output_buffer = io.StringIO()
     shell = manage_module.StockShell(stdout=output_buffer)
     shell.onecmd(
-        "start_simulate start=2018-01-01 dollar_volume>0 ema_sma_cross ema_sma_cross"
+        "start_simulate start=2018-01-01 dollar_volume>0%,0% ema_sma_cross ema_sma_cross"
     )
     assert recorded_arguments["start_date"] == pandas.Timestamp("2018-01-01")
     assert "Simulation start date: 2018-01-01" in output_buffer.getvalue()
-
-
-def test_start_simulate_dollar_volume_rank(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The command should forward the ranking filter to evaluation."""
-    import stock_indicator.manage as manage_module
-
-    rank_record: dict[str, int | None] = {}
-
-    from stock_indicator.strategy import StrategyMetrics
-
-    def fake_evaluate(
-        data_directory: Path,
-        buy_strategy_name: str,
-        sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
-        minimum_average_dollar_volume_ratio: float | None = None,
-        starting_cash: float = 3000.0,
-        withdraw_amount: float = 0.0,
-        stop_loss_percentage: float = 1.0,
-        start_date: pandas.Timestamp | None = None,
-    ) -> StrategyMetrics:
-        rank_record["rank"] = top_dollar_volume_rank
-        assert starting_cash == 3000.0
-        assert withdraw_amount == 0.0
-        return StrategyMetrics(
-            total_trades=0,
-            win_rate=0.0,
-            mean_profit_percentage=0.0,
-            profit_percentage_standard_deviation=0.0,
-            mean_loss_percentage=0.0,
-            loss_percentage_standard_deviation=0.0,
-            mean_holding_period=0.0,
-            holding_period_standard_deviation=0.0,
-            maximum_concurrent_positions=0,
-            maximum_drawdown=0.0,
-            final_balance=0.0,
-            compound_annual_growth_rate=0.0,
-            annual_returns={},
-            annual_trade_counts={},
-        )
-
-    monkeypatch.setattr(
-        manage_module.strategy,
-        "evaluate_combined_strategy",
-        fake_evaluate,
-    )
-
-    shell = manage_module.StockShell(stdout=io.StringIO())
-    shell.onecmd("start_simulate dollar_volume=6th ema_sma_cross ema_sma_cross")
-    assert rank_record["rank"] == 6
 
 
 def test_start_simulate_dollar_volume_ratio(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -622,15 +564,15 @@ def test_start_simulate_dollar_volume_ratio(monkeypatch: pytest.MonkeyPatch) -> 
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
         start_date: pandas.Timestamp | None = None,
     ) -> StrategyMetrics:
         ratio_record["ratio"] = minimum_average_dollar_volume_ratio
+        ratio_record["increment"] = dollar_volume_ratio_increment
         return StrategyMetrics(
             total_trades=0,
             win_rate=0.0,
@@ -655,63 +597,11 @@ def test_start_simulate_dollar_volume_ratio(monkeypatch: pytest.MonkeyPatch) -> 
     )
 
     shell = manage_module.StockShell(stdout=io.StringIO())
-    shell.onecmd("start_simulate dollar_volume>1% ema_sma_cross ema_sma_cross")
+    shell.onecmd("start_simulate dollar_volume>1%,-0.2% ema_sma_cross ema_sma_cross")
     assert ratio_record["ratio"] == 0.01
+    assert ratio_record["increment"] == pytest.approx(-0.002)
 
 
-def test_start_simulate_dollar_volume_threshold_and_rank(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The command should forward both threshold and ranking filters."""
-    import stock_indicator.manage as manage_module
-
-    recorded_values: dict[str, float | int | None] = {}
-
-    from stock_indicator.strategy import StrategyMetrics
-
-    def fake_evaluate(
-        data_directory: Path,
-        buy_strategy_name: str,
-        sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
-        minimum_average_dollar_volume_ratio: float | None = None,
-        starting_cash: float = 3000.0,
-        withdraw_amount: float = 0.0,
-        stop_loss_percentage: float = 1.0,
-        start_date: pandas.Timestamp | None = None,
-    ) -> StrategyMetrics:
-        recorded_values["threshold"] = minimum_average_dollar_volume
-        recorded_values["rank"] = top_dollar_volume_rank
-        assert starting_cash == 3000.0
-        assert withdraw_amount == 0.0
-        return StrategyMetrics(
-            total_trades=0,
-            win_rate=0.0,
-            mean_profit_percentage=0.0,
-            profit_percentage_standard_deviation=0.0,
-            mean_loss_percentage=0.0,
-            loss_percentage_standard_deviation=0.0,
-            mean_holding_period=0.0,
-            holding_period_standard_deviation=0.0,
-            maximum_concurrent_positions=0,
-            maximum_drawdown=0.0,
-            final_balance=0.0,
-            compound_annual_growth_rate=0.0,
-            annual_returns={},
-            annual_trade_counts={},
-        )
-
-    monkeypatch.setattr(
-        manage_module.strategy,
-        "evaluate_combined_strategy",
-        fake_evaluate,
-    )
-
-    shell = manage_module.StockShell(stdout=io.StringIO())
-    shell.onecmd("start_simulate dollar_volume>100,6th ema_sma_cross ema_sma_cross")
-    assert recorded_values["threshold"] == 100.0
-    assert recorded_values["rank"] == 6
 
 
 def test_start_simulate_supports_rsi_strategy(
@@ -730,9 +620,8 @@ def test_start_simulate_supports_rsi_strategy(
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
@@ -766,7 +655,7 @@ def test_start_simulate_supports_rsi_strategy(
 
     shell = manage_module.StockShell(stdout=io.StringIO())
     shell.onecmd(
-        "start_simulate dollar_volume>0 "
+        "start_simulate dollar_volume>0%,0% "
         "ema_sma_cross_and_rsi ema_sma_cross_and_rsi"
     )
     assert call_arguments["strategies"] == (
@@ -791,9 +680,8 @@ def test_start_simulate_supports_slope_strategy(
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
@@ -827,7 +715,7 @@ def test_start_simulate_supports_slope_strategy(
 
     shell = manage_module.StockShell(stdout=io.StringIO())
     shell.onecmd(
-        "start_simulate dollar_volume>0 "
+        "start_simulate dollar_volume>0%,0% "
         "ema_sma_cross_with_slope ema_sma_cross_with_slope"
     )
     assert call_arguments["strategies"] == (
@@ -852,9 +740,8 @@ def test_start_simulate_supports_slope_and_volume_strategy(
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
@@ -888,7 +775,7 @@ def test_start_simulate_supports_slope_and_volume_strategy(
 
     shell = manage_module.StockShell(stdout=io.StringIO())
     shell.onecmd(
-        "start_simulate dollar_volume>0 "
+        "start_simulate dollar_volume>0%,0% "
         "ema_sma_cross_with_slope_and_volume "
         "ema_sma_cross_with_slope_and_volume"
     )
@@ -913,9 +800,8 @@ def test_start_simulate_accepts_slope_range_strategy_names(
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
@@ -947,7 +833,7 @@ def test_start_simulate_accepts_slope_range_strategy_names(
 
     shell = manage_module.StockShell(stdout=io.StringIO())
     shell.onecmd(
-        "start_simulate dollar_volume>0 "
+        "start_simulate dollar_volume>0%,0% "
         "ema_sma_cross_with_slope_-0.5_0.5 "
         "ema_sma_cross_with_slope_-0.5_0.5"
     )
@@ -966,7 +852,7 @@ def test_start_simulate_reports_missing_slope_bound() -> None:
     output_buffer = io.StringIO()
     shell = manage_module.StockShell(stdout=output_buffer)
     shell.onecmd(
-        "start_simulate dollar_volume>0 "
+        "start_simulate dollar_volume>0%,0% "
         "ema_sma_cross_with_slope_-0.5 ema_sma_cross"
     )
     assert (
@@ -983,7 +869,7 @@ def test_start_simulate_reports_extra_slope_bound() -> None:
     output_buffer = io.StringIO()
     shell = manage_module.StockShell(stdout=output_buffer)
     shell.onecmd(
-        "start_simulate dollar_volume>0 "
+        "start_simulate dollar_volume>0%,0% "
         "ema_sma_cross_with_slope_-0.5_0.5_1.0 ema_sma_cross"
     )
     assert (
@@ -1008,9 +894,8 @@ def test_start_simulate_supports_20_50_sma_cross_strategy(
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
@@ -1044,7 +929,7 @@ def test_start_simulate_supports_20_50_sma_cross_strategy(
 
     shell = manage_module.StockShell(stdout=io.StringIO())
     shell.onecmd(
-        "start_simulate dollar_volume>0 20_50_sma_cross 20_50_sma_cross"
+        "start_simulate dollar_volume>0%,0% 20_50_sma_cross 20_50_sma_cross"
     )
     assert call_arguments["strategies"] == (
         "20_50_sma_cross",
@@ -1066,9 +951,8 @@ def test_start_simulate_accepts_stop_loss_argument(
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
@@ -1102,7 +986,7 @@ def test_start_simulate_accepts_stop_loss_argument(
 
     shell = manage_module.StockShell(stdout=io.StringIO())
     shell.onecmd(
-        "start_simulate dollar_volume>100 ema_sma_cross ema_sma_cross 0.5"
+        "start_simulate dollar_volume>1%,-0.2% ema_sma_cross ema_sma_cross 0.5"
     )
     assert stop_loss_record["value"] == 0.5
 
@@ -1121,9 +1005,8 @@ def test_start_simulate_accepts_cash_and_withdraw(
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
@@ -1156,7 +1039,7 @@ def test_start_simulate_accepts_cash_and_withdraw(
 
     shell = manage_module.StockShell(stdout=io.StringIO())
     shell.onecmd(
-        "start_simulate starting_cash=5000 withdraw=1000 dollar_volume>0 ema_sma_cross ema_sma_cross"
+        "start_simulate starting_cash=5000 withdraw=1000 dollar_volume>0%,0% ema_sma_cross ema_sma_cross"
     )
     assert recorded_values["cash"] == 5000.0
     assert recorded_values["withdraw"] == 1000.0
@@ -1168,7 +1051,7 @@ def test_start_simulate_unsupported_strategy(monkeypatch: pytest.MonkeyPatch) ->
 
     output_buffer = io.StringIO()
     shell = manage_module.StockShell(stdout=output_buffer)
-    shell.onecmd("start_simulate dollar_volume>0 unknown ema_sma_cross")
+    shell.onecmd("start_simulate dollar_volume>0%,0% unknown ema_sma_cross")
     assert "unsupported strategies" in output_buffer.getvalue()
 
 
@@ -1179,7 +1062,7 @@ def test_start_simulate_rejects_sell_only_buy_strategy() -> None:
     output_buffer = io.StringIO()
     shell = manage_module.StockShell(stdout=output_buffer)
     shell.onecmd(
-        "start_simulate dollar_volume>0 kalman_filtering ema_sma_cross"
+        "start_simulate dollar_volume>0%,0% kalman_filtering ema_sma_cross"
     )
     assert "unsupported strategies" in output_buffer.getvalue()
 
@@ -1209,9 +1092,8 @@ def test_start_simulate_accepts_windowed_strategy_names(monkeypatch: pytest.Monk
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
@@ -1241,5 +1123,5 @@ def test_start_simulate_accepts_windowed_strategy_names(monkeypatch: pytest.Monk
     )
 
     shell = manage_module.StockShell(stdout=output_buffer)
-    shell.onecmd("start_simulate dollar_volume>0 noop_5 noop_10")
+    shell.onecmd("start_simulate dollar_volume>0%,0% noop_5 noop_10")
     assert "unsupported strategies" not in output_buffer.getvalue()

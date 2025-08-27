@@ -71,41 +71,35 @@ python -m stock_indicator.manage
 For example:
 
 ```bash
-(stock-indicator) find_signal 2024-01-10 dollar_volume>1 ema_sma_cross ema_sma_cross 1.0
+(stock-indicator) find_signal 2024-01-10 dollar_volume>1%,-0.2% ema_sma_cross ema_sma_cross 1.0
 ['AAA', 'BBB']
 ['CCC', 'DDD']
 ```
 
-Developers can also call `daily_job.find_signal("2024-01-10", "dollar_volume>1", "ema_sma_cross", "ema_sma_cross", 1.0)` to compute
+Developers can also call `daily_job.find_signal("2024-01-10", "dollar_volume>1%,-0.2%", "ema_sma_cross", "ema_sma_cross", 1.0)` to compute
 the same data from Python code. This function recalculates signals rather than
 reading them from log files.
 
-The shell can also simulate trading strategies. The `dollar_volume` filter
-accepts a minimum threshold in millions, a percentage of total market volume,
-and a ranking when combined with a comma. The command below evaluates
-`ftd_ema_sma_cross` using only the six symbols whose 50-day average dollar
-volume exceeds 10,000 million:
+The shell can also simulate trading strategies. The `dollar_volume` filter now
+accepts a base percentage and an optional adjustment applied every five years
+before 2021. The command below evaluates `ftd_ema_sma_cross` using a base
+threshold of 2.4% and decreasing it by 0.2 percentage points for each earlier
+five-year period:
 
 ```bash
-(stock-indicator) start_simulate starting_cash=5000 withdraw=1000 dollar_volume>10000,6th ftd_ema_sma_cross ftd_ema_sma_cross
+(stock-indicator) start_simulate starting_cash=5000 withdraw=1000 dollar_volume>2.4%,-0.2% ftd_ema_sma_cross ftd_ema_sma_cross
 ```
-
-Here `dollar_volume>10000,6th` first drops symbols below the threshold and then
-selects the six highest-volume symbols from the remainder. The tests
-`tests/test_manage.py::test_start_simulate_dollar_volume_threshold_and_rank` and
-`tests/test_strategy.py::test_evaluate_combined_strategy_dollar_volume_filter_and_rank`
-demonstrate this combined syntax.
 
 Strategies may also limit the simple moving average slope. These identifiers follow the `ema_sma_signal_with_slope_n_k` pattern where `n` and `k` are the lower and upper slope bounds. The bounds accept negative or positive floating-point numbers. For example:
 
 ```bash
-(stock-indicator) start_simulate dollar_volume>1 ema_sma_cross_with_slope_-0.1_1.2 ema_sma_cross_with_slope_-0.1_1.2
+(stock-indicator) start_simulate dollar_volume>1%,-0.2% ema_sma_cross_with_slope_-0.1_1.2 ema_sma_cross_with_slope_-0.1_1.2
 ```
 
 You can combine slope bounds with a custom EMA/SMA window size by placing the integer before the bounds:
 
 ```bash
-(stock-indicator) start_simulate dollar_volume>1 ema_sma_cross_with_slope_40_-0.1_1.2 ema_sma_cross_with_slope_40_-0.1_1.2
+(stock-indicator) start_simulate dollar_volume>1%,-0.2% ema_sma_cross_with_slope_40_-0.1_1.2 ema_sma_cross_with_slope_40_-0.1_1.2
 ```
 
 When omitted, the window size defaults to 40 days.

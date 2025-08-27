@@ -642,9 +642,8 @@ def evaluate_combined_strategy(
     data_directory: Path,
     buy_strategy_name: str,
     sell_strategy_name: str,
-    minimum_average_dollar_volume: float | None = None,
-    top_dollar_volume_rank: int | None = None,  # TODO: review
     minimum_average_dollar_volume_ratio: float | None = None,
+    dollar_volume_ratio_increment: float = 0.0,
     starting_cash: float = 3000.0,
     withdraw_amount: float = 0.0,
     stop_loss_percentage: float = 1.0,
@@ -667,18 +666,13 @@ def evaluate_combined_strategy(
     sell_strategy_name: str
         Strategy name used to generate exit signals. The same conventions as
         ``buy_strategy_name`` apply.
-    minimum_average_dollar_volume: float | None, optional
-        Minimum 50-day moving average dollar volume, in millions, required for a
-        symbol to be included in the evaluation. When ``None``, no filter is
-        applied.
-    top_dollar_volume_rank: int | None, optional
-        Retain only the ``N`` symbols with the highest 50-day simple moving
-        average dollar volume on each trading day. When ``None``, no ranking
-        filter is applied.
     minimum_average_dollar_volume_ratio: float | None, optional
         Minimum fraction of the total market 50-day average dollar volume that
         a symbol must exceed to be eligible. Specify values as decimals, for
         example ``0.01`` for ``1%``. When ``None``, no ratio filter is applied.
+    dollar_volume_ratio_increment: float, optional
+        Additional ratio applied for every five years prior to 2021. Negative
+        values decrease the threshold for earlier years.
     starting_cash: float, default 3000.0
         Initial amount of cash used for portfolio simulation.
     withdraw_amount: float, default 0.0
@@ -706,15 +700,6 @@ def evaluate_combined_strategy(
     if sell_base_name not in SELL_STRATEGIES:
         raise ValueError(f"Unsupported strategy: {sell_strategy_name}")
 
-    if (
-        minimum_average_dollar_volume is not None
-        and minimum_average_dollar_volume_ratio is not None
-    ):
-        raise ValueError(
-            "Specify either minimum_average_dollar_volume or "
-            "minimum_average_dollar_volume_ratio, not both",
-        )
-
     trade_profit_list: List[float] = []
     profit_percentage_list: List[float] = []
     loss_percentage_list: List[float] = []
@@ -738,15 +723,14 @@ def evaluate_combined_strategy(
             if price_data_frame.empty:
                 continue
         if "volume" in price_data_frame.columns:
-            dollar_volume_series = price_data_frame["close"] * price_data_frame["volume"]
+            dollar_volume_series = (
+                price_data_frame["close"] * price_data_frame["volume"]
+            )
             price_data_frame["simple_moving_average_dollar_volume"] = sma(
                 dollar_volume_series, DOLLAR_VOLUME_SMA_WINDOW
             )
         else:
-            if (
-                minimum_average_dollar_volume is not None
-                or top_dollar_volume_rank is not None
-            ):
+            if minimum_average_dollar_volume_ratio is not None:
                 raise ValueError(
                     "Volume column is required to compute dollar volume metrics"
                 )
@@ -761,11 +745,7 @@ def evaluate_combined_strategy(
             },
             axis=1,
         )
-        if (
-            minimum_average_dollar_volume is None
-            and top_dollar_volume_rank is None
-            and minimum_average_dollar_volume_ratio is None
-        ):
+        if minimum_average_dollar_volume_ratio is None:
             eligibility_mask = pandas.DataFrame(
                 True,
                 index=merged_volume_frame.index,
@@ -773,23 +753,14 @@ def evaluate_combined_strategy(
             )
         else:
             eligibility_mask = ~merged_volume_frame.isna()
-            if minimum_average_dollar_volume is not None:
-                eligibility_mask &= (
-                    merged_volume_frame / 1_000_000 >= minimum_average_dollar_volume
-                )
-            if minimum_average_dollar_volume_ratio is not None:
-                total_volume_series = merged_volume_frame.sum(axis=1)
-                ratio_frame = merged_volume_frame.divide(
-                    total_volume_series, axis=0
-                )
-                eligibility_mask &= (
-                    ratio_frame >= minimum_average_dollar_volume_ratio
-                )
-            if top_dollar_volume_rank is not None:
-                rank_frame = merged_volume_frame.rank(
-                    axis=1, method="min", ascending=False
-                )
-                eligibility_mask &= rank_frame <= top_dollar_volume_rank
+            total_volume_series = merged_volume_frame.sum(axis=1)
+            ratio_frame = merged_volume_frame.divide(total_volume_series, axis=0)
+            threshold_series = ratio_frame.index.to_series().apply(
+                lambda date: minimum_average_dollar_volume_ratio
+                + max(0, ((2020 - date.year) // 5 + 1))
+                * dollar_volume_ratio_increment
+            )
+            eligibility_mask &= ratio_frame.ge(threshold_series, axis=0)
     else:
         merged_volume_frame = pandas.DataFrame()
         eligibility_mask = pandas.DataFrame()

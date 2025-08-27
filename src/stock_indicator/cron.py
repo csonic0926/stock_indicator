@@ -18,19 +18,15 @@ LOGGER = logging.getLogger(__name__)
 
 
 def parse_daily_task_arguments(argument_line: str) -> Tuple[
-    float | None,
-    int | None,
+    float,
+    float,
     str,
     str,
     float,
 ]:
     """Parse a cron job argument string.
 
-    The expected format is ``dollar_volume>NUMBER BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]``,
-    ``dollar_volume>NUMBER% BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]``,
-    ``dollar_volume=Nth BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]``,
-    ``dollar_volume>NUMBER,Nth BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]``, or
-    ``dollar_volume>NUMBER%,Nth BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]``.
+    The expected format is ``dollar_volume>N%,K% BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]``.
 
     Parameters
     ----------
@@ -39,80 +35,33 @@ def parse_daily_task_arguments(argument_line: str) -> Tuple[
 
     Returns
     -------
-    Tuple[float | None, int | None, str, str, float]
-        Tuple containing either a minimum dollar volume threshold in millions
-        or a ratio of the total market, followed by the ranking position, the
-        buy strategy name, the sell strategy name, and the stop loss
-        percentage.
+    Tuple[float, float, str, str, float]
+        Tuple containing the base minimum dollar volume ratio, the incremental
+        change applied every five years, the buy strategy name, the sell
+        strategy name, and the stop loss percentage.
     """
     argument_parts = argument_line.split()
     if len(argument_parts) not in (3, 4):
         raise ValueError(
-            "argument_line must be 'dollar_volume>NUMBER BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]', "
-            "'dollar_volume>NUMBER% BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]', "
-            "'dollar_volume=RANKth BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]', "
-            "'dollar_volume>NUMBER,RANKth BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]', or "
-            "'dollar_volume>NUMBER%,RANKth BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]'",
+            "argument_line must be 'dollar_volume>N%,K% BUY_STRATEGY SELL_STRATEGY [STOP_LOSS]'",
         )
     volume_filter, buy_strategy_name, sell_strategy_name = argument_parts[:3]
     stop_loss_percentage = (
         float(argument_parts[3]) if len(argument_parts) == 4 else 1.0
     )
-    minimum_average_dollar_volume: float | None = None
-    minimum_average_dollar_volume_ratio: float | None = None
-    top_dollar_volume_rank: int | None = None
-    combined_percentage_match = re.fullmatch(
-        r"dollar_volume>(\d+(?:\.\d{1,2})?)%,(\d+)th",
+    percentage_match = re.fullmatch(
+        r"dollar_volume>(\d+(?:\.\d{1,2})?)%,(-?\d+(?:\.\d{1,2})?)%",
         volume_filter,
     )
-    if combined_percentage_match is not None:
-        minimum_average_dollar_volume_ratio = (
-            float(combined_percentage_match.group(1)) / 100
+    if percentage_match is None:
+        raise ValueError(
+            "Unsupported filter format. Expected 'dollar_volume>N%,K%'",
         )
-        top_dollar_volume_rank = int(combined_percentage_match.group(2))
-    else:
-        combined_match = re.fullmatch(
-            r"dollar_volume>(\d+(?:\.\d+)?),(\d+)th",
-            volume_filter,
-        )
-        if combined_match is not None:
-            minimum_average_dollar_volume = float(combined_match.group(1))
-            top_dollar_volume_rank = int(combined_match.group(2))
-        else:
-            percentage_match = re.fullmatch(
-                r"dollar_volume>(\d+(?:\.\d{1,2})?)%",
-                volume_filter,
-            )
-            if percentage_match is not None:
-                minimum_average_dollar_volume_ratio = (
-                    float(percentage_match.group(1)) / 100
-                )
-            else:
-                volume_match = re.fullmatch(
-                    r"dollar_volume>(\d+(?:\.\d+)?)",
-                    volume_filter,
-                )
-                if volume_match is not None:
-                    minimum_average_dollar_volume = float(volume_match.group(1))
-                else:
-                    rank_match = re.fullmatch(
-                        r"dollar_volume=(\d+)th",
-                        volume_filter,
-                    )
-                    if rank_match is not None:
-                        top_dollar_volume_rank = int(rank_match.group(1))
-                    else:
-                        raise ValueError(
-                            "Unsupported filter format. Expected 'dollar_volume>NUMBER', "
-                            "'dollar_volume>NUMBER%', 'dollar_volume=RANKth', "
-                            "'dollar_volume>NUMBER,RANKth', or "
-                            "'dollar_volume>NUMBER%,RANKth'.",
-                        )
+    base_ratio = float(percentage_match.group(1)) / 100
+    increment_ratio = float(percentage_match.group(2)) / 100
     return (
-        minimum_average_dollar_volume_ratio
-        if minimum_average_dollar_volume_ratio is not None
-        else minimum_average_dollar_volume,
-        top_dollar_volume_rank,
+        base_ratio,
+        increment_ratio,
         buy_strategy_name,
         sell_strategy_name,
         stop_loss_percentage,
@@ -127,8 +76,8 @@ def run_daily_tasks(
     symbol_list: Iterable[str] | None = None,
     data_download_function: Callable[[str, str, str], pandas.DataFrame] = download_history,
     data_directory: Path | None = None,
-    minimum_average_dollar_volume: float | None = None,
-    top_dollar_volume_rank: int | None = None,  # TODO: review
+    minimum_average_dollar_volume_ratio: float | None = None,
+    dollar_volume_ratio_increment: float = 0.0,
 ) -> Dict[str, List[str]]:
     """Execute the daily workflow for data retrieval and signal detection.
 
@@ -150,12 +99,13 @@ def run_daily_tasks(
         :func:`download_history`.
     data_directory: Path | None
         Optional directory path where downloaded data is stored as CSV files.
-    minimum_average_dollar_volume: float | None
-        Minimum 50-day average dollar volume in millions required for a symbol
-        to be processed. When ``None``, no volume filter is applied.
-    top_dollar_volume_rank: int | None
-        When provided, only the ``N`` symbols with the highest 50-day average
-        dollar volume are processed.
+    minimum_average_dollar_volume_ratio: float | None
+        Minimum fraction of the market's 50-day average dollar volume required
+        for a symbol to be processed. Values are decimals, for example
+        ``0.024`` for ``2.4%``. When ``None``, no volume filter is applied.
+    dollar_volume_ratio_increment: float, default 0.0
+        Additional ratio applied for every five years prior to 2021. Negative
+        values reduce the threshold for earlier years.
 
     Returns
     -------
@@ -207,18 +157,23 @@ def run_daily_tasks(
                 )
         symbol_data.append((symbol, price_history_frame, average_dollar_volume))
 
-    if minimum_average_dollar_volume is not None:
-        symbol_data = [
-            item
-            for item in symbol_data
-            if item[2] is not None
-            and (item[2] / 1_000_000) >= minimum_average_dollar_volume
-        ]
-
-    if top_dollar_volume_rank is not None:
-        symbol_data = [item for item in symbol_data if item[2] is not None]
-        symbol_data.sort(key=lambda item: item[2], reverse=True)
-        symbol_data = symbol_data[:top_dollar_volume_rank]
+    if minimum_average_dollar_volume_ratio is not None:
+        total_volume = sum(
+            item[2] for item in symbol_data if item[2] is not None
+        )
+        if total_volume > 0:
+            end_year = pandas.Timestamp(end_date).year
+            steps = max(0, ((2020 - end_year) // 5 + 1))
+            ratio_threshold = (
+                minimum_average_dollar_volume_ratio
+                + steps * dollar_volume_ratio_increment
+            )
+            symbol_data = [
+                item
+                for item in symbol_data
+                if item[2] is not None
+                and (item[2] / total_volume) >= ratio_threshold
+            ]
 
     for symbol, price_history_frame, _ in symbol_data:
         SUPPORTED_STRATEGIES[buy_strategy_name](price_history_frame)
@@ -271,8 +226,8 @@ def run_daily_tasks_from_argument(
         that triggered the respective signals on the latest available data row.
     """
     (
-        minimum_average_dollar_volume,
-        top_dollar_volume_rank,
+        minimum_average_dollar_volume_ratio,
+        dollar_volume_ratio_increment,
         buy_strategy_name,
         sell_strategy_name,
         _,
@@ -285,6 +240,6 @@ def run_daily_tasks_from_argument(
         symbol_list=symbol_list,
         data_download_function=data_download_function,
         data_directory=data_directory,
-        minimum_average_dollar_volume=minimum_average_dollar_volume,
-        top_dollar_volume_rank=top_dollar_volume_rank,
+        minimum_average_dollar_volume_ratio=minimum_average_dollar_volume_ratio,
+        dollar_volume_ratio_increment=dollar_volume_ratio_increment,
     )

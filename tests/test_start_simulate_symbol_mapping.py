@@ -30,9 +30,8 @@ def test_start_simulate_filters_pre_2014_googl(
         data_directory: Path,
         buy_strategy_name: str,
         sell_strategy_name: str,
-        minimum_average_dollar_volume: float | None,
-        top_dollar_volume_rank: int | None = None,
         minimum_average_dollar_volume_ratio: float | None = None,
+        dollar_volume_ratio_increment: float = 0.0,
         starting_cash: float = 3000.0,
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
@@ -107,7 +106,7 @@ def test_start_simulate_filters_pre_2014_googl(
 
     output_buffer = io.StringIO()
     shell = manage_module.StockShell(stdout=output_buffer)
-    shell.onecmd("start_simulate dollar_volume>0 noop noop")
+    shell.onecmd("start_simulate dollar_volume>0%,0% noop noop")
     output_string = output_buffer.getvalue()
 
     assert "GOOGL" not in output_string
