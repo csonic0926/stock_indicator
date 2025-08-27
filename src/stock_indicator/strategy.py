@@ -131,6 +131,11 @@ def attach_ema_sma_cross_signals(
 ) -> None:
     """Attach EMA/SMA cross entry and exit signals to ``price_data_frame``.
 
+    Entry signals require the EMA to cross above the SMA, a positive slope for
+    the long-term SMA, and, when ``require_close_above_long_term_sma`` is
+    ``True``, the previous day's closing price must also exceed the long-term
+    SMA.
+
     Parameters
     ----------
     price_data_frame:
@@ -138,8 +143,8 @@ def attach_ema_sma_cross_signals(
     window_size:
         Number of periods for both EMA and SMA calculations.
     require_close_above_long_term_sma:
-        When ``True``, entry signals are only generated if the previous day's
-        closing price is greater than the 150-day simple moving average.
+        When ``True``, entry signals additionally require the previous day's
+        closing price to be greater than the 150-day simple moving average.
     """
     # TODO: review
 
@@ -154,6 +159,13 @@ def attach_ema_sma_cross_signals(
         "long_term_sma_value"
     ].shift(1)
     price_data_frame["close_previous"] = price_data_frame["close"].shift(1)
+    price_data_frame["long_term_sma_slope"] = (
+        price_data_frame["long_term_sma_value"]
+        - price_data_frame["long_term_sma_previous"]
+    )
+    price_data_frame["long_term_sma_slope_previous"] = price_data_frame[
+        "long_term_sma_slope"
+    ].shift(1)
     ema_cross_up = (
         (price_data_frame["ema_previous"] <= price_data_frame["sma_previous"])
         & (price_data_frame["ema_value"] > price_data_frame["sma_value"])
@@ -170,9 +182,12 @@ def attach_ema_sma_cross_signals(
                 price_data_frame["close_previous"]
                 > price_data_frame["long_term_sma_previous"]
             )
+            & (price_data_frame["long_term_sma_slope_previous"] > 0)
         )
     else:
-        price_data_frame["ema_sma_cross_entry_signal"] = base_entry_signal
+        price_data_frame["ema_sma_cross_entry_signal"] = (
+            base_entry_signal & (price_data_frame["long_term_sma_slope_previous"] > 0)
+        )
     price_data_frame["ema_sma_cross_exit_signal"] = ema_cross_down.shift(
         1, fill_value=False
     )
