@@ -1464,6 +1464,66 @@ def test_attach_ema_sma_cross_and_rsi_signals_filters_by_rsi(
     ]
 
 
+def test_attach_ema_sma_cross_signals_requires_positive_long_term_sma_slope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The EMA/SMA cross entry signal should require a positive long-term SMA slope."""
+    # TODO: review
+
+    import stock_indicator.strategy as strategy_module
+
+    price_data_frame = pandas.DataFrame(
+        {"open": [1.0] * 5, "close": [1.0, 1.0, 4.0, 4.0, 4.0]}
+    )
+
+    def fake_ema(
+        price_series: pandas.Series, window_size: int
+    ) -> pandas.Series:
+        return pandas.Series([1.0, 1.0, 2.0, 3.0, 4.0])
+
+    def fake_sma_negative(
+        price_series: pandas.Series, window_size: int
+    ) -> pandas.Series:
+        if window_size == strategy_module.LONG_TERM_SMA_WINDOW:
+            return pandas.Series([5.0, 4.0, 3.0, 2.0, 1.0])
+        return pandas.Series([1.0, 1.0, 1.5, 2.5, 3.5])
+
+    monkeypatch.setattr(strategy_module, "ema", fake_ema)
+    monkeypatch.setattr(strategy_module, "sma", fake_sma_negative)
+
+    strategy_module.attach_ema_sma_cross_signals(price_data_frame, window_size=2)
+
+    assert list(price_data_frame["ema_sma_cross_entry_signal"]) == [
+        False,
+        False,
+        False,
+        False,
+        False,
+    ]
+
+    def fake_sma_positive(
+        price_series: pandas.Series, window_size: int
+    ) -> pandas.Series:
+        if window_size == strategy_module.LONG_TERM_SMA_WINDOW:
+            return pandas.Series([1.0, 2.0, 3.0, 4.0, 5.0])
+        return pandas.Series([1.0, 1.0, 1.5, 2.5, 3.5])
+
+    monkeypatch.setattr(strategy_module, "sma", fake_sma_positive)
+
+    price_data_frame = pandas.DataFrame(
+        {"open": [1.0] * 5, "close": [1.0, 1.0, 4.0, 4.0, 4.0]}
+    )
+    strategy_module.attach_ema_sma_cross_signals(price_data_frame, window_size=2)
+
+    assert list(price_data_frame["ema_sma_cross_entry_signal"]) == [
+        False,
+        False,
+        False,
+        True,
+        False,
+    ]
+
+
 def test_attach_ftd_ema_sma_cross_signals_requires_recent_ftd(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
