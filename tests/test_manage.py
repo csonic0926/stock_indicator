@@ -1477,10 +1477,9 @@ def test_start_simulate_creates_csv(
         "start_simulate start=2024-01-01 dollar_volume>1 ema_sma_cross ema_sma_cross"
     )
 
-    result_directory = tmp_path / "logs" / "simulate_result"
-    csv_files = list(result_directory.glob("simulation_*.csv"))
-    assert len(csv_files) == 1
-    data_frame = pandas.read_csv(csv_files[0])
+    result_file = tmp_path / "logs" / "simulate_result.csv"
+    assert result_file.exists()
+    data_frame = pandas.read_csv(result_file)
     assert list(data_frame.columns) == [
         "year",
         "entry_date",

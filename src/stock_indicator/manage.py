@@ -649,10 +649,10 @@ class StockShell(cmd.Cmd):
                         "percentage_change": detail.percentage_change,
                     }
                 )
-        output_directory = Path("logs") / "simulate_result"
+        output_directory = Path("logs")
         output_directory.mkdir(parents=True, exist_ok=True)
-        timestamp_string = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = output_directory / f"simulation_{timestamp_string}.csv"
+        output_file = output_directory / "simulate_result.csv"
+        output_file.unlink(missing_ok=True)
         pandas.DataFrame(
             trade_records,
             columns=[
