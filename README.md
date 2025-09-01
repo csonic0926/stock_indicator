@@ -118,6 +118,12 @@ You can combine slope bounds with a custom EMA/SMA window size by placing the in
 (stock-indicator) start_simulate dollar_volume>1 ema_sma_cross_with_slope_40_-0.1_1.2 ema_sma_cross_with_slope_40_-0.1_1.2
 ```
 
+For experimentation, the `ema_sma_cross_testing` strategy offers the same
+optional window size and slope range suffixes. It omits the long-term simple
+moving average requirement and additionally filters signals using chip
+concentration metrics, enforcing default thresholds of 0.12 for the near-price
+volume ratio and 0.10 for the above-price volume ratio.
+
 When omitted, the window size defaults to 40 days.
 
 ### Strategy Sets

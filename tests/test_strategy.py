@@ -1632,6 +1632,105 @@ def test_attach_ema_sma_cross_with_slope_signals_raises_value_error_for_invalid_
         )
 
 
+def test_attach_ema_sma_cross_testing_filters_by_slope_and_chip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Entry applies slope and chip concentration filters without long-term SMA."""
+    # TODO: review
+
+    import stock_indicator.strategy as strategy_module
+
+    price_data_frame = pandas.DataFrame(
+        {
+            "open": [1.0, 1.0, 1.0, 1.0, 1.0],
+            "high": [1.0, 1.0, 1.0, 1.0, 1.0],
+            "low": [1.0, 1.0, 1.0, 1.0, 1.0],
+            "close": [1.0, 1.0, 1.0, 1.0, 1.0],
+            "volume": [1.0, 1.0, 1.0, 1.0, 1.0],
+        }
+    )
+
+    recorded_flag: bool | None = None
+
+    def fake_attach_ema_sma_cross_signals(
+        data_frame: pandas.DataFrame,
+        window_size: int = 50,
+        require_close_above_long_term_sma: bool = True,
+        sma_window_factor: float | None = None,
+    ) -> None:
+        nonlocal recorded_flag
+        recorded_flag = require_close_above_long_term_sma
+        data_frame["sma_value"] = pandas.Series([1.0, 0.8, 0.9, 1.3, 1.2])
+        data_frame["sma_previous"] = data_frame["sma_value"].shift(1)
+        data_frame["ema_sma_cross_entry_signal"] = pandas.Series(
+            [False, True, True, True, True]
+        )
+        data_frame["ema_sma_cross_exit_signal"] = pandas.Series(
+            [False, False, False, False, True]
+        )
+
+    metrics_queue = [
+        {"near_price_volume_ratio": 0.2, "above_price_volume_ratio": 0.2},
+        {"near_price_volume_ratio": 0.2, "above_price_volume_ratio": 0.2},
+        {"near_price_volume_ratio": 0.11, "above_price_volume_ratio": 0.09},
+        {"near_price_volume_ratio": 0.05, "above_price_volume_ratio": 0.11},
+        {"near_price_volume_ratio": 0.13, "above_price_volume_ratio": 0.09},
+    ]
+
+    def fake_calculate_chip_concentration_metrics(
+        frame: pandas.DataFrame,
+        lookback_window_size: int = 60,
+        bin_count: int = 50,
+        near_price_band_ratio: float = 0.03,
+    ) -> dict[str, float | int | None]:
+        return metrics_queue.pop(0)
+
+    monkeypatch.setattr(
+        strategy_module, "attach_ema_sma_cross_signals", fake_attach_ema_sma_cross_signals
+    )
+    monkeypatch.setattr(
+        strategy_module,
+        "calculate_chip_concentration_metrics",
+        fake_calculate_chip_concentration_metrics,
+    )
+
+    strategy_module.attach_ema_sma_cross_testing_signals(
+        price_data_frame, slope_range=(0.0, 0.2)
+    )
+
+    assert recorded_flag is False
+    assert list(price_data_frame["ema_sma_cross_testing_entry_signal"]) == [
+        False,
+        False,
+        True,
+        False,
+        False,
+    ]
+    assert list(price_data_frame["ema_sma_cross_testing_exit_signal"]) == [
+        False,
+        False,
+        False,
+        False,
+        True,
+    ]
+
+
+def test_attach_ema_sma_cross_testing_signals_raises_value_error_for_invalid_slope_range() -> None:
+    """``attach_ema_sma_cross_testing_signals`` should validate the slope range."""
+    # TODO: review
+
+    import stock_indicator.strategy as strategy_module
+
+    price_data_frame = pandas.DataFrame({"open": [1.0], "close": [1.0]})
+
+    with pytest.raises(
+        ValueError, match="lower bound cannot exceed upper bound",
+    ):
+        strategy_module.attach_ema_sma_cross_testing_signals(
+            price_data_frame, slope_range=(1.0, -1.0)
+        )
+
+
 def test_attach_ema_sma_cross_with_slope_and_volume_requires_higher_ema_volume(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1794,6 +1893,21 @@ def test_supported_strategies_includes_ema_sma_cross_with_slope() -> None:
     assert (
         SUPPORTED_STRATEGIES["ema_sma_cross_with_slope"]
         is attach_ema_sma_cross_with_slope_signals
+    )
+
+
+def test_supported_strategies_includes_ema_sma_cross_testing() -> None:
+    """``SUPPORTED_STRATEGIES`` should expose the testing strategy."""
+    # TODO: review
+
+    from stock_indicator.strategy import (
+        SUPPORTED_STRATEGIES,
+        attach_ema_sma_cross_testing_signals,
+    )
+
+    assert (
+        SUPPORTED_STRATEGIES["ema_sma_cross_testing"]
+        is attach_ema_sma_cross_testing_signals
     )
 
 

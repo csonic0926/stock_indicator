@@ -87,6 +87,7 @@ The `start_simulate` command accepts the following strategies:
 * `ftd_ema_sma_cross`
 * `ema_sma_cross_with_slope` *(use `ema_sma_cross_with_slope_N` to set a custom EMA/SMA window size; `N` defaults to 40. Append `_LOWER_UPPER` to constrain the simple moving average slope to a range.)*
 * `ema_sma_cross_with_slope_and_volume`
+* `ema_sma_cross_testing`
 * `ema_sma_double_cross`
 * `kalman_filtering` *(sell only)*
 
@@ -107,6 +108,12 @@ The window size and slope range can be combined by placing the integer before th
 ```
 start_simulate dollar_volume>1 ema_sma_cross_with_slope_40_-0.1_1.2 ema_sma_cross_with_slope_40_-0.1_1.2
 ```
+
+The testing variant `ema_sma_cross_testing` accepts the same optional window
+size and slope range suffixes. In addition to the EMA/SMA cross and slope
+filters, it recalculates chip concentration metrics and requires both the
+near-price and above-price volume ratios to remain below 0.12 and 0.10 by
+default.
 
 The tests `tests/test_manage.py::test_start_simulate_accepts_slope_range_strategy_names` and `tests/test_strategy.py::test_evaluate_combined_strategy_passes_slope_range` confirm this behavior. The management test shows the command accepts strategy names with slope bounds, and the strategy test verifies that the evaluation routine passes the bounds to the strategy implementation.
 

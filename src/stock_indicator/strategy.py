@@ -923,6 +923,93 @@ def attach_ema_sma_cross_with_slope_signals(
     ]
 
 
+def attach_ema_sma_cross_testing_signals(
+    price_data_frame: pandas.DataFrame,
+    window_size: int = 40,
+    slope_range: tuple[float, float] = (-0.3, 2.14),
+    near_pct: float = 0.12,
+    above_pct: float = 0.10,
+    sma_window_factor: float | None = None,
+) -> None:
+    """Attach EMA/SMA cross testing signals with slope and chip filters.
+
+    Entry signals mirror :func:`attach_ema_sma_cross_with_slope_signals` but do
+    not require the closing price to remain above the long-term simple moving
+    average. Instead, this variant recomputes chip concentration metrics and
+    validates that the near-price and above-price volume ratios fall below the
+    ``near_pct`` and ``above_pct`` thresholds.
+
+    Parameters
+    ----------
+    price_data_frame:
+        DataFrame containing ``open``, ``high``, ``low``, ``close`` and
+        ``volume`` columns.
+    window_size:
+        Number of periods for EMA calculations.
+    slope_range:
+        Inclusive range ``(lower_bound, upper_bound)`` for the SMA slope.
+    near_pct:
+        Maximum allowed fraction of volume near the current price.
+    above_pct:
+        Maximum allowed fraction of volume above the current price.
+    sma_window_factor:
+        Optional multiplier applied to ``window_size`` to determine the SMA
+        window as ``ceil(window_size * factor)``. When ``None``, uses
+        ``window_size`` for the SMA as well.
+
+    Raises
+    ------
+    ValueError
+        If ``slope_range`` has a lower bound greater than its upper bound.
+    """
+    # TODO: review
+
+    slope_lower_bound, slope_upper_bound = slope_range
+    if slope_lower_bound > slope_upper_bound:
+        raise ValueError(
+            "Invalid slope_range: lower bound cannot exceed upper bound"
+        )
+
+    attach_ema_sma_cross_signals(
+        price_data_frame,
+        window_size,
+        require_close_above_long_term_sma=False,
+        sma_window_factor=sma_window_factor,
+    )
+    price_data_frame["sma_slope"] = (
+        price_data_frame["sma_value"] - price_data_frame["sma_previous"]
+    )
+
+    near_ratios: List[float | None] = []
+    above_ratios: List[float | None] = []
+    for row_index in range(len(price_data_frame)):
+        chip_metrics = calculate_chip_concentration_metrics(
+            price_data_frame.iloc[: row_index + 1],
+            lookback_window_size=60,
+        )
+        near_ratios.append(chip_metrics["near_price_volume_ratio"])
+        above_ratios.append(chip_metrics["above_price_volume_ratio"])
+    price_data_frame["near_price_volume_ratio"] = pandas.Series(
+        near_ratios, index=price_data_frame.index
+    )
+    price_data_frame["above_price_volume_ratio"] = pandas.Series(
+        above_ratios, index=price_data_frame.index
+    )
+
+    near_ok = price_data_frame["near_price_volume_ratio"].le(near_pct)
+    above_ok = price_data_frame["above_price_volume_ratio"].le(above_pct)
+    price_data_frame["ema_sma_cross_testing_entry_signal"] = (
+        price_data_frame["ema_sma_cross_entry_signal"]
+        & (price_data_frame["sma_slope"] >= slope_lower_bound)
+        & (price_data_frame["sma_slope"] <= slope_upper_bound)
+        & near_ok.fillna(False)
+        & above_ok.fillna(False)
+    )
+    price_data_frame["ema_sma_cross_testing_exit_signal"] = price_data_frame[
+        "ema_sma_cross_exit_signal"
+    ]
+
+
 def attach_ema_shift_cross_with_slope_signals(
     price_data_frame: pandas.DataFrame,
     window_size: int = 35,
@@ -1017,6 +1104,7 @@ BUY_STRATEGIES: Dict[str, Callable[[pandas.DataFrame], None]] = {
     "ema_sma_cross": attach_ema_sma_cross_signals,
     "20_50_sma_cross": attach_20_50_sma_cross_signals,
     "ema_sma_cross_with_slope": attach_ema_sma_cross_with_slope_signals,
+    "ema_sma_cross_testing": attach_ema_sma_cross_testing_signals,
     "ema_shift_cross_with_slope": attach_ema_shift_cross_with_slope_signals,
 }
 
