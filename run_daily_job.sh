@@ -8,7 +8,8 @@ SOURCE_DIRECTORY="${SRC:-$REPOSITORY_ROOT/src}"
 VIRTUAL_ENVIRONMENT_DIRECTORY="${VENV:-$REPOSITORY_ROOT/venv}"
 
 # Your daily_job argument line:
-ARG_LINE='dollar_volume>2.14%,Top3 strategy=s1 0.1'
+# TODO: review
+ARG_LINE='dollar_volume>2.14%,Top3 ema_sma_cross ema_sma_cross 0.1'
 
 # Set up logging directory
 LOG_DIRECTORY="$REPOSITORY_ROOT/cron_logs"
