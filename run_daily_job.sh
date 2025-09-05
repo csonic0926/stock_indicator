@@ -51,4 +51,5 @@ cd "$SOURCE_DIRECTORY"
 
 # Run as a module so `from . import cron` works
 # Stdout/stderr go to a rolling cron log for debugging
-"$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.daily_job "$ARG_LINE" >> "$LOG_DIRECTORY/cron_stdout.log" 2>&1
+# Disable automatic breakpoints during the daily job run
+PYTHONBREAKPOINT=0 "$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.daily_job "$ARG_LINE" >> "$LOG_DIRECTORY/cron_stdout.log" 2>&1
