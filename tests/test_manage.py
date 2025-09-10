@@ -231,9 +231,9 @@ def test_find_history_signal_prints_recalculated_signals(
         "budget suggestions: {'AAA': 500.0}",
     ]
 
-
+ 
 # TODO: review
-def test_find_latest_signal_prints_recalculated_signals(
+def test_find_history_signal_without_date_prints_recalculated_signals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The command should display latest signals and budget suggestions."""
@@ -269,7 +269,7 @@ def test_find_latest_signal_prints_recalculated_signals(
     output_buffer = io.StringIO()
     shell = manage_module.StockShell(stdout=output_buffer)
     shell.onecmd(
-        "find_latest_signal dollar_volume>1 ema_sma_cross ema_sma_cross 1.0",
+        "find_history_signal dollar_volume>1 ema_sma_cross ema_sma_cross 1.0",
     )
 
     assert recorded_arguments == {
@@ -320,7 +320,7 @@ def test_find_history_signal_invalid_argument(
     assert (
         output_buffer.getvalue()
         ==
-        "usage: find_history_signal DATE DOLLAR_VOLUME_FILTER (BUY SELL STOP_LOSS | STOP_LOSS strategy=ID) [group=1,2,...]\n"
+        "usage: find_history_signal [DATE] DOLLAR_VOLUME_FILTER (BUY SELL STOP_LOSS | STOP_LOSS strategy=ID) [group=1,2,...]\n"
     )
 
 

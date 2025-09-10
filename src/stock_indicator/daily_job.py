@@ -13,11 +13,9 @@ from zoneinfo import ZoneInfo
 
 import pandas
 from pandas.tseries.offsets import BDay
-import yfinance.exceptions as yfinance_exceptions
 
 from . import cron, strategy_sets
 from .data_loader import download_history
-from .symbols import load_daily_job_symbols, remove_daily_job_symbol
 
 LOGGER = logging.getLogger(__name__)
 
@@ -464,77 +462,6 @@ def _read_latest_close(
         return None
     except Exception:  # noqa: BLE001
         return None
-
-
-# TODO: review
-def find_latest_signal(
-    dollar_volume_filter: str,
-    buy_strategy: str,
-    sell_strategy: str,
-    stop_loss: float,
-    allowed_fama_french_groups: set[int] | None = None,
-) -> Dict[str, Any]:
-    """Wrapper for :func:`find_history_signal` using the latest trading date.
-
-    This function exists for backward compatibility. It refreshes data for the
-    symbols listed in ``symbols_daily_job.txt`` and then delegates to
-    :func:`find_history_signal` with ``date_string`` set to ``None`` so the
-    latest trading day is used. Symbols that trigger a
-    :class:`yfinance.exceptions.YFException` are removed from the daily job list
-    to avoid repeated failures.
-    """
-
-    latest_trading_date = determine_latest_trading_date()
-    download_end_date = (latest_trading_date + datetime.timedelta(days=1)).isoformat()
-    symbol_list = load_daily_job_symbols()
-    for symbol_name in symbol_list:
-        csv_path = STOCK_DATA_DIRECTORY / f"{symbol_name}.csv"
-        try:
-            history_frame = pandas.read_csv(csv_path, index_col=0, parse_dates=True)
-            if history_frame.empty:
-                download_start = DEFAULT_START_DATE
-            else:
-                next_day = history_frame.index.max() + pandas.Timedelta(days=1)
-                download_start = next_day.date().isoformat()
-        except Exception as read_error:  # noqa: BLE001
-            LOGGER.warning("Could not read %s: %s", csv_path, read_error)
-            download_start = DEFAULT_START_DATE
-        try:
-            download_history(
-                symbol_name,
-                start=download_start,
-                end=download_end_date,
-                cache_path=csv_path,
-            )
-            try:
-                cached_frame = pandas.read_csv(csv_path, index_col=0, parse_dates=True)
-                deduplicated_frame = cached_frame.loc[
-                    ~cached_frame.index.duplicated(keep="last")
-                ]
-                deduplicated_frame.to_csv(csv_path)
-            except Exception as cache_error:  # noqa: BLE001
-                LOGGER.warning("Failed to deduplicate %s: %s", csv_path, cache_error)
-        except yfinance_exceptions.YFException as download_error:
-            LOGGER.warning(
-                "Removing %s from daily job symbols due to download error: %s",
-                symbol_name,
-                download_error,
-            )
-            remove_daily_job_symbol(symbol_name)
-        except Exception as download_error:  # noqa: BLE001
-            LOGGER.warning(
-                "Failed to refresh data for %s: %s", symbol_name, download_error
-            )
-
-    return find_history_signal(
-        None,
-        dollar_volume_filter,
-        buy_strategy,
-        sell_strategy,
-        stop_loss,
-        allowed_fama_french_groups,
-    )
-
 
 def find_history_signal(
     date_string: str | None,

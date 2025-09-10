@@ -1444,16 +1444,16 @@ class StockShell(cmd.Cmd):
 
     # TODO: review
     def do_find_history_signal(self, argument_line: str) -> None:  # noqa: D401
-        """find_history_signal DATE DOLLAR_VOLUME_FILTER BUY_STRATEGY SELL_STRATEGY STOP_LOSS
-        [group=...] or find_history_signal DATE DOLLAR_VOLUME_FILTER STOP_LOSS strategy=ID
+        """find_history_signal [DATE] DOLLAR_VOLUME_FILTER BUY_STRATEGY SELL_STRATEGY STOP_LOSS
+        [group=...] or find_history_signal [DATE] DOLLAR_VOLUME_FILTER STOP_LOSS strategy=ID
         [group=...]
 
-        Display the entry and exit signals generated for DATE."""
+        Display the entry and exit signals generated for DATE or the latest trading day when DATE is omitted."""
         usage_message = (
-            "usage: find_history_signal DATE DOLLAR_VOLUME_FILTER (BUY SELL STOP_LOSS | STOP_LOSS strategy=ID) [group=1,2,...]\n"
+            "usage: find_history_signal [DATE] DOLLAR_VOLUME_FILTER (BUY SELL STOP_LOSS | STOP_LOSS strategy=ID) [group=1,2,...]\n"
         )
         argument_parts: List[str] = argument_line.split()
-        if len(argument_parts) < 4:
+        if len(argument_parts) < 3:
             self.stdout.write(usage_message)
             return  # TODO: review
         # Optional group token may appear in any position after DATE; normalize
@@ -1480,15 +1480,19 @@ class StockShell(cmd.Cmd):
                 strategy_id = token.split("=", 1)[1].strip()
             else:
                 tokens.append(token)
+        try:
+            datetime.date.fromisoformat(tokens[0])
+            date_string = tokens.pop(0)
+        except ValueError:
+            date_string = None
         # Support two forms:
-        # 1) DATE FILTER BUY SELL STOP
-        # 2) DATE FILTER STOP with strategy=ID
+        # 1) [DATE] FILTER BUY SELL STOP
+        # 2) [DATE] FILTER STOP with strategy=ID
         if strategy_id:
-            if len(tokens) != 3:
+            if len(tokens) != 2:
                 self.stdout.write(usage_message)
                 return
             (
-                date_string,
                 dollar_volume_filter,
                 stop_loss_string,
             ) = tokens
@@ -1498,21 +1502,21 @@ class StockShell(cmd.Cmd):
                 return
             buy_strategy_name, sell_strategy_name = mapping[strategy_id]
         else:
-            if len(tokens) != 5:
+            if len(tokens) != 4:
                 self.stdout.write(usage_message)
                 return
             (
-                date_string,
                 dollar_volume_filter,
                 buy_strategy_name,
                 sell_strategy_name,
                 stop_loss_string,
             ) = tokens
-        try:
-            datetime.date.fromisoformat(date_string)
-        except ValueError:
-            self.stdout.write(usage_message)
-            return
+        if date_string is not None:
+            try:
+                datetime.date.fromisoformat(date_string)
+            except ValueError:
+                self.stdout.write(usage_message)
+                return
         try:
             stop_loss_value = float(stop_loss_string)
         except ValueError:
@@ -1538,95 +1542,11 @@ class StockShell(cmd.Cmd):
     def help_find_history_signal(self) -> None:
         """Display help for the find_history_signal command."""
         self.stdout.write(
-            "find_history_signal DATE DOLLAR_VOLUME_FILTER (BUY SELL STOP_LOSS | STOP_LOSS strategy=ID) [group=1,2,...]\n"
-            "Display entry and exit signals for DATE using the provided strategies or a strategy id from data/strategy_sets.csv.\n"
+            "find_history_signal [DATE] DOLLAR_VOLUME_FILTER (BUY SELL STOP_LOSS | STOP_LOSS strategy=ID) [group=1,2,...]\n"
+            "Display entry and exit signals for DATE or the latest trading day when DATE is omitted using the provided strategies or a strategy id from data/strategy_sets.csv.\n"
             "Signal calculation uses the same group dynamic ratio and Top-N rule as start_simulate.\n"
         )
 
-    # TODO: review
-    def do_find_latest_signal(self, argument_line: str) -> None:  # noqa: D401
-        """find_latest_signal DOLLAR_VOLUME_FILTER BUY_STRATEGY SELL_STRATEGY STOP_LOSS [group=...]
-        or find_latest_signal DOLLAR_VOLUME_FILTER STOP_LOSS strategy=ID [group=...]"""
-
-        usage_message = (
-            "usage: find_latest_signal DOLLAR_VOLUME_FILTER (BUY SELL STOP_LOSS | STOP_LOSS strategy=ID) [group=1,2,...]\n"
-        )
-        argument_parts: List[str] = argument_line.split()
-        if len(argument_parts) < 3:
-            self.stdout.write(usage_message)
-            return
-        allowed_group_identifiers: set[int] | None = None
-        tokens: List[str] = []
-        strategy_id: str | None = None
-        for token in argument_parts:
-            if token.startswith("group="):
-                try:
-                    raw = token.split("=", 1)[1]
-                    parts = [p.strip() for p in raw.split(",") if p.strip()]
-                    parsed = {int(p) for p in parts}
-                except ValueError:
-                    self.stdout.write("invalid group list\n")
-                    return
-                if any(identifier < 1 or identifier > 11 for identifier in parsed):
-                    self.stdout.write("group identifiers must be between 1 and 11\n")
-                    return
-                if 12 in parsed:
-                    self.stdout.write("group list must not include 12 (Other)\n")
-                    return
-                allowed_group_identifiers = parsed
-            elif token.startswith("strategy="):
-                strategy_id = token.split("=", 1)[1].strip()
-            else:
-                tokens.append(token)
-        if strategy_id:
-            if len(tokens) != 2:
-                self.stdout.write(usage_message)
-                return
-            dollar_volume_filter, stop_loss_string = tokens
-            mapping = load_strategy_set_mapping()
-            if strategy_id not in mapping:
-                self.stdout.write(f"unknown strategy id: {strategy_id}\n")
-                return
-            buy_strategy_name, sell_strategy_name = mapping[strategy_id]
-        else:
-            if len(tokens) != 4:
-                self.stdout.write(usage_message)
-                return
-            (
-                dollar_volume_filter,
-                buy_strategy_name,
-                sell_strategy_name,
-                stop_loss_string,
-            ) = tokens
-        try:
-            stop_loss_value = float(stop_loss_string)
-        except ValueError:
-            self.stdout.write("invalid stop loss\n")
-            return
-        signal_data: Dict[str, Any] = daily_job.find_history_signal(
-            None,
-            dollar_volume_filter,
-            buy_strategy_name,
-            sell_strategy_name,
-            stop_loss_value,
-            allowed_group_identifiers,
-        )
-        entry_signal_list: List[str] = signal_data.get("entry_signals", [])
-        exit_signal_list: List[str] = signal_data.get("exit_signals", [])
-        self.stdout.write(f"entry signals: {entry_signal_list}\n")
-        self.stdout.write(f"exit signals: {exit_signal_list}\n")
-        entry_budgets: Dict[str, float] | None = signal_data.get("entry_budgets")
-        if entry_budgets:
-            self.stdout.write(f"budget suggestions: {entry_budgets}\n")
-
-    # TODO: review
-    def help_find_latest_signal(self) -> None:
-        """Display help for the find_latest_signal command."""
-        self.stdout.write(
-            "find_latest_signal DOLLAR_VOLUME_FILTER (BUY SELL STOP_LOSS | STOP_LOSS strategy=ID) [group=1,2,...]\n"
-            "Display entry and exit signals for the most recent date using the provided strategies or a strategy id from data/strategy_sets.csv.\n"
-            "Signal calculation uses the same group dynamic ratio and Top-N rule as start_simulate.\n"
-        )
 
 
     def do_exit(self, argument_line: str) -> bool:  # noqa: D401

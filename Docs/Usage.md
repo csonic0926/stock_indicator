@@ -108,29 +108,23 @@ argument evaluates the most recent trading day. The function returns the entry
 and exit signal lists along with the budget information when available, rather
 than reading log files.
 
-To refresh data for the symbols listed in `symbols_daily_job.txt` and compute
-today's signals, use `find_latest_signal`. The command delegates to
-`daily_job.find_history_signal(None, ...)` and accepts the same argument forms
-as `find_history_signal`:
+To refresh data for all cached symbols and compute today's signals, run
+`find_history_signal` without a date. The command accepts the same argument
+forms:
 
 ```
-find_latest_signal DOLLAR_VOLUME_FILTER BUY_STRATEGY SELL_STRATEGY STOP_LOSS
-find_latest_signal DOLLAR_VOLUME_FILTER STOP_LOSS strategy=ID
+find_history_signal DOLLAR_VOLUME_FILTER BUY_STRATEGY SELL_STRATEGY STOP_LOSS
+find_history_signal DOLLAR_VOLUME_FILTER STOP_LOSS strategy=ID
 ```
 
 Example:
 
 ```
-find_latest_signal dollar_volume>1 ema_sma_cross ema_sma_cross 1.0
+find_history_signal dollar_volume>1 ema_sma_cross ema_sma_cross 1.0
 entry signals: ['AAA']
 exit signals: ['BBB']
 budget suggestions: {'AAA': 500.0}
 ```
-
-`find_latest_signal` updates each symbol's CSV cache before delegating to
-`find_history_signal` for the current date. Symbols that trigger
-`yfinance` errors are removed from `symbols_daily_job.txt` to prevent repeated
-failures.
 
 ## Available strategies
 
