@@ -36,6 +36,7 @@ def test_start_simulate_accepts_start_date(monkeypatch: pytest.MonkeyPatch, tmp_
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
         start_date: pandas.Timestamp | None = None,
+        **kwargs: object,
     ) -> StrategyMetrics:
         recorded_arguments["start_date"] = start_date
         return StrategyMetrics(
@@ -53,6 +54,7 @@ def test_start_simulate_accepts_start_date(monkeypatch: pytest.MonkeyPatch, tmp_
             compound_annual_growth_rate=0.0,
             annual_returns={},
             annual_trade_counts={},
+            annual_profit_totals={},
         )
 
     monkeypatch.setattr(manage_module, "determine_start_date", fake_determine_start_date)

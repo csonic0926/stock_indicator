@@ -21,6 +21,7 @@ from stock_indicator.simulator import (
     calculate_maximum_concurrent_positions,
     calculate_annual_returns,
     calculate_annual_trade_counts,
+    calculate_annual_profit_totals,
     simulate_trades,
     simulate_portfolio_balance,
     calculate_max_drawdown,
@@ -537,6 +538,39 @@ def test_calculate_annual_trade_counts_counts_trades_per_year() -> None:
         [trade_alpha, trade_beta, trade_gamma]
     )
     assert trade_counts == {2023: 1, 2024: 2}
+
+
+def test_calculate_annual_profit_totals_sums_profit_by_exit_year() -> None:
+    trade_winner = Trade(
+        entry_date=pandas.Timestamp("2023-01-01"),
+        exit_date=pandas.Timestamp("2023-02-01"),
+        entry_price=10.0,
+        exit_price=12.0,
+        profit=2.0
+        - calc_commission(1, 10.0)
+        - calc_commission(1, 12.0),
+        holding_period=1,
+    )
+    trade_loser = Trade(
+        entry_date=pandas.Timestamp("2024-03-01"),
+        exit_date=pandas.Timestamp("2024-04-01"),
+        entry_price=10.0,
+        exit_price=8.0,
+        profit=-2.0
+        - calc_commission(1, 10.0)
+        - calc_commission(1, 8.0),
+        holding_period=1,
+    )
+    annual_profit_totals = calculate_annual_profit_totals(
+        [trade_winner, trade_loser]
+    )
+    expected_totals = {
+        2023: pytest.approx(trade_winner.profit, rel=1e-9),
+        2024: pytest.approx(trade_loser.profit, rel=1e-9),
+    }
+    assert annual_profit_totals.keys() == expected_totals.keys()
+    for year_value, expected_profit in expected_totals.items():
+        assert annual_profit_totals[year_value] == expected_profit
 
 
 def test_calculate_max_drawdown_marks_to_market() -> None:

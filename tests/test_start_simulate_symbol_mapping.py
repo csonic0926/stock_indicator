@@ -37,6 +37,7 @@ def test_start_simulate_filters_pre_2014_googl(
         withdraw_amount: float = 0.0,
         stop_loss_percentage: float = 1.0,
         start_date: pandas.Timestamp | None = None,
+        **kwargs: object,
     ) -> StrategyMetrics:
         trade_details_by_year = {
             2013: [
@@ -97,6 +98,7 @@ def test_start_simulate_filters_pre_2014_googl(
             compound_annual_growth_rate=0.0,
             annual_returns={2013: 0.1},
             annual_trade_counts={2013: 2},
+            annual_profit_totals={2013: 0.0},
             trade_details_by_year=trade_details_by_year,
         )
 
@@ -113,4 +115,4 @@ def test_start_simulate_filters_pre_2014_googl(
     assert "GOOGL" not in output_string
     assert "GOOG" in output_string
     assert "Trades: 1," in output_string
-    assert "Year 2013: 10.00%, trade: 1" in output_string
+    assert "Year 2013: 10.00%, profit: 0.00, trade: 1" in output_string

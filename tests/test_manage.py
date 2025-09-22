@@ -41,6 +41,7 @@ def _create_empty_metrics() -> StrategyMetrics:
         compound_annual_growth_rate=0.0,
         annual_returns={},
         annual_trade_counts={},
+        annual_profit_totals={},
         trade_details_by_year={},
     )
 
@@ -674,6 +675,7 @@ def test_start_simulate(monkeypatch: pytest.MonkeyPatch) -> None:
             compound_annual_growth_rate=0.1,
             annual_returns={2023: 0.1, 2024: -0.05},
             annual_trade_counts={2023: 2, 2024: 1},
+            annual_profit_totals={},
             trade_details_by_year=trade_details_by_year,
         )
 
@@ -706,8 +708,8 @@ def test_start_simulate(monkeypatch: pytest.MonkeyPatch) -> None:
     summary_output = output_buffer.getvalue()
     for fragment in summary_fragments:
         assert fragment in summary_output
-    assert "Year 2023: 10.00%, trade: 2" in output_buffer.getvalue()
-    assert "Year 2024: -5.00%, trade: 1" in output_buffer.getvalue()
+    assert "Year 2023: 10.00%, profit: 0.00, trade: 2" in output_buffer.getvalue()
+    assert "Year 2024: -5.00%, profit: 0.00, trade: 1" in output_buffer.getvalue()
     assert "AAA open 10.00" in output_buffer.getvalue()
     assert "AAA close 11.00" in output_buffer.getvalue()
     assert "CCC open 30.00" in output_buffer.getvalue()
@@ -774,6 +776,7 @@ def test_start_simulate_suppresses_trade_details(
             compound_annual_growth_rate=0.1,
             annual_returns={2023: 0.1},
             annual_trade_counts={2023: 1},
+            annual_profit_totals={2023: 10.0},
             trade_details_by_year=trade_details_by_year,
         )
 
@@ -789,7 +792,7 @@ def test_start_simulate_suppresses_trade_details(
         "start_simulate dollar_volume>0 ema_sma_cross ema_sma_cross 1 false"
     )
     output_string = output_buffer.getvalue()
-    assert "Year 2023: 10.00%, trade: 1" in output_string
+    assert "Year 2023: 10.00%, profit: 10.00, trade: 1" in output_string
     assert "AAA open" not in output_string
     assert "AAA close" not in output_string
 
@@ -876,6 +879,7 @@ def test_start_simulate_filters_early_googl_trades(
             compound_annual_growth_rate=0.1,
             annual_returns={2013: 0.05, 2015: -0.1},
             annual_trade_counts={2013: 1, 2015: 1},
+            annual_profit_totals={2013: 20.0, 2015: -5.0},
             trade_details_by_year=trade_details_by_year,
         )
 
@@ -891,7 +895,7 @@ def test_start_simulate_filters_early_googl_trades(
     output_string = output_buffer.getvalue()
     assert "GOOGL" not in output_string
     assert "Year 2013" not in output_string
-    assert "Year 2015: -10.00%, trade: 1" in output_string
+    assert "Year 2015: -10.00%, profit: -5.00, trade: 1" in output_string
     assert "Trades: 1," in output_string
 
 
@@ -938,6 +942,7 @@ def test_start_simulate_different_strategies(monkeypatch: pytest.MonkeyPatch) ->
             compound_annual_growth_rate=0.0,
             annual_returns={},
             annual_trade_counts={},
+            annual_profit_totals={},
         )
 
     monkeypatch.setattr(
@@ -995,6 +1000,7 @@ def test_start_simulate_accepts_start_date(monkeypatch: pytest.MonkeyPatch) -> N
             compound_annual_growth_rate=0.0,
             annual_returns={},
             annual_trade_counts={},
+            annual_profit_totals={},
         )
 
     monkeypatch.setattr(
@@ -1051,6 +1057,7 @@ def test_start_simulate_dollar_volume_rank(monkeypatch: pytest.MonkeyPatch) -> N
             compound_annual_growth_rate=0.0,
             annual_returns={},
             annual_trade_counts={},
+            annual_profit_totals={},
         )
 
     monkeypatch.setattr(
@@ -1101,6 +1108,7 @@ def test_start_simulate_dollar_volume_ratio(monkeypatch: pytest.MonkeyPatch) -> 
             compound_annual_growth_rate=0.0,
             annual_returns={},
             annual_trade_counts={},
+            annual_profit_totals={},
         )
 
     monkeypatch.setattr(
@@ -1156,6 +1164,7 @@ def test_start_simulate_dollar_volume_threshold_and_rank(
             compound_annual_growth_rate=0.0,
             annual_returns={},
             annual_trade_counts={},
+            annual_profit_totals={},
         )
 
     monkeypatch.setattr(
@@ -1213,6 +1222,7 @@ def test_start_simulate_supports_rsi_strategy(
             compound_annual_growth_rate=0.0,
             annual_returns={},
             annual_trade_counts={},
+            annual_profit_totals={},
         )
 
     monkeypatch.setattr(
@@ -1275,6 +1285,7 @@ def test_start_simulate_supports_slope_strategy(
             compound_annual_growth_rate=0.0,
             annual_returns={},
             annual_trade_counts={},
+            annual_profit_totals={},
         )
 
     monkeypatch.setattr(
@@ -1337,6 +1348,7 @@ def test_start_simulate_supports_slope_and_volume_strategy(
             compound_annual_growth_rate=0.0,
             annual_returns={},
             annual_trade_counts={},
+            annual_profit_totals={},
         )
 
     monkeypatch.setattr(
@@ -1397,6 +1409,7 @@ def test_start_simulate_accepts_angle_range_strategy_names(
             compound_annual_growth_rate=0.0,
             annual_returns={},
             annual_trade_counts={},
+            annual_profit_totals={},
         )
 
     monkeypatch.setattr(
@@ -1653,6 +1666,7 @@ def test_start_simulate_supports_20_50_sma_cross_strategy(
             compound_annual_growth_rate=0.0,
             annual_returns={},
             annual_trade_counts={},
+            annual_profit_totals={},
         )
 
     monkeypatch.setattr(
@@ -1712,6 +1726,7 @@ def test_start_simulate_accepts_stop_loss_argument(
             compound_annual_growth_rate=0.0,
             annual_returns={},
             annual_trade_counts={},
+            annual_profit_totals={},
         )
 
     monkeypatch.setattr(
@@ -2048,6 +2063,7 @@ def test_start_simulate_creates_csv(
         compound_annual_growth_rate=0.0,
         annual_returns={2024: 0.0},
         annual_trade_counts={2024: 0},
+        annual_profit_totals={2024: 0.0},
         trade_details_by_year={2024: [open_trade_detail, close_trade_detail]},
     )
 
@@ -2132,6 +2148,7 @@ def test_start_simulate_writes_trade_detail_log(
         compound_annual_growth_rate=0.0,
         annual_returns={2024: 0.0},
         annual_trade_counts={2024: 0},
+        annual_profit_totals={2024: 0.0},
         trade_details_by_year={2024: [open_trade_detail, close_trade_detail]},
     )
 
@@ -2206,6 +2223,7 @@ def test_complex_simulation_strategy_id_resolution(
         recorded_arguments["set_definitions"] = set_definitions
         recorded_arguments["kwargs"] = kwargs
         return manage_module.strategy.ComplexSimulationMetrics(
+            overall_metrics=_create_empty_metrics(),
             metrics_by_set={
                 "A": _create_empty_metrics(),
                 "B": _create_empty_metrics(),
@@ -2231,6 +2249,7 @@ def test_complex_simulation_strategy_id_resolution(
     assert set_definitions["B"].buy_strategy_name == "ema_sma_cross_20"
     assert recorded_arguments["kwargs"]["starting_cash"] == 5000.0
     output_text = output_buffer.getvalue()
+    assert "[Total] Trades: 0" in output_text
     assert "[A] Trades: 0" in output_text
     assert "[B] Trades: 0" in output_text
 
@@ -2368,5 +2387,7 @@ def test_complex_simulation_half_cap_for_set_b_rounds_up(
     )
 
     output_text = output_buffer.getvalue()
+    assert "[Total] Trades: 3" in output_text
     assert "[A] Trades: 2" in output_text
-    assert "[B] Trades: 3" in output_text
+    assert "[B] Trades: 1" in output_text
+    assert output_text.index("[Total]") < output_text.index("[A]")

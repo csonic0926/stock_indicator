@@ -91,17 +91,49 @@ def _build_artifacts(
     )
 
 
-def _stub_metrics_functions(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stub_metrics_functions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, list[int]]:
     """Replace expensive metric helpers with deterministic stubs."""
 
-    monkeypatch.setattr(strategy, "calculate_annual_returns", lambda *args, **kwargs: {})
-    monkeypatch.setattr(strategy, "calculate_annual_trade_counts", lambda trades: {})
+    call_records: dict[str, list[int]] = {
+        "simulate_portfolio_balance": [],
+        "calculate_max_drawdown": [],
+    }
+
     monkeypatch.setattr(
-        strategy,
-        "simulate_portfolio_balance",
-        lambda trades, starting_cash, *args, **kwargs: float(starting_cash),
+        strategy, "calculate_annual_returns", lambda *args, **kwargs: {}
     )
-    monkeypatch.setattr(strategy, "calculate_max_drawdown", lambda *args, **kwargs: 0.0)
+    monkeypatch.setattr(
+        strategy, "calculate_annual_trade_counts", lambda trades: {}
+    )
+
+    def fake_simulate_portfolio_balance(
+        trades: list[strategy.Trade],
+        starting_cash: float,
+        maximum_position_count: int,
+        *args: object,
+        **kwargs: object,
+    ) -> float:
+        call_records["simulate_portfolio_balance"].append(maximum_position_count)
+        return float(starting_cash)
+
+    def fake_calculate_max_drawdown(
+        trades: list[strategy.Trade],
+        starting_cash: float,
+        maximum_position_count: int,
+        *args: object,
+        **kwargs: object,
+    ) -> float:
+        call_records["calculate_max_drawdown"].append(maximum_position_count)
+        return 0.0
+
+    monkeypatch.setattr(
+        strategy, "simulate_portfolio_balance", fake_simulate_portfolio_balance
+    )
+    monkeypatch.setattr(strategy, "calculate_max_drawdown", fake_calculate_max_drawdown)
+
+    return call_records
 
 
 def test_run_complex_simulation_enforces_shared_cap(
@@ -149,6 +181,15 @@ def test_run_complex_simulation_enforces_shared_cap(
 
     assert metrics.metrics_by_set["A"].total_trades == 2
     assert metrics.metrics_by_set["B"].total_trades == 0
+    assert metrics.overall_metrics.total_trades == 2
+    assert metrics.overall_metrics.maximum_concurrent_positions == 2
+    assert metrics.metrics_by_set["A"].annual_profit_totals == {
+        2024: pytest.approx(2.0)
+    }
+    assert metrics.metrics_by_set["B"].annual_profit_totals == {}
+    assert metrics.overall_metrics.annual_profit_totals == {
+        2024: pytest.approx(2.0)
+    }
 
 
 def test_run_complex_simulation_allows_two_b_positions_when_limit_rounds_up(
@@ -195,6 +236,16 @@ def test_run_complex_simulation_allows_two_b_positions_when_limit_rounds_up(
     )
 
     assert metrics.metrics_by_set["B"].total_trades == 2
+    assert metrics.overall_metrics.total_trades == 3
+    assert metrics.metrics_by_set["A"].annual_profit_totals == {
+        2024: pytest.approx(1.0)
+    }
+    assert metrics.metrics_by_set["B"].annual_profit_totals == {
+        2024: pytest.approx(2.0)
+    }
+    assert metrics.overall_metrics.annual_profit_totals == {
+        2024: pytest.approx(3.0)
+    }
 
 
 def test_run_complex_simulation_skips_b_when_global_open_count_reaches_quota(
@@ -243,3 +294,52 @@ def test_run_complex_simulation_skips_b_when_global_open_count_reaches_quota(
 
     assert metrics.metrics_by_set["A"].total_trades == 2
     assert metrics.metrics_by_set["B"].total_trades == 0
+    assert metrics.overall_metrics.total_trades == 2
+    assert metrics.metrics_by_set["A"].annual_profit_totals == {
+        2024: pytest.approx(2.0)
+    }
+    assert metrics.metrics_by_set["B"].annual_profit_totals == {}
+    assert metrics.overall_metrics.annual_profit_totals == {
+        2024: pytest.approx(2.0)
+    }
+
+
+def test_run_complex_simulation_overall_metrics_use_global_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Overall metric helpers should receive the shared position cap."""
+
+    trade_a = _build_trade("2024-01-01", "2024-01-05", symbol="AAA")
+    trade_b = _build_trade("2024-01-02", "2024-01-06", symbol="BBB")
+
+    artifacts_a = _build_artifacts([trade_a])
+    artifacts_b = _build_artifacts([trade_b])
+
+    def fake_generate(*args: object, **kwargs: object) -> strategy.StrategyEvaluationArtifacts:
+        buy_name = kwargs.get("buy_strategy_name") or args[1]
+        return artifacts_a if buy_name == "set_a" else artifacts_b
+
+    monkeypatch.setattr(strategy, "_generate_strategy_evaluation_artifacts", fake_generate)
+    call_records = _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+        ),
+        "B": strategy.ComplexStrategySetDefinition(
+            label="B",
+            buy_strategy_name="set_b",
+            sell_strategy_name="set_b",
+        ),
+    }
+
+    strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=3,
+    )
+
+    assert call_records["simulate_portfolio_balance"][-1] == 3
+    assert call_records["calculate_max_drawdown"][-1] == 3

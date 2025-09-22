@@ -726,3 +726,30 @@ def calculate_annual_trade_counts(trades: Iterable[Trade]) -> Dict[int, int]:
         else:
             trade_counts[year_value] = 1
     return trade_counts
+
+
+def calculate_annual_profit_totals(trades: Iterable[Trade]) -> Dict[int, float]:
+    """Sum realized trade profits for each calendar year.
+
+    Parameters
+    ----------
+    trades:
+        Collection of completed trades whose profits should be grouped by
+        calendar year based on exit timestamps.
+
+    Returns
+    -------
+    Dict[int, float]
+        Mapping of calendar year to the total realized profit for trades that
+        closed during that year.
+    """
+
+    annual_profit_totals: Dict[int, float] = {}
+    for completed_trade in trades:
+        year_value = completed_trade.exit_date.year
+        profit_value = float(completed_trade.profit)
+        if year_value in annual_profit_totals:
+            annual_profit_totals[year_value] += profit_value
+        else:
+            annual_profit_totals[year_value] = profit_value
+    return annual_profit_totals
