@@ -22,6 +22,7 @@ pytz==2025.2
 requests==2.32.4
 six==1.17.0
 soupsieve==2.7
+-e git+https://csonic0926@github.com/csonic0926/stock_indicator.git@8847b3efd30b235982b5c9b21804605f945bac05#egg=stock_indicator
 typing_extensions==4.14.1
 tzdata==2025.2
 urllib3==2.5.0
