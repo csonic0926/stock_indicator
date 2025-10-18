@@ -263,7 +263,14 @@ def find_history_signal(
             except Exception:  # noqa: BLE001
                 missing_symbols.append(symbol_name)
                 continue
-            if evaluation_timestamp not in history_frame.index:
+            try:
+                available_index = history_frame.index[
+                    history_frame.index <= evaluation_timestamp
+                ]
+            except Exception:  # noqa: BLE001
+                missing_symbols.append(symbol_name)
+                continue
+            if len(available_index) == 0:
                 missing_symbols.append(symbol_name)
         if missing_symbols:
             missing_symbol_list = ", ".join(sorted(missing_symbols))
@@ -334,7 +341,7 @@ def filter_debug_values(
     price_history_frame = load_local_history(
         symbol_name, start_date_string, end_date_string, cache_path=csv_file_path
     )
-    if price_history_frame.empty or pandas.Timestamp(evaluation_date_string) not in price_history_frame.index:
+    if price_history_frame.empty:
         return {
             "sma_angle": None,
             "near_price_volume_ratio": None,
@@ -342,6 +349,29 @@ def filter_debug_values(
             "entry": False,
             "exit": False,
         }
+
+    evaluation_timestamp = pandas.Timestamp(evaluation_date_string)
+    try:
+        available_index = price_history_frame.index[
+            price_history_frame.index <= evaluation_timestamp
+        ]
+    except Exception:  # noqa: BLE001
+        return {
+            "sma_angle": None,
+            "near_price_volume_ratio": None,
+            "above_price_volume_ratio": None,
+            "entry": False,
+            "exit": False,
+        }
+    if len(available_index) == 0:
+        return {
+            "sma_angle": None,
+            "near_price_volume_ratio": None,
+            "above_price_volume_ratio": None,
+            "entry": False,
+            "exit": False,
+        }
+    last_available_timestamp = available_index[-1]
 
     buy_price_history_frame = price_history_frame.copy()
     sell_price_history_frame = price_history_frame.copy()
@@ -408,7 +438,16 @@ def filter_debug_values(
             sell_price_history_frame[[sell_exit_signal_column]], how="outer"
         )
 
-    row = debug_frame.loc[pandas.Timestamp(evaluation_date_string)]
+    try:
+        row = debug_frame.loc[last_available_timestamp]
+    except Exception:  # noqa: BLE001
+        return {
+            "sma_angle": None,
+            "near_price_volume_ratio": None,
+            "above_price_volume_ratio": None,
+            "entry": False,
+            "exit": False,
+        }
     return {
         "sma_angle": row.get("sma_angle"),
         "near_price_volume_ratio": row.get("near_price_volume_ratio"),
