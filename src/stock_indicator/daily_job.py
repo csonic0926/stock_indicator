@@ -230,10 +230,11 @@ def find_history_signal(
     argument_line = f"{group_token}{dollar_volume_filter} {buy_strategy} {sell_strategy} {stop_loss}"
     try:
         evaluation_timestamp = pandas.Timestamp(date_string)
-        evaluation_end_date_string = evaluation_timestamp.date().isoformat()
     except Exception:  # noqa: BLE001
         evaluation_timestamp = pandas.Timestamp.today()
-        evaluation_end_date_string = evaluation_timestamp.date().isoformat()
+    evaluation_end_date_string = (
+        evaluation_timestamp + pandas.Timedelta(days=1)
+    ).date().isoformat()
     cached_start_timestamp = pandas.Timestamp(
         determine_start_date(STOCK_DATA_DIRECTORY)
     )
@@ -298,7 +299,6 @@ def find_history_signal(
         top_dollar_volume_rank=top_dollar_volume_rank,
         allowed_fama_french_groups=allowed_groups,
         maximum_symbols_per_group=maximum_symbols_per_group,
-        use_unshifted_signals=True,
     )
     entry_signals = signal_result.get("entry_signals", [])
     exit_signals = signal_result.get("exit_signals", [])

@@ -153,3 +153,70 @@ def test_update_all_data_from_yf_logs_warning_on_error(
 
     assert any("BBB" in record.message for record in caplog.records)
 
+
+def test_find_history_signal_uses_shifted_signals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``find_history_signal`` should evaluate signals on the trading day."""
+
+    csv_path = tmp_path / "AAA.csv"
+    csv_path.write_text(
+        "Date,open,close,volume\n2024-01-10,1,1,1000000\n",
+        encoding="utf-8",
+    )
+
+    recorded_arguments: dict[str, object] = {}
+
+    def fake_parse_arguments(argument_line: str) -> tuple[
+        float | None,
+        int | None,
+        int,
+        str,
+        str,
+        float,
+        set[int] | None,
+    ]:
+        recorded_arguments["argument_line"] = argument_line
+        return (None, None, 1, "buy", "sell", 1.0, None)
+
+    def fake_run_daily_tasks(
+        *,
+        buy_strategy_name: str,
+        sell_strategy_name: str,
+        start_date: str,
+        end_date: str,
+        symbol_list: list[str] | None,
+        data_download_function,
+        data_directory: Path,
+        minimum_average_dollar_volume,
+        top_dollar_volume_rank,
+        allowed_fama_french_groups,
+        maximum_symbols_per_group: int,
+        use_unshifted_signals: bool = False,
+        **_: object,
+    ) -> dict[str, list[str] | list[tuple[str, int | None]]]:
+        recorded_arguments["start_date"] = start_date
+        recorded_arguments["end_date"] = end_date
+        recorded_arguments["use_unshifted_signals"] = use_unshifted_signals
+        assert buy_strategy_name == "buy"
+        assert sell_strategy_name == "sell"
+        return {
+            "filtered_symbols": [("AAA", None)],
+            "entry_signals": ["AAA"],
+            "exit_signals": [],
+        }
+
+    monkeypatch.setattr(daily_job, "STOCK_DATA_DIRECTORY", tmp_path)
+    monkeypatch.setattr(daily_job, "determine_start_date", lambda _path: "2024-01-01")
+    monkeypatch.setattr(daily_job, "parse_daily_task_arguments", fake_parse_arguments)
+    monkeypatch.setattr(daily_job, "run_daily_tasks", fake_run_daily_tasks)
+
+    result = daily_job.find_history_signal(
+        "2024-01-10", "dollar_volume>1", "buy", "sell", 1.0
+    )
+
+    assert result["entry_signals"] == ["AAA"]
+    assert recorded_arguments["use_unshifted_signals"] is False
+    assert recorded_arguments["end_date"] == "2024-01-11"
+    assert recorded_arguments["start_date"] == "2024-01-01"
+
