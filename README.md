@@ -14,8 +14,8 @@ Stock Indicator provides a collection of Python utilities for computing common t
 ```bash
 git clone https://github.com/yourusername/stock_indicator.git
 cd stock_indicator
-python -m venv .venv
-source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
+python -m venv venv
+source venv/bin/activate  # On Windows use: .venv\Scripts\activate
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
