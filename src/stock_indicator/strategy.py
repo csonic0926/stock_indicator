@@ -14,6 +14,7 @@ import re
 
 import numpy
 import pandas
+from pandas.api.types import is_bool_dtype
 
 from .indicators import ema, kalman_filter, sma
 from .chip_filter import calculate_chip_concentration_metrics
@@ -30,6 +31,9 @@ from .simulator import (
 from .symbols import SP500_SYMBOL
 
 LOGGER = logging.getLogger(__name__)
+
+_STRATEGY_TIMEFRAME_CACHE: dict[str, str] = {}
+_TIMEFRAME_AWARE_STRATEGIES: set[str] = {"ema_sma_cross_testing"}
 
 
 DEFAULT_SMA_ANGLE_RANGE: tuple[float, float] = (
@@ -54,6 +58,90 @@ def _split_strategy_choices(strategy_name: str) -> list[str]:
     """
     parts = re.split(r"\s*(?:\bor\b|\||/)\s*", strategy_name.strip())
     return [token for token in parts if token]
+
+
+def determine_strategy_timeframe(strategy_name: str) -> str:
+    """Return the timeframe encoded in ``strategy_name``.
+
+    Strategy names default to the "daily" timeframe. When the window segment
+    ends with ``"w"`` (for example, ``"ema_sma_cross_testing_4w"``), the
+    strategy operates on weekly candles. The result is cached so subsequent
+    lookups do not require repeated parsing.
+    """
+
+    cached = _STRATEGY_TIMEFRAME_CACHE.get(strategy_name)
+    if cached is not None:
+        return cached
+
+    timeframe = "daily"
+    if re.search(r"_(\d+)[wW](?:_|$)", strategy_name):
+        timeframe = "weekly"
+
+    _STRATEGY_TIMEFRAME_CACHE[strategy_name] = timeframe
+    return timeframe
+
+
+def _resample_to_weekly_ohlcv(price_data_frame: pandas.DataFrame) -> pandas.DataFrame:
+    """Return a weekly OHLCV view of ``price_data_frame`` indexed by week end."""
+
+    if price_data_frame.empty:
+        return price_data_frame.copy()
+
+    grouped = price_data_frame.groupby(
+        pandas.Grouper(freq="W-FRI", label="right", closed="right")
+    )
+
+    aggregated_rows: list[dict[str, float]] = []
+    aggregated_index: list[pandas.Timestamp] = []
+    base_columns = set(price_data_frame.columns)
+
+    for _, group_frame in grouped:
+        if group_frame.empty:
+            continue
+        aggregated_index.append(group_frame.index[-1])
+        aggregated_row: dict[str, float] = {}
+        if "open" in base_columns:
+            aggregated_row["open"] = float(group_frame["open"].iloc[0])
+        if "high" in base_columns:
+            aggregated_row["high"] = float(group_frame["high"].max())
+        if "low" in base_columns:
+            aggregated_row["low"] = float(group_frame["low"].min())
+        if "close" in base_columns:
+            aggregated_row["close"] = float(group_frame["close"].iloc[-1])
+        if "volume" in base_columns:
+            aggregated_row["volume"] = float(group_frame["volume"].sum())
+        aggregated_rows.append(aggregated_row)
+
+    if not aggregated_rows:
+        return pandas.DataFrame(columns=list(base_columns))
+
+    weekly_frame = pandas.DataFrame(aggregated_rows)
+    weekly_frame.index = pandas.Index(aggregated_index, name=price_data_frame.index.name)
+    return weekly_frame
+
+
+def _apply_resampled_columns(
+    source_frame: pandas.DataFrame,
+    target_frame: pandas.DataFrame,
+    column_names: Iterable[str],
+) -> None:
+    """Write ``column_names`` from ``source_frame`` into ``target_frame``.
+
+    Columns that are boolean receive ``False`` for non-weekly rows. All other
+    column types are filled with ``NaN`` outside the sampled index.
+    """
+
+    for column_name in column_names:
+        if column_name not in source_frame.columns:
+            continue
+        series = source_frame[column_name]
+        if is_bool_dtype(series):
+            target_frame[column_name] = False
+        else:
+            target_frame[column_name] = numpy.nan
+        shared_index = target_frame.index.intersection(series.index)
+        if not shared_index.empty:
+            target_frame.loc[shared_index, column_name] = series.loc[shared_index]
 
 
 def _extract_sma_factor(strategy_name: str) -> float | None:
@@ -1155,6 +1243,12 @@ def compute_signals_for_date(
             ):
                 kwargs["near_range"] = near_range
                 kwargs["above_range"] = above_range
+        timeframe = determine_strategy_timeframe(full_name)
+        if (
+            timeframe != "daily"
+            and base_name in _TIMEFRAME_AWARE_STRATEGIES
+        ):
+            kwargs["timeframe"] = timeframe
         table[base_name](frame, include_raw_signals=include_raw_signals, **kwargs)
         if base_name != full_name:
             rename_mapping = {
@@ -1595,6 +1689,10 @@ def attach_ema_sma_cross_with_slope_signals(
     bounds_as_tangent:
         When ``True``, interpret ``angle_range`` as tangent values instead of
         degrees.
+    timeframe:
+        Candle resolution for indicator calculations. ``"daily"`` uses the
+        original bars, while ``"weekly"`` aggregates the input into
+        week-ending OHLCV data before evaluating signals.
     include_raw_signals:
         When ``True``, attach unshifted ``*_raw_entry_signal`` and
         ``*_raw_exit_signal`` columns representing same-day signals.
@@ -1653,6 +1751,7 @@ def attach_ema_sma_cross_testing_signals(
     above_range: tuple[float, float] = (0.0, 0.10),
     sma_window_factor: float | None = None,
     bounds_as_tangent: bool = False,
+    timeframe: str = "daily",
     include_raw_signals: bool = False,
 ) -> None:
     """Attach EMA/SMA cross testing signals with angle and chip filters.
@@ -1698,6 +1797,10 @@ def attach_ema_sma_cross_testing_signals(
     """
     # TODO: review
 
+    normalized_timeframe = timeframe.lower()
+    if normalized_timeframe not in {"daily", "weekly"}:
+        raise ValueError(f"Unsupported timeframe '{timeframe}'")
+
     angle_lower_bound, angle_upper_bound = angle_range
     near_lower_bound, near_upper_bound = near_range
     above_lower_bound, above_upper_bound = above_range
@@ -1709,84 +1812,96 @@ def attach_ema_sma_cross_testing_signals(
             "Invalid angle_range: lower bound cannot exceed upper bound"
         )
 
+    working_frame = price_data_frame
+    baseline_columns: set[str] | None = None
+    if normalized_timeframe == "weekly":
+        working_frame = _resample_to_weekly_ohlcv(price_data_frame)
+        baseline_columns = set(working_frame.columns)
+
     attach_ema_sma_cross_signals(
-        price_data_frame,
+        working_frame,
         window_size,
         require_close_above_long_term_sma=False,
         sma_window_factor=sma_window_factor,
         include_raw_signals=include_raw_signals,
     )
     relative_change = (
-        price_data_frame["sma_value"] - price_data_frame["sma_previous"]
-    ) / price_data_frame["sma_previous"]
-    price_data_frame["sma_angle"] = numpy.degrees(numpy.arctan(relative_change))
+        working_frame["sma_value"] - working_frame["sma_previous"]
+    ) / working_frame["sma_previous"]
+    working_frame["sma_angle"] = numpy.degrees(numpy.arctan(relative_change))
 
     near_ratios: List[float | None] = []
     above_ratios: List[float | None] = []
-    for row_index in range(len(price_data_frame)):
+    for row_index in range(len(working_frame)):
         chip_metrics = calculate_chip_concentration_metrics(
-            price_data_frame.iloc[: row_index + 1],
+            working_frame.iloc[: row_index + 1],
             lookback_window_size=60,
             include_volume_profile=False,
         )
         near_ratios.append(chip_metrics["near_price_volume_ratio"])
         above_ratios.append(chip_metrics["above_price_volume_ratio"])
-    price_data_frame["near_price_volume_ratio"] = pandas.Series(
-        near_ratios, index=price_data_frame.index
+    working_frame["near_price_volume_ratio"] = pandas.Series(
+        near_ratios, index=working_frame.index
     )
-    price_data_frame["above_price_volume_ratio"] = pandas.Series(
-        above_ratios, index=price_data_frame.index
+    working_frame["above_price_volume_ratio"] = pandas.Series(
+        above_ratios, index=working_frame.index
     )
 
-    price_data_frame["near_price_volume_ratio_previous"] = price_data_frame[
+    working_frame["near_price_volume_ratio_previous"] = working_frame[
         "near_price_volume_ratio"
     ].shift(1)
-    price_data_frame["above_price_volume_ratio_previous"] = price_data_frame[
+    working_frame["above_price_volume_ratio_previous"] = working_frame[
         "above_price_volume_ratio"
     ].shift(1)
 
     near_price_ratio_previous_ok = (
-        price_data_frame["near_price_volume_ratio_previous"].ge(near_lower_bound)
-        & price_data_frame["near_price_volume_ratio_previous"].le(near_upper_bound)
+        working_frame["near_price_volume_ratio_previous"].ge(near_lower_bound)
+        & working_frame["near_price_volume_ratio_previous"].le(near_upper_bound)
     )
     above_price_ratio_previous_ok = (
-        price_data_frame["above_price_volume_ratio_previous"].ge(above_lower_bound)
-        & price_data_frame["above_price_volume_ratio_previous"].le(above_upper_bound)
+        working_frame["above_price_volume_ratio_previous"].ge(above_lower_bound)
+        & working_frame["above_price_volume_ratio_previous"].le(above_upper_bound)
     )
 
-    price_data_frame["ema_sma_cross_testing_entry_signal"] = (
-        price_data_frame["ema_sma_cross_entry_signal"]
-        & (price_data_frame["sma_angle"] >= angle_lower_bound)
-        & (price_data_frame["sma_angle"] <= angle_upper_bound)
+    working_frame["ema_sma_cross_testing_entry_signal"] = (
+        working_frame["ema_sma_cross_entry_signal"]
+        & (working_frame["sma_angle"] >= angle_lower_bound)
+        & (working_frame["sma_angle"] <= angle_upper_bound)
         & (
             near_price_ratio_previous_ok.fillna(False)
             & above_price_ratio_previous_ok.fillna(False)
         )
     )
-    price_data_frame["ema_sma_cross_testing_exit_signal"] = price_data_frame[
+    working_frame["ema_sma_cross_testing_exit_signal"] = working_frame[
         "ema_sma_cross_exit_signal"
     ]
     if include_raw_signals:
         near_price_ratio_raw_ok = (
-            price_data_frame["near_price_volume_ratio"].ge(near_lower_bound)
-            & price_data_frame["near_price_volume_ratio"].le(near_upper_bound)
+            working_frame["near_price_volume_ratio"].ge(near_lower_bound)
+            & working_frame["near_price_volume_ratio"].le(near_upper_bound)
         )
         above_price_ratio_raw_ok = (
-            price_data_frame["above_price_volume_ratio"].ge(above_lower_bound)
-            & price_data_frame["above_price_volume_ratio"].le(above_upper_bound)
+            working_frame["above_price_volume_ratio"].ge(above_lower_bound)
+            & working_frame["above_price_volume_ratio"].le(above_upper_bound)
         )
-        price_data_frame["ema_sma_cross_testing_raw_entry_signal"] = (
-            price_data_frame["ema_sma_cross_raw_entry_signal"]
-            & (price_data_frame["sma_angle"] >= angle_lower_bound)
-            & (price_data_frame["sma_angle"] <= angle_upper_bound)
+        working_frame["ema_sma_cross_testing_raw_entry_signal"] = (
+            working_frame["ema_sma_cross_raw_entry_signal"]
+            & (working_frame["sma_angle"] >= angle_lower_bound)
+            & (working_frame["sma_angle"] <= angle_upper_bound)
             & (
                 near_price_ratio_raw_ok.fillna(False)
                 & above_price_ratio_raw_ok.fillna(False)
             )
         )
-        price_data_frame["ema_sma_cross_testing_raw_exit_signal"] = (
-            price_data_frame["ema_sma_cross_raw_exit_signal"]
+        working_frame["ema_sma_cross_testing_raw_exit_signal"] = (
+            working_frame["ema_sma_cross_raw_exit_signal"]
         )
+
+    if normalized_timeframe == "weekly":
+        new_columns = (
+            working_frame.columns if baseline_columns is None else working_frame.columns.difference(baseline_columns)
+        )
+        _apply_resampled_columns(working_frame, price_data_frame, new_columns)
 
 
 def attach_ema_shift_cross_with_slope_signals(
@@ -2010,20 +2125,29 @@ def parse_strategy_name(
     if segment_count == 0:
         return base_name, None, None, None, None
 
+    def _parse_window_segment(segment: str) -> int:
+        normalized = segment
+        timeframe = "daily"
+        if segment.lower().endswith("w"):
+            timeframe = "weekly"
+            normalized = segment[:-1]
+        if not normalized.isdigit():
+            raise ValueError(
+                "Malformed strategy name: window segment must be an integer or "
+                f"integer+'w' in '{strategy_name}'"
+            )
+        window_size_value = int(normalized)
+        if window_size_value <= 0:
+            raise ValueError(
+                "Window size must be a positive integer in strategy name: "
+                f"{strategy_name}"
+            )
+        _STRATEGY_TIMEFRAME_CACHE[strategy_name] = timeframe
+        return window_size_value
+
     if segment_count == 1:
-        numeric_value = numeric_segments[0]
-        if numeric_value.isdigit():
-            window_size = int(numeric_value)
-            if window_size <= 0:
-                raise ValueError(
-                    "Window size must be a positive integer in strategy name: "
-                    f"{strategy_name}"
-                )
+        window_size = _parse_window_segment(numeric_segments[0])
         return base_name, window_size, None, None, None
-        raise ValueError(
-            "Malformed strategy name: expected two numeric segments for angle range "
-            f"but found {segment_count} in '{strategy_name}'"
-        )
 
     if segment_count == 2:
         lower_bound, upper_bound = (
@@ -2033,18 +2157,7 @@ def parse_strategy_name(
         return base_name, None, (lower_bound, upper_bound), None, None
 
     if segment_count == 3:
-        window_value = numeric_segments[0]
-        if not window_value.isdigit():
-            raise ValueError(
-                "Malformed strategy name: expected two numeric segments for angle range "
-                f"but found {segment_count} in '{strategy_name}'"
-            )
-        window_size = int(window_value)
-        if window_size <= 0:
-            raise ValueError(
-                "Window size must be a positive integer in strategy name: "
-                f"{strategy_name}"
-            )
+        window_size = _parse_window_segment(numeric_segments[0])
         lower_bound, upper_bound = (
             float(numeric_segments[1]),
             float(numeric_segments[2]),
@@ -2052,18 +2165,7 @@ def parse_strategy_name(
         return base_name, window_size, (lower_bound, upper_bound), None, None
 
     if segment_count == 5:
-        window_value = numeric_segments[0]
-        if not window_value.isdigit():
-            raise ValueError(
-                "Malformed strategy name: expected window size as first numeric segment "
-                f"in '{strategy_name}'"
-            )
-        window_size = int(window_value)
-        if window_size <= 0:
-            raise ValueError(
-                "Window size must be a positive integer in strategy name: "
-                f"{strategy_name}"
-            )
+        window_size = _parse_window_segment(numeric_segments[0])
         lower_bound, upper_bound = (
             float(numeric_segments[1]),
             float(numeric_segments[2]),
@@ -2382,6 +2484,12 @@ def _generate_strategy_evaluation_artifacts(
                 ):
                     kwargs["near_range"] = near_range
                     kwargs["above_range"] = above_range
+            timeframe = determine_strategy_timeframe(buy_name)
+            if (
+                timeframe != "daily"
+                and base_name in _TIMEFRAME_AWARE_STRATEGIES
+            ):
+                kwargs["timeframe"] = timeframe
             buy_function(price_data_frame, **kwargs)
             rename_signal_columns(price_data_frame, base_name, buy_name)
             entry_column_name = f"{buy_name}_entry_signal"
@@ -2437,6 +2545,12 @@ def _generate_strategy_evaluation_artifacts(
                 ):
                     kwargs["near_range"] = near_range
                     kwargs["above_range"] = above_range
+            timeframe = determine_strategy_timeframe(sell_name)
+            if (
+                timeframe != "daily"
+                and base_name in _TIMEFRAME_AWARE_STRATEGIES
+            ):
+                kwargs["timeframe"] = timeframe
             sell_function(sell_price_data_frame, **kwargs)
             rename_signal_columns(sell_price_data_frame, base_name, sell_name)
             entry_column_name = f"{sell_name}_entry_signal"

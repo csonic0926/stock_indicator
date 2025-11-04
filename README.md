@@ -184,7 +184,8 @@ moving average requirement and additionally filters signals using chip
 concentration metrics. Strategy names follow the pattern
 `ema_sma_cross_testing_<window>_<lower>_<upper>_<near_min>,<near_max>_<above_min>,<above_max>`, where:
 
-* `<window>` — EMA and SMA window size (default `40`).
+* `<window>` — EMA and SMA window size (default `40`). Append `w` (for example,
+  `4w`) to evaluate the strategy using weekly candles rather than daily bars.
 * `<lower>` and `<upper>` — inclusive bounds for the simple moving average angle in degrees (defaults `-16.7` and `65`).
 * `<near_min>` and `<near_max>` — inclusive bounds for the fraction of volume near the current price (default `0.0`–`0.12`).
 * `<above_min>` and `<above_max>` — inclusive bounds for the fraction of volume above the current price (default `0.0`–`0.10`).
