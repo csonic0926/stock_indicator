@@ -160,7 +160,8 @@ size and slope range suffixes. In addition to the EMA/SMA cross and slope
 filters, it recalculates chip concentration metrics. Strategy names follow
 `ema_sma_cross_testing_<window>_<lower>_<upper>_<near_min>,<near_max>_<above_min>,<above_max>`:
 
-* `<window>` — EMA and SMA window size (default `40`).
+* `<window>` — EMA and SMA window size (default `40`). Append `w` (e.g., `4w`)
+  to evaluate the strategy on weekly candles instead of daily bars.
 * `<lower>` and `<upper>` — inclusive simple moving average angle bounds in degrees (defaults `-16.7` and `65`).
 * `<near_min>` and `<near_max>` — inclusive bounds for the near-price volume ratio (default `0.0`–`0.12`).
 * `<above_min>` and `<above_max>` — inclusive bounds for the above-price volume ratio (default `0.0`–`0.10`).

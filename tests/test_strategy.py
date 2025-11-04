@@ -7,6 +7,7 @@ import datetime
 from pathlib import Path
 from typing import Iterable
 
+import numpy
 import pandas
 import pytest
 
@@ -21,6 +22,7 @@ from stock_indicator.strategy import (
     evaluate_kalman_channel_strategy,
     evaluate_combined_strategy,
     parse_strategy_name,
+    determine_strategy_timeframe,
 )
 
 
@@ -2068,6 +2070,46 @@ def test_attach_ema_sma_cross_testing_respects_range_bounds(
     ]
 
 
+def test_attach_ema_sma_cross_testing_supports_weekly_timeframe() -> None:
+    """Weekly timeframe should populate columns only on week-ending rows."""
+
+    date_index = pandas.bdate_range("2020-01-06", periods=350)
+    open_values = numpy.linspace(50.0, 150.0, len(date_index))
+    price_data_frame = pandas.DataFrame(
+        {
+            "open": open_values,
+            "high": open_values + 1.0,
+            "low": open_values - 1.0,
+            "close": open_values + 0.5,
+            "volume": numpy.linspace(1_000_000.0, 2_000_000.0, len(date_index)),
+        },
+        index=date_index,
+    )
+
+    strategy.attach_ema_sma_cross_testing_signals(
+        price_data_frame,
+        window_size=4,
+        angle_range=(-90.0, 90.0),
+        near_range=(-1.0, 1.0),
+        above_range=(-1.0, 1.0),
+        timeframe="weekly",
+    )
+
+    non_friday_mask = price_data_frame.index.weekday != 4
+    assert price_data_frame.loc[non_friday_mask, "near_price_volume_ratio"].isna().all()
+
+    friday_ratios = price_data_frame.loc[
+        price_data_frame.index.weekday == 4, "near_price_volume_ratio"
+    ].dropna()
+    assert not friday_ratios.empty
+
+    assert (
+        price_data_frame.loc[non_friday_mask, "ema_sma_cross_testing_entry_signal"]
+        .eq(False)
+        .all()
+    )
+
+
 def test_generate_strategy_artifacts_use_run_frame_index_for_signal_date(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -2488,6 +2530,36 @@ def test_parse_strategy_name_with_near_and_above_thresholds() -> None:
     assert angle_range == (-26.6, 26.6)
     assert near_range == pytest.approx((0.11, 0.12))
     assert above_range == pytest.approx((0.09, 0.1))
+
+
+def test_parse_strategy_name_with_weekly_window() -> None:
+    """Weekly suffix ``w`` should be accepted for the window segment."""
+
+    (
+        base_name,
+        window_size,
+        angle_range,
+        near_range,
+        above_range,
+    ) = parse_strategy_name(
+        "ema_sma_cross_testing_4w_-10.0_10.0_-0.5,0.5_-0.5,0.5"
+    )
+
+    assert base_name == "ema_sma_cross_testing"
+    assert window_size == 4
+    assert angle_range == (-10.0, 10.0)
+    assert near_range == (-0.5, 0.5)
+    assert above_range == (-0.5, 0.5)
+
+
+def test_determine_strategy_timeframe_identifies_weekly() -> None:
+    """``determine_strategy_timeframe`` should detect weekly window suffixes."""
+
+    daily_name = "ema_sma_cross_testing_4_-10.0_10.0"
+    weekly_name = "ema_sma_cross_testing_4w_-10.0_10.0"
+
+    assert determine_strategy_timeframe(daily_name) == "daily"
+    assert determine_strategy_timeframe(weekly_name) == "weekly"
 
 
 def test_parse_strategy_name_without_suffix() -> None:
