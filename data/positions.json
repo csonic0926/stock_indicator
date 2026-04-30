@@ -1,3 +1,16 @@
 {
-  "buy3": []
+  "buy3": [
+    {
+      "symbol": "ABBV",
+      "entry_date": "2026-04-24"
+    },
+    {
+      "symbol": "LLY",
+      "entry_date": "2026-04-28"
+    },
+    {
+      "symbol": "MRK",
+      "entry_date": "2026-04-28"
+    }
+  ]
 }

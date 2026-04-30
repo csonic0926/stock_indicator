@@ -1539,6 +1539,9 @@ class StockShell(cmd.Cmd):
                     min_hold_tp=int(raw_adaptive.get("min_hold_tp", 0)),
                     delayed_rolling_update=bool(raw_adaptive.get("delayed_rolling_update", False)),
                     breakeven_at_mp=bool(raw_adaptive.get("breakeven_at_mp", False)),
+                    sector_rolling=bool(raw_adaptive.get("sector_rolling", False)),
+                    sector_sl_sigma=float(raw_adaptive.get("sector_sl_sigma", 0.5)),
+                    sector_min_rr=float(raw_adaptive.get("sector_min_rr", 2.0)),
                 )
             else:
                 # Boolean true -> use defaults.
@@ -1548,10 +1551,15 @@ class StockShell(cmd.Cmd):
                 if adaptive_tp_sl_config.fixed_sl is not None
                 else f"target_r={adaptive_tp_sl_config.target_r}"
             )
+            sector_desc = (
+                f" sector_rolling=True sector_sl_sigma={adaptive_tp_sl_config.sector_sl_sigma}"
+                if adaptive_tp_sl_config.sector_rolling
+                else ""
+            )
             self.stdout.write(
                 f"Adaptive TP/SL: window={adaptive_tp_sl_config.window} "
                 f"sigma={adaptive_tp_sl_config.sigma_multiplier} "
-                f"{sl_desc}\n"
+                f"{sl_desc}{sector_desc}\n"
             )
 
         try:

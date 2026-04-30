@@ -223,6 +223,7 @@ def main() -> None:
             order_type=OrderType.NORMAL,
             trd_env=trd_env,
             time_in_force=TimeInForce.GTC,
+            fill_outside_rth=True,
         )
         tp_result = {
             "symbol": symbol,
@@ -291,6 +292,7 @@ def main() -> None:
             trd_env=trd_env,
             aux_price=sl_price,
             time_in_force=TimeInForce.GTC,
+            fill_outside_rth=True,
         )
         sl_result = {
             "symbol": symbol,

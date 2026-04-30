@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from collections import deque
+import bisect
+from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace
 import heapq
 import logging
@@ -571,6 +572,13 @@ class AdaptiveTPSLConfig:
 
     TP = rolling_MP + sigma_multiplier * rolling_σ_profit
     SL = TP / target_r (capped by fixed_sl when set)
+
+    When ``sector_rolling`` is True, TP and SL are computed per FF12 sector
+    using ALL raw trades in the universe (not just accepted trades), so each
+    sector's rolling window fills quickly.  SL in sector mode uses:
+        SL = min(ML + sector_sl_sigma * σ_ML, TP)
+    guaranteeing R:R >= 1.0.  The global rolling deque is used as fallback
+    when a sector has fewer than ``min_samples`` closed trades.
     """
 
     window: int = 20
@@ -595,6 +603,12 @@ class AdaptiveTPSLConfig:
     # When True, SL is tightened to break-even (entry price) once unrealized
     # profit reaches the rolling mean profit (MP).
     breakeven_at_mp: bool = False
+    # When True, TP/SL are computed per FF12 sector using all raw trades.
+    sector_rolling: bool = False
+    # Sigma multiplier for sector SL: SL = min(ML + sector_sl_sigma * σ_ML, TP/sector_min_rr).
+    sector_sl_sigma: float = 0.5
+    # Minimum R:R ratio for sector mode: SL <= TP / sector_min_rr.
+    sector_min_rr: float = 2.0
 
 
 @dataclass
@@ -875,6 +889,109 @@ def run_complex_simulation(
         key=lambda event: (event[0], event[1], event[2], event[3], event[4])
     )
 
+    # --- Pre-computed sector rolling lookup (for sector_rolling mode) ---
+    # Maps ff12 sector -> sorted list of (exit_date, raw_pct) for ALL raw
+    # trades in the universe.  A global list is also built for fallback.
+    _sector_raw_trades: Dict[int, list[tuple[pandas.Timestamp, float]]] = {}
+    _global_raw_trades: list[tuple[pandas.Timestamp, float]] = []
+    _sector_symbol_ff12: Dict[str, int] = {}
+
+    if adaptive_tp_sl is not None and adaptive_tp_sl.sector_rolling:
+        # Load sector map from symbols_with_sector.csv.
+        sector_csv_path = data_directory.parent / "symbols_with_sector.csv"
+        if sector_csv_path.exists():
+            _sector_df = pandas.read_csv(sector_csv_path)
+            if "ticker" in _sector_df.columns and "ff12" in _sector_df.columns:
+                _sector_symbol_ff12 = dict(
+                    zip(
+                        _sector_df["ticker"].str.upper(),
+                        _sector_df["ff12"].fillna(12).astype(int),
+                    )
+                )
+        if not _sector_symbol_ff12:
+            LOGGER.warning(
+                "sector_rolling enabled but symbols_with_sector.csv not found "
+                "or empty at %s — falling back to global rolling",
+                sector_csv_path,
+            )
+
+        # Collect ALL raw trades from every bucket's artifacts.
+        _sector_raw_trades_unsorted: Dict[
+            int, list[tuple[pandas.Timestamp, float]]
+        ] = defaultdict(list)
+        _global_raw_trades_unsorted: list[tuple[pandas.Timestamp, float]] = []
+        for label, artifacts in artifacts_by_set.items():
+            for trade in artifacts.trades:
+                if trade.entry_price <= 0:
+                    continue
+                raw_pct = (
+                    (trade.exit_price - trade.entry_price) / trade.entry_price
+                )
+                sym = artifacts.trade_symbol_lookup.get(trade, "")
+                ff12 = _sector_symbol_ff12.get(sym.upper(), 12)
+                _sector_raw_trades_unsorted[ff12].append(
+                    (trade.exit_date, raw_pct)
+                )
+                _global_raw_trades_unsorted.append(
+                    (trade.exit_date, raw_pct)
+                )
+        # Sort by exit_date for binary search.
+        for ff12 in _sector_raw_trades_unsorted:
+            _sector_raw_trades[ff12] = sorted(
+                _sector_raw_trades_unsorted[ff12], key=lambda x: x[0]
+            )
+        _global_raw_trades = sorted(
+            _global_raw_trades_unsorted, key=lambda x: x[0]
+        )
+
+    def _compute_sector_tp_sl(
+        entry_date: pandas.Timestamp,
+        ff12: int,
+        config: AdaptiveTPSLConfig,
+    ) -> tuple[float, float]:
+        """Compute sector-specific TP/SL using pre-computed raw trades.
+
+        Only uses trades with exit_date strictly before entry_date.
+        Falls back to global pool if sector has < min_samples trades.
+        """
+        # Find trades with exit_date < entry_date via bisect.
+        def _rolling_from_pool(
+            pool: list[tuple[pandas.Timestamp, float]],
+        ) -> list[float]:
+            idx = bisect.bisect_left(pool, (entry_date,))
+            start = max(0, idx - config.window)
+            return [pct for _, pct in pool[start:idx]]
+
+        sector_pool = _sector_raw_trades.get(ff12, [])
+        recent = _rolling_from_pool(sector_pool)
+        if len(recent) < config.min_samples:
+            recent = _rolling_from_pool(_global_raw_trades)
+
+        tp_pct = config.min_tp
+        sl_pct = config.min_sl
+
+        if len(recent) >= config.min_samples:
+            # TP from positive trades.
+            profits = [p for p in recent if p > 0]
+            if len(profits) >= 3:
+                mp = sum(profits) / len(profits)
+                sp = stdev(profits) if len(profits) >= 2 else 0.0
+                tp_pct = max(config.min_tp, mp + config.sigma_multiplier * sp)
+
+            # SL from negative trades: min(ML + σ_ML * sector_sl_sigma, TP).
+            losses = [abs(p) for p in recent if p <= 0]
+            if len(losses) >= 3:
+                ml = sum(losses) / len(losses)
+                sl_std = stdev(losses) if len(losses) >= 2 else 0.0
+                sl_pct = max(
+                    config.min_sl,
+                    ml + config.sector_sl_sigma * sl_std,
+                )
+                # Cap SL at TP/sector_min_rr to guarantee minimum R:R.
+                sl_pct = min(sl_pct, tp_pct / config.sector_min_rr)
+
+        return tp_pct, sl_pct
+
     # Adaptive TP/SL state: rolling window of recently closed trades.
     adaptive_closed_profits: deque[float] = deque()
     # Map from original trade id -> adjusted trade for adaptive mode.
@@ -1017,28 +1134,44 @@ def run_complex_simulation(
                 tp_pct = adaptive_tp_sl.min_tp
                 sl_pct = adaptive_tp_sl.min_sl
                 rolling_mp = 0.0
-                if len(adaptive_closed_profits) >= adaptive_tp_sl.min_samples:
-                    profits = [
-                        p for p in adaptive_closed_profits if p > 0
-                    ]
-                    if len(profits) >= 3:
-                        mp = sum(profits) / len(profits)
-                        rolling_mp = mp
-                        if len(profits) >= 2:
-                            sp = stdev(profits)
-                        else:
-                            sp = 0.0
-                        tp_pct = max(
-                            adaptive_tp_sl.min_tp,
-                            mp + adaptive_tp_sl.sigma_multiplier * sp,
-                        )
-                        sl_pct = max(
-                            adaptive_tp_sl.min_sl,
-                            tp_pct / adaptive_tp_sl.target_r,
-                        )
-                # Apply fixed_sl as ceiling (cap): SL never exceeds this.
-                if adaptive_tp_sl.fixed_sl is not None:
-                    sl_pct = min(sl_pct, adaptive_tp_sl.fixed_sl)
+
+                if (
+                    adaptive_tp_sl.sector_rolling
+                    and _sector_symbol_ff12
+                ):
+                    # Sector-specific TP/SL from pre-computed raw trades.
+                    _trade_sym = artifacts_by_set[label].trade_symbol_lookup.get(
+                        trade, ""
+                    )
+                    _trade_ff12 = _sector_symbol_ff12.get(
+                        _trade_sym.upper(), 12
+                    )
+                    tp_pct, sl_pct = _compute_sector_tp_sl(
+                        event_date, _trade_ff12, adaptive_tp_sl,
+                    )
+                else:
+                    if len(adaptive_closed_profits) >= adaptive_tp_sl.min_samples:
+                        profits = [
+                            p for p in adaptive_closed_profits if p > 0
+                        ]
+                        if len(profits) >= 3:
+                            mp = sum(profits) / len(profits)
+                            rolling_mp = mp
+                            if len(profits) >= 2:
+                                sp = stdev(profits)
+                            else:
+                                sp = 0.0
+                            tp_pct = max(
+                                adaptive_tp_sl.min_tp,
+                                mp + adaptive_tp_sl.sigma_multiplier * sp,
+                            )
+                            sl_pct = max(
+                                adaptive_tp_sl.min_sl,
+                                tp_pct / adaptive_tp_sl.target_r,
+                            )
+                    # Apply fixed_sl as ceiling (cap): SL never exceeds this.
+                    if adaptive_tp_sl.fixed_sl is not None:
+                        sl_pct = min(sl_pct, adaptive_tp_sl.fixed_sl)
 
                 # Break-even trigger: rolling MP (before sigma adjustment).
                 be_trigger = rolling_mp if adaptive_tp_sl.breakeven_at_mp else 0.0

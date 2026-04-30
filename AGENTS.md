@@ -103,6 +103,18 @@ If this project has **user-facing text** (CLI, GUI, web responses):
 
 ---
 
+## Common Commands
+
+* **Start dashboard server** (after reboot or when needed):
+
+  ```bash
+  source venv/bin/activate && uvicorn stock_indicator.dashboard:app --host 0.0.0.0 --port 8000 --app-dir src &
+  ```
+
+  Verify: `curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/` should return `200`.
+
+---
+
 ## Agent Behavior
 
 * Always use complete, meaningful English names for **code** identifiers.

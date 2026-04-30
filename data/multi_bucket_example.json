@@ -13,13 +13,16 @@
   "adaptive_tp_sl": {
     "window": 20,
     "sigma": 0.5,
-    "fixed_sl": 0.03
+    "fixed_sl": 0.03,
+    "override_min_hold_tp_only": true,
+    "min_hold_tp": 1,
+    "delayed_rolling_update": true
   },
   "buckets": [
     {
-      "label": "buy3_adaptive_fixedsl_Top200Pick5_6p",
+      "label": "buy3_production",
       "strategy_id": "buy3",
-      "dollar_volume_filter": "dollar_volume>0.01%,Top200,Pick5",
+      "dollar_volume_filter": "dollar_volume>0.05%,Top200,Pick5",
       "stop_loss": 1.0,
       "take_profit": 0.0,
       "priority": 1,
