@@ -354,6 +354,32 @@ def api_execute_orders(req: ExecuteRequest):
             continue
 
         try:
+            # For SELL orders, cancel any existing pending sell orders
+            # (TP/SL) first — Futu locks can_sell_qty when sell orders exist.
+            if order["side"] == "SELL":
+                ret_ord, ord_data = trd_ctx.order_list_query(trd_env=trd_env)
+                if ret_ord == 0 and len(ord_data) > 0:
+                    for _, orow in ord_data.iterrows():
+                        if (
+                            str(orow.get("code", "")) == code
+                            and str(orow.get("trd_side", "")) == "SELL"
+                            and str(orow.get("order_status", "")) not in (
+                                "CANCELLED_ALL", "FILLED_ALL", "FAILED", "DELETED",
+                            )
+                        ):
+                            cancel_id = str(orow.get("order_id", ""))
+                            trd_ctx.modify_order(
+                                modify_order_op=2,  # CANCEL
+                                order_id=cancel_id,
+                                qty=0,
+                                price=0,
+                                trd_env=trd_env,
+                            )
+                            LOGGER.info(
+                                "Cancelled pending sell %s for %s",
+                                cancel_id, symbol,
+                            )
+
             # Market order for entry/exit
             ret, data = trd_ctx.place_order(
                 price=0.0,
