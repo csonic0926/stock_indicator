@@ -337,7 +337,7 @@ class ExecuteRequest(BaseModel):
 @app.post("/api/execute_orders")
 def api_execute_orders(req: ExecuteRequest):
     """Execute confirmed orders via Futu API."""
-    from futu import OrderType, TrdSide
+    from futu import ModifyOrderOp, OrderType, TrdSide
 
     trd_ctx = _get_futu_trd_ctx()
     trd_env = _get_trd_env()
@@ -368,17 +368,19 @@ def api_execute_orders(req: ExecuteRequest):
                             )
                         ):
                             cancel_id = str(orow.get("order_id", ""))
-                            trd_ctx.modify_order(
-                                modify_order_op=2,  # CANCEL
+                            ret_cancel, _ = trd_ctx.modify_order(
+                                modify_order_op=ModifyOrderOp.CANCEL,
                                 order_id=cancel_id,
                                 qty=0,
                                 price=0,
                                 trd_env=trd_env,
                             )
                             LOGGER.info(
-                                "Cancelled pending sell %s for %s",
-                                cancel_id, symbol,
+                                "Cancelled pending sell %s for %s (ret=%s)",
+                                cancel_id, symbol, ret_cancel,
                             )
+                import time
+                time.sleep(1)  # wait for Futu to release can_sell_qty
 
             # Market order for entry/exit
             ret, data = trd_ctx.place_order(
