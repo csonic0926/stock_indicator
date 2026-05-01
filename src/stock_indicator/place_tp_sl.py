@@ -1,7 +1,7 @@
-"""Place TP/SL orders based on Futu live positions.
+"""System B: Place TP/SL orders based on Futu live positions.
 
 Source of truth: Futu API (positions, orders, history).
-Only TP/SL percentages come from local adaptive log.
+TP/SL percentages come from adaptive_state.json (System A output).
 
 Logic:
 1. Query Futu positions → code, qty, cost_price
@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -33,21 +32,22 @@ TRADING_ENV = "REAL"
 MIN_HOLD_BARS = 5
 
 
-def _get_tp_sl_from_log() -> tuple[float | None, float | None]:
-    """Read TP/SL percentages from the latest daily log."""
-    log_files = sorted(LOGS_DIRECTORY.glob("*.log"), reverse=True)
-    for log_path in log_files:
-        try:
-            date.fromisoformat(log_path.stem)
-        except ValueError:
-            continue
-        text = log_path.read_text(encoding="utf-8")
-        tp_m = re.search(r"TP:\s*([\d.]+)%", text)
-        sl_m = re.search(r"SL:\s*([\d.]+)%", text)
-        tp = float(tp_m.group(1)) / 100 if tp_m else None
-        sl = float(sl_m.group(1)) / 100 if sl_m else None
+DATA_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "data"
+
+
+def _get_tp_sl_from_adaptive_state() -> tuple[float | None, float | None]:
+    """Read TP/SL percentages from adaptive_state.json (System A output)."""
+    state_path = DATA_DIRECTORY / "adaptive_state.json"
+    if not state_path.exists():
+        return None, None
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        tp = state.get("tp_pct")
+        sl = state.get("sl_pct")
         if tp is not None:
-            return tp, sl
+            return float(tp), float(sl) if sl is not None else None
+    except (json.JSONDecodeError, OSError, TypeError):
+        pass
     return None, None
 
 
@@ -86,8 +86,8 @@ def main() -> None:
         format="%(asctime)s %(message)s",
     )
 
-    # --- Adaptive TP/SL from local log (only non-Futu data source) ---
-    tp_pct, sl_pct = _get_tp_sl_from_log()
+    # --- Adaptive TP/SL from adaptive_state.json (System A output) ---
+    tp_pct, sl_pct = _get_tp_sl_from_adaptive_state()
     if tp_pct is None:
         LOGGER.error("No TP/SL found in logs")
         return
@@ -223,7 +223,6 @@ def main() -> None:
             order_type=OrderType.NORMAL,
             trd_env=trd_env,
             time_in_force=TimeInForce.GTC,
-            fill_outside_rth=True,
         )
         tp_result = {
             "symbol": symbol,
@@ -292,7 +291,6 @@ def main() -> None:
             trd_env=trd_env,
             aux_price=sl_price,
             time_in_force=TimeInForce.GTC,
-            fill_outside_rth=True,
         )
         sl_result = {
             "symbol": symbol,

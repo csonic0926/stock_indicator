@@ -81,9 +81,9 @@ class Trade:
     max_favorable_excursion_date: pandas.Timestamp | None = None
     max_adverse_excursion_date: pandas.Timestamp | None = None
     # Per-bar excursion path for adaptive TP/SL replay.
-    # Each tuple: (date, bar_high_pct_from_entry, bar_low_pct_from_entry).
+    # Each tuple: (date, bar_high_pct, bar_low_pct, bar_open_pct).
     # Populated only when running raw mode (no TP/SL).
-    bar_excursions: list[tuple[pandas.Timestamp, float, float]] | None = None
+    bar_excursions: list[tuple[pandas.Timestamp, float, float, float]] | None = None
 
 
 @dataclass
@@ -304,8 +304,13 @@ def simulate_trades(
                 if record_bar_excursions:
                     bar_h = high_excursion_pct if "high" in data.columns and not math.isnan(bar_high_value) else 0.0
                     bar_l = low_excursion_pct if "low" in data.columns and not math.isnan(bar_low_value) else 0.0
+                    bar_o = 0.0
+                    if "open" in data.columns:
+                        bar_open_value = float(current_row["open"])
+                        if not math.isnan(bar_open_value) and entry_price > 0:
+                            bar_o = (bar_open_value - entry_price) / entry_price
                     current_bar_excursions.append(
-                        (data.index[row_index], bar_h, bar_l)
+                        (data.index[row_index], bar_h, bar_l, bar_o)
                     )
             # Update trailing high for trailing stop
             if 0 < trailing_stop_percentage < 1 and "high" in data.columns:

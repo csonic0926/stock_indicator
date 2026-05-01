@@ -3211,10 +3211,12 @@ class StockShell(cmd.Cmd):
             key=lambda name: filtered_symbol_order.get(name, len(filtered_symbol_order)),
         )
 
-        # Position tracking: load positions.json, check exits for held
-        # symbols (including those outside the current filter), update state.
+        # Signal trade tracking: load signal_trades.json to know which symbols
+        # have active entry signals.  When a signal exit fires, the trade is
+        # recorded into adaptive_state.json for rolling TP/SL computation.
+        # This is NOT live portfolio state — actual positions come from Futu API.
         # Format: {"strategy_id": [{"symbol": "X", "entry_date": "YYYY-MM-DD"}, ...]}
-        positions_path = DATA_DIRECTORY / "positions.json"
+        positions_path = DATA_DIRECTORY / "signal_trades.json"
         all_positions: Dict[str, List[Dict[str, str]]] = {}
         if positions_path.exists():
             try:
@@ -3314,14 +3316,16 @@ class StockShell(cmd.Cmd):
                 entry_rec = next(
                     (e for e in held_entries if e["symbol"] == exit_sym), None
                 )
-                if entry_rec and entry_rec.get("entry_price"):
-                    # Record closed trade for manual exit_price update later.
+                if entry_rec:
+                    # Record closed trade. entry_price may be None if
+                    # compute_adaptive_tp_sl hasn't run yet; it will be
+                    # auto-filled on the next compute_adaptive_tp_sl call.
                     closed_list.append({
                         "symbol": exit_sym,
                         "entry_date": entry_rec.get("entry_date", ""),
                         "exit_date": effective_date_for_exit,
-                        "entry_price": entry_rec["entry_price"],
-                        "exit_price": None,  # fill manually or via API
+                        "entry_price": entry_rec.get("entry_price"),
+                        "exit_price": None,
                         "raw_pct": None,
                     })
             adaptive_state["raw_trade_profits"] = raw_profits[-20:]
@@ -3347,7 +3351,7 @@ class StockShell(cmd.Cmd):
 
         expected_symbols = [e["symbol"] for e in expected_entries]
 
-        # Save to positions.json
+        # Save to signal_trades.json
         if strategy_id:
             all_positions[strategy_id] = expected_entries
             try:
@@ -3355,7 +3359,7 @@ class StockShell(cmd.Cmd):
                     json.dump(all_positions, fp, indent=2)
             except OSError as write_error:
                 self.stdout.write(
-                    f"warning: failed to write positions.json: {write_error}\n"
+                    f"warning: failed to write signal_trades.json: {write_error}\n"
                 )
 
         # Action instructions
@@ -3395,16 +3399,16 @@ class StockShell(cmd.Cmd):
 
     def do_compute_adaptive_tp_sl(self, argument_line: str) -> None:  # noqa: D401
         """compute_adaptive_tp_sl
-        Compute current adaptive TP/SL levels from rolling raw trade stats.
+        System A: compute adaptive TP/SL from rolling raw trade stats.
 
-        Reads data/adaptive_state.json for the rolling window of raw trade
-        profits.  Outputs current TP/SL percentages and, for each open
-        position in positions.json, computes target prices.
+        Reads data/adaptive_state.json for the rolling window of raw signal
+        trade profits (open-to-open, no TP/SL adjustment).  Computes current
+        TP/SL percentages and writes them back to adaptive_state.json for
+        System B (place_tp_sl.py) to read.
 
         Config: window=20, sigma=0.5, target_r=2.0, fixed_sl_cap=0.03
         """
         state_path = DATA_DIRECTORY / "adaptive_state.json"
-        positions_path = DATA_DIRECTORY / "positions.json"
 
         # Adaptive parameters (matching production config)
         window = 20
@@ -3491,20 +3495,6 @@ class StockShell(cmd.Cmd):
             updated_closed.append(ct)
         # Trim rolling window
         raw_profits = raw_profits[-window:]
-        if state_changed:
-            try:
-                with state_path.open("w", encoding="utf-8") as fp:
-                    json.dump(
-                        {
-                            "raw_trade_profits": [round(p, 8) for p in raw_profits],
-                            "closed_trades": updated_closed,
-                        },
-                        fp,
-                        indent=2,
-                    )
-            except OSError:
-                pass
-
         # Compute current TP/SL
         tp_pct = min_tp
         sl_pct = min_sl
@@ -3517,6 +3507,22 @@ class StockShell(cmd.Cmd):
                 tp_pct = max(min_tp, mp + sigma_mult * sp)
                 sl_pct = max(min_sl, tp_pct / target_r)
                 sl_pct = min(sl_pct, fixed_sl_cap)
+
+        # Always write back: rolling history, closed trades, and TP/SL %.
+        try:
+            with state_path.open("w", encoding="utf-8") as fp:
+                json.dump(
+                    {
+                        "raw_trade_profits": [round(p, 8) for p in raw_profits],
+                        "closed_trades": updated_closed,
+                        "tp_pct": round(tp_pct, 6),
+                        "sl_pct": round(sl_pct, 6),
+                    },
+                    fp,
+                    indent=2,
+                )
+        except OSError:
+            pass
 
         self.stdout.write(
             f"\n--- Adaptive TP/SL (window={window}, "
@@ -3543,57 +3549,10 @@ class StockShell(cmd.Cmd):
                 f"samples, using defaults)\n"
             )
 
-        # Load positions and compute target prices
-        all_positions: Dict[str, list] = {}
-        if positions_path.exists():
-            try:
-                with positions_path.open("r", encoding="utf-8") as fp:
-                    all_positions = json.load(fp)
-            except (json.JSONDecodeError, OSError):
-                pass
-
-        has_positions = False
-        for strat_id, strat_positions in all_positions.items():
-            for pos in strat_positions:
-                if not isinstance(pos, dict):
-                    continue
-                symbol = pos.get("symbol", "?")
-                entry_price = pos.get("entry_price")
-                if entry_price is not None:
-                    has_positions = True
-                    entry_price = float(entry_price)
-                    tp_price = entry_price * (1 + tp_pct)
-                    sl_price = entry_price * (1 - sl_pct)
-                    self.stdout.write(
-                        f"  {symbol}: entry={entry_price:.2f} "
-                        f"TP={tp_price:.2f} (+{tp_pct:.2%}) "
-                        f"SL={sl_price:.2f} (-{sl_pct:.2%})\n"
-                    )
-                    # Store computed targets back into position
-                    pos["tp_pct"] = round(tp_pct, 6)
-                    pos["sl_pct"] = round(sl_pct, 6)
-                    pos["tp_price"] = round(tp_price, 4)
-                    pos["sl_price"] = round(sl_price, 4)
-
-        if not has_positions:
-            self.stdout.write(
-                "  (no open positions with entry_price)\n"
-            )
-
-        # Save updated positions with target prices
-        if has_positions:
-            try:
-                with positions_path.open("w", encoding="utf-8") as fp:
-                    json.dump(all_positions, fp, indent=2)
-            except OSError as write_error:
-                self.stdout.write(
-                    f"warning: failed to write positions.json: {write_error}\n"
-                )
-
     def do_show_positions(self, argument_line: str) -> None:  # noqa: D401
         """show_positions
-        Print combined concurrent positions from positions.json."""
-        positions_path = DATA_DIRECTORY / "positions.json"
+        Print active signal trades from signal_trades.json (not live portfolio)."""
+        positions_path = DATA_DIRECTORY / "signal_trades.json"
         all_positions: Dict[str, list] = {}
         if positions_path.exists():
             try:

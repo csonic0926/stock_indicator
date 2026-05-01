@@ -659,9 +659,13 @@ def _replay_trade_with_adaptive_tp_sl(
         else minimum_holding_bars
     )
     active_sl_pct = sl_pct
-    for bar_index, (bar_date, bar_high_pct, bar_low_pct) in enumerate(
-        trade.bar_excursions
-    ):
+    for bar_index, excursion in enumerate(trade.bar_excursions):
+        # Support both 3-tuple (legacy) and 4-tuple (with open_pct).
+        if len(excursion) == 4:
+            bar_date, bar_high_pct, bar_low_pct, bar_open_pct = excursion
+        else:
+            bar_date, bar_high_pct, bar_low_pct = excursion[:3]
+            bar_open_pct = 0.0
         holding = bar_index + 1
         # Upgrade SL to break-even once profit reaches trigger level
         if (
@@ -685,13 +689,15 @@ def _replay_trade_with_adaptive_tp_sl(
                 exit_reason="adaptive_stop_loss",
                 bar_excursions=trade.bar_excursions[: holding],
             )
-        # Check TP (may use different min_hold)
+        # Check TP (may use different min_hold).
+        # If open gaps above TP, limit order fills at open (price improvement).
         if (
             holding >= effective_min_hold_tp
             and tp_pct > 0
             and bar_high_pct >= tp_pct
         ):
-            adjusted_exit_price = trade.entry_price * (1 + tp_pct)
+            effective_tp_pct = max(tp_pct, bar_open_pct)
+            adjusted_exit_price = trade.entry_price * (1 + effective_tp_pct)
             adjusted_profit = adjusted_exit_price - trade.entry_price
             return replace(
                 trade,
@@ -1149,6 +1155,9 @@ def run_complex_simulation(
                     tp_pct, sl_pct = _compute_sector_tp_sl(
                         event_date, _trade_ff12, adaptive_tp_sl,
                     )
+                    # If fixed_sl is set, override sector SL with it.
+                    if adaptive_tp_sl.fixed_sl is not None:
+                        sl_pct = adaptive_tp_sl.fixed_sl
                 else:
                     if len(adaptive_closed_profits) >= adaptive_tp_sl.min_samples:
                         profits = [

@@ -94,15 +94,15 @@ def _get_log_dates() -> list[str]:
 
 @app.get("/api/state")
 def api_state():
-    """Current system state: positions, adaptive state, latest log."""
-    positions = _load_json(DATA_DIRECTORY / "positions.json")
+    """Current system state: signal trades, adaptive state, latest log."""
+    signal_trades = _load_json(DATA_DIRECTORY / "signal_trades.json")
     adaptive = _load_json(DATA_DIRECTORY / "adaptive_state.json")
     dates = _get_log_dates()
     latest_log = None
     if dates:
         latest_log = _parse_log(LOGS_DIRECTORY / f"{dates[0]}.log")
     return {
-        "positions": positions,
+        "signal_trades": signal_trades,
         "adaptive_state": adaptive,
         "latest_log": latest_log,
         "available_dates": dates[:30],
@@ -280,9 +280,14 @@ def api_preview_orders():
         return {"error": "No log files found"}
     log = _parse_log(LOGS_DIRECTORY / f"{dates[0]}.log")
 
-    # Read adaptive TP/SL
-    tp_pct = log.get("tp_pct")
-    sl_pct = log.get("sl_pct")
+    # Read adaptive TP/SL from adaptive_state.json (System A output)
+    adaptive = _load_json(DATA_DIRECTORY / "adaptive_state.json")
+    tp_pct = adaptive.get("tp_pct")
+    sl_pct = adaptive.get("sl_pct")
+    if tp_pct is not None:
+        tp_pct = tp_pct * 100  # match log format (percentage)
+    if sl_pct is not None:
+        sl_pct = sl_pct * 100
 
     orders = []
 
@@ -607,12 +612,14 @@ async function load() {
 function render(state, futu) {
   const log = state.latest_log || {};
   const adaptive = state.adaptive_state || {};
-  const positions = state.positions || {};
+  const positions = state.signal_trades || {};
 
-  // Adaptive stats
+  // Adaptive stats — from adaptive_state.json (System A), not log
   let html = '';
-  html += stat('TP', pct(log.tp_pct), 'positive');
-  html += stat('SL', pct(log.sl_pct), 'negative');
+  const a_tp = adaptive.tp_pct != null ? (adaptive.tp_pct * 100).toFixed(2) + '%' : '—';
+  const a_sl = adaptive.sl_pct != null ? (adaptive.sl_pct * 100).toFixed(2) + '%' : '—';
+  html += stat('TP', a_tp, 'positive');
+  html += stat('SL', a_sl, 'negative');
   if (log.rolling_mp != null) html += stat('Rolling MP', '+' + pct(log.rolling_mp) + ' (n=' + log.rolling_mp_n + ')', 'positive');
   if (log.rolling_ml != null) html += stat('Rolling ML', '-' + pct(log.rolling_ml) + ' (n=' + log.rolling_ml_n + ')', 'negative');
   html += stat('Window', '20 trades');
