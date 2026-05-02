@@ -22,7 +22,7 @@
     {
       "label": "buy3_production",
       "strategy_id": "buy3",
-      "dollar_volume_filter": "dollar_volume>0.05%,Top200,Pick5",
+      "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
       "stop_loss": 1.0,
       "take_profit": 0.0,
       "priority": 1,
