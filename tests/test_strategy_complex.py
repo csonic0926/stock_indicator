@@ -161,7 +161,11 @@ def test_run_complex_simulation_enforces_shared_cap(
         buy_name = kwargs.get("buy_strategy_name") or args[1]
         return artifact_map[str(buy_name)]
 
-    monkeypatch.setattr(strategy, "_generate_strategy_evaluation_artifacts", fake_generate)
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
     _stub_metrics_functions(monkeypatch)
 
     definitions = {
@@ -187,6 +191,198 @@ def test_run_complex_simulation_enforces_shared_cap(
     assert metrics.metrics_by_set["B"].total_trades == 0
     assert metrics.overall_metrics.total_trades == 2
     assert metrics.overall_metrics.maximum_concurrent_positions == 2
+
+
+def test_evict_oldest_keeps_evicted_exit_from_far_future_settlement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Far-future close events must not overwrite an already evicted trade."""
+
+    first_trade, first_details = _build_trade(
+        "2024-01-01",
+        "2024-01-12",
+        symbol="AAA",
+    )
+    first_trade = strategy.replace(
+        first_trade,
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-02"), 0.01, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-03"), 0.01, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-04"), 0.01, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-05"), 0.01, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-08"), 0.01, 0.00, 0.02),
+        ],
+    )
+    second_trade, second_details = _build_trade(
+        "2024-01-08",
+        "2024-01-12",
+        symbol="BBB",
+    )
+    second_trade = strategy.replace(
+        second_trade,
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-09"), 0.01, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-10"), 0.01, 0.00, 0.00),
+        ],
+    )
+
+    artifacts = _build_artifacts(
+        [
+            (first_trade, first_details),
+            (second_trade, second_details),
+        ],
+    )
+
+    def fake_generate(
+        *args: object,
+        **kwargs: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        return artifacts
+
+    monkeypatch.setattr(strategy, "_generate_strategy_evaluation_artifacts", fake_generate)
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=1,
+        minimum_holding_bars=5,
+        adaptive_tp_sl=strategy.AdaptiveTPSLConfig(
+            fixed_sl=0.03,
+            evict_oldest=True,
+        ),
+    )
+
+    close_details = [
+        detail
+        for detail_list in metrics.overall_metrics.trade_details_by_year.values()
+        for detail in detail_list
+        if detail.action == "close"
+    ]
+    first_close = next(
+        detail for detail in close_details if detail.symbol == "AAA"
+    )
+
+    assert first_close.date == pandas.Timestamp("2024-01-08")
+    assert first_close.exit_reason == "evicted"
+    assert metrics.overall_metrics.maximum_concurrent_positions == 1
+
+
+def test_evict_oldest_refreshes_same_symbol_signal_age_without_reentry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same-symbol signals refresh eviction age without adding a new position."""
+
+    first_signal_trade, first_signal_details = _build_trade(
+        "2024-01-01",
+        "2024-01-08",
+        entry_price=10.0,
+        exit_price=12.0,
+        profit=2.0,
+        symbol="AAA",
+    )
+    first_signal_trade = strategy.replace(
+        first_signal_trade,
+        exit_reason="reentry",
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-02"), 0.10, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-03"), 0.10, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-04"), 0.10, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-05"), 0.10, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-08"), 0.20, 0.10, 0.20),
+        ],
+    )
+    refreshed_signal_trade, refreshed_signal_details = _build_trade(
+        "2024-01-08",
+        "2024-01-12",
+        entry_price=12.0,
+        exit_price=14.0,
+        profit=2.0,
+        symbol="AAA",
+    )
+    refreshed_signal_trade = strategy.replace(
+        refreshed_signal_trade,
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-09"), 0.25, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-10"), 0.25, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-11"), 0.25, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-12"), 0.25, 0.00, 0.00),
+        ],
+    )
+    competing_trade, competing_details = _build_trade(
+        "2024-01-10",
+        "2024-01-12",
+        symbol="BBB",
+    )
+    competing_trade = strategy.replace(
+        competing_trade,
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-11"), 0.01, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-12"), 0.01, 0.00, 0.00),
+        ],
+    )
+
+    artifacts = _build_artifacts(
+        [
+            (first_signal_trade, first_signal_details),
+            (refreshed_signal_trade, refreshed_signal_details),
+            (competing_trade, competing_details),
+        ],
+    )
+
+    def fake_generate(
+        *args: object,
+        **kwargs: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        return artifacts
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=1,
+        minimum_holding_bars=5,
+        adaptive_tp_sl=strategy.AdaptiveTPSLConfig(
+            fixed_sl=0.03,
+            evict_oldest=True,
+        ),
+    )
+
+    close_details = [
+        detail
+        for detail_list in metrics.overall_metrics.trade_details_by_year.values()
+        for detail in detail_list
+        if detail.action == "close"
+    ]
+
+    assert [detail.symbol for detail in close_details] == ["AAA"]
+    assert close_details[0].date == pandas.Timestamp("2024-01-12")
+    assert close_details[0].exit_reason == "end_of_data"
+    assert close_details[0].max_favorable_excursion_pct == pytest.approx(0.5)
+    assert metrics.overall_metrics.total_trades == 1
+    assert metrics.overall_metrics.maximum_concurrent_positions == 1
 
 
 def test_run_complex_simulation_assigns_global_position_counts(

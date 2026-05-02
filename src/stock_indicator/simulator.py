@@ -118,6 +118,7 @@ def simulate_trades(
     pending_limit_entry: bool = False,
     pending_market_entry: bool = False,
     cancel_pending_rule: Callable[[pandas.Series], bool] | None = None,
+    reentry_on_signal: bool = False,
 ) -> SimulationResult:
     """Simulate trades using supplied entry and exit rules.
 
@@ -585,6 +586,48 @@ def simulate_trades(
                 sl_tp_reference_price = None
                 stop_loss_pending = False
                 take_profit_pending = False
+                current_mfe_pct = None
+                current_mae_pct = None
+                current_mfe_date = None
+                current_mae_date = None
+                current_bar_excursions = []
+                last_exit_index = row_index
+                continue
+            # Re-entry: if still in position and a new entry signal fires,
+            # close current trade at this bar's open and open a fresh trade.
+            if (
+                reentry_on_signal
+                and not is_last_row
+                and entry_rule(current_row)
+            ):
+                exit_price = float(current_row[price_column_name])
+                profit_value = exit_price - entry_price
+                holding_period_value = row_index - entry_row_index
+                trades.append(
+                    Trade(
+                        entry_date=data.index[entry_row_index],
+                        exit_date=data.index[row_index],
+                        entry_price=entry_price,
+                        exit_price=exit_price,
+                        profit=profit_value,
+                        holding_period=holding_period_value,
+                        exit_reason="reentry",
+                        signal_bar_open=sl_tp_reference_price,
+                        max_favorable_excursion_pct=current_mfe_pct,
+                        max_adverse_excursion_pct=current_mae_pct,
+                        max_favorable_excursion_date=current_mfe_date,
+                        max_adverse_excursion_date=current_mae_date,
+                        bar_excursions=current_bar_excursions if record_bar_excursions else None,
+                    )
+                )
+                # Immediately open new position on same bar.
+                entry_row = current_row
+                entry_row_index = row_index
+                sl_tp_reference_price = None
+                stop_loss_pending = False
+                take_profit_pending = False
+                trailing_stop_pending = False
+                trailing_high_price = 0.0
                 current_mfe_pct = None
                 current_mae_pct = None
                 current_mfe_date = None

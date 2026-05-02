@@ -503,6 +503,9 @@ class TradeDetail:
     max_adverse_excursion_pct: float | None = None
     max_favorable_excursion_date: pandas.Timestamp | None = None
     max_adverse_excursion_date: pandas.Timestamp | None = None
+    # Adaptive TP/SL percentages applied to this trade (exit detail only).
+    adaptive_tp_pct: float | None = None
+    adaptive_sl_pct: float | None = None
 
 
 @dataclass
@@ -609,6 +612,13 @@ class AdaptiveTPSLConfig:
     sector_sl_sigma: float = 0.5
     # Minimum R:R ratio for sector mode: SL <= TP / sector_min_rr.
     sector_min_rr: float = 2.0
+    # Max calendar days to look back for sector rolling trades.
+    # 0 = use count-based window (original behaviour).
+    sector_lookback_days: int = 0
+    # When True, no TP or signal exit. New entry signals evict the oldest
+    # open position (past min_hold) to free a slot. Exit price = eviction
+    # day open of the evicted symbol.
+    evict_oldest: bool = False
 
 
 @dataclass
@@ -638,6 +648,8 @@ def _replay_trade_with_adaptive_tp_sl(
     minimum_holding_bars: int = 0,
     minimum_holding_bars_tp: int | None = None,
     breakeven_trigger_pct: float = 0.0,
+    tp_pct_late: float | None = None,
+    sl_only: bool = False,
 ) -> Trade:
     """Replay a raw trade using adaptive TP/SL levels.
 
@@ -651,6 +663,11 @@ def _replay_trade_with_adaptive_tp_sl(
 
     When *breakeven_trigger_pct* > 0, once the bar high reaches that level
     the SL is tightened to break-even (entry price).
+
+    When *tp_pct_late* is provided, TP switches from *tp_pct* to
+    *tp_pct_late* once holding >= *minimum_holding_bars*.  This allows
+    a wider (sector) TP during the catalyst window and a tighter
+    (uniform) TP after min_hold.
     """
     if trade.bar_excursions is None or not trade.bar_excursions:
         return trade
@@ -691,23 +708,47 @@ def _replay_trade_with_adaptive_tp_sl(
             )
         # Check TP (may use different min_hold).
         # If open gaps above TP, limit order fills at open (price improvement).
-        if (
-            holding >= effective_min_hold_tp
-            and tp_pct > 0
-            and bar_high_pct >= tp_pct
-        ):
-            effective_tp_pct = max(tp_pct, bar_open_pct)
-            adjusted_exit_price = trade.entry_price * (1 + effective_tp_pct)
-            adjusted_profit = adjusted_exit_price - trade.entry_price
-            return replace(
-                trade,
-                exit_date=bar_date,
-                exit_price=adjusted_exit_price,
-                profit=adjusted_profit,
-                holding_period=holding,
-                exit_reason="adaptive_take_profit",
-                bar_excursions=trade.bar_excursions[: holding],
-            )
+        # Switch to tp_pct_late after minimum_holding_bars if provided.
+        if not sl_only:
+            active_tp_pct = tp_pct
+            if tp_pct_late is not None and holding >= minimum_holding_bars:
+                active_tp_pct = tp_pct_late
+            if (
+                holding >= effective_min_hold_tp
+                and active_tp_pct > 0
+                and bar_high_pct >= active_tp_pct
+            ):
+                effective_tp_pct = max(active_tp_pct, bar_open_pct)
+                adjusted_exit_price = trade.entry_price * (1 + effective_tp_pct)
+                adjusted_profit = adjusted_exit_price - trade.entry_price
+                return replace(
+                    trade,
+                    exit_date=bar_date,
+                    exit_price=adjusted_exit_price,
+                    profit=adjusted_profit,
+                    holding_period=holding,
+                    exit_reason="adaptive_take_profit",
+                    bar_excursions=trade.bar_excursions[: holding],
+                )
+    if sl_only:
+        # No SL triggered — hold indefinitely until evicted by a new signal.
+        # Set exit_date far into the future so the trade stays open in the
+        # event loop. Eviction or true end-of-data will override.
+        far_future = pandas.Timestamp("2099-12-31")
+        last = trade.bar_excursions[-1]
+        # Use last bar's close (signal exit price) as fallback exit price;
+        # eviction will replace this with the eviction-day open.
+        adjusted_exit_price = trade.exit_price
+        adjusted_profit = adjusted_exit_price - trade.entry_price
+        return replace(
+            trade,
+            exit_date=far_future,
+            exit_price=adjusted_exit_price,
+            profit=adjusted_profit,
+            holding_period=len(trade.bar_excursions),
+            exit_reason="end_of_data",
+            bar_excursions=trade.bar_excursions,
+        )
     # Neither triggered — use signal exit as-is.
     return trade
 
@@ -820,6 +861,9 @@ def run_complex_simulation(
             price_score_max=definition.price_score_max,
             confirmation_sma_angle_range=confirmation_sma_angle_range,
             exit_alpha_factor=definition.exit_alpha_factor,
+            reentry_on_signal=(
+                adaptive_tp_sl.evict_oldest if adaptive_tp_sl is not None else False
+            ),
         )
 
     accepted_trades_by_set: Dict[str, List[Trade]] = {
@@ -965,6 +1009,13 @@ def run_complex_simulation(
             pool: list[tuple[pandas.Timestamp, float]],
         ) -> list[float]:
             idx = bisect.bisect_left(pool, (entry_date,))
+            if config.sector_lookback_days > 0:
+                cutoff = entry_date - pandas.Timedelta(
+                    days=config.sector_lookback_days,
+                )
+                start = bisect.bisect_left(pool, (cutoff,))
+                start = min(start, idx)
+                return [pct for _, pct in pool[start:idx]]
             start = max(0, idx - config.window)
             return [pct for _, pct in pool[start:idx]]
 
@@ -1004,6 +1055,11 @@ def run_complex_simulation(
     adaptive_trade_map: Dict[int, Trade] = {}
     # Reverse map: adjusted trade -> original trade (for detail pair lookups).
     adaptive_original_trade: Dict[int, Trade] = {}
+    # TP/SL pcts applied per adjusted trade id.
+    adaptive_tp_sl_applied: Dict[int, tuple[float, float]] = {}
+    # Far-future adaptive trades need a real end-of-data fallback that can move
+    # forward after same-symbol signal refreshes.
+    adaptive_fallback_exits: Dict[int, tuple[pandas.Timestamp, float, int]] = {}
     # Pending close events for adaptive mode (heap of
     # (close_date, counter, label, original_trade_id)).
     adaptive_close_heap: list[tuple[pandas.Timestamp, int, str, int]] = []
@@ -1012,8 +1068,14 @@ def run_complex_simulation(
     # here and only flushed into adaptive_closed_profits when an entry
     # event on a LATER date is processed.
     pending_rolling_updates: list[tuple[pandas.Timestamp, float]] = []
+    # For evict_oldest: track the latest active signal date for each open
+    # trade.  This is intentionally separate from Trade.entry_date: accounting
+    # and holding-period statistics keep the original entry date, while
+    # eviction/min-hold decisions use the most recent same-symbol signal.
+    open_trade_entry_dates: Dict[int, pandas.Timestamp] = {}
 
     if adaptive_tp_sl is not None:
+        use_evict_oldest = adaptive_tp_sl.evict_oldest
         # Use heap-based event processing for adaptive mode.
         # Convert sorted entry events into a deque for efficient popping.
         entry_events = deque(events)
@@ -1024,6 +1086,228 @@ def run_complex_simulation(
         same_day_close_count = 0
         last_close_date: pandas.Timestamp | None = None
 
+        _far_future = pandas.Timestamp("2099-12-31")
+
+        if use_evict_oldest:
+
+            def _convert_bar_excursions_to_entry_basis(
+                segment_trade: Trade,
+                position_entry_price: float,
+            ) -> list[tuple[pandas.Timestamp, float, float, float]]:
+                """Convert segment excursions to the original position basis."""
+
+                converted_excursions: list[
+                    tuple[pandas.Timestamp, float, float, float]
+                ] = []
+                if not segment_trade.bar_excursions or position_entry_price <= 0:
+                    return converted_excursions
+                for excursion in segment_trade.bar_excursions:
+                    bar_date = excursion[0]
+                    bar_high_percentage = excursion[1]
+                    bar_low_percentage = excursion[2]
+                    bar_open_percentage = (
+                        excursion[3] if len(excursion) == 4 else 0.0
+                    )
+                    bar_high_price = segment_trade.entry_price * (
+                        1 + bar_high_percentage
+                    )
+                    bar_low_price = segment_trade.entry_price * (
+                        1 + bar_low_percentage
+                    )
+                    bar_open_price = segment_trade.entry_price * (
+                        1 + bar_open_percentage
+                    )
+                    converted_excursions.append(
+                        (
+                            bar_date,
+                            (bar_high_price - position_entry_price)
+                            / position_entry_price,
+                            (bar_low_price - position_entry_price)
+                            / position_entry_price,
+                            (bar_open_price - position_entry_price)
+                            / position_entry_price,
+                        )
+                    )
+                return converted_excursions
+
+            def _excursion_extremes(
+                bar_excursions: list[
+                    tuple[pandas.Timestamp, float, float, float]
+                ],
+            ) -> tuple[
+                float | None,
+                float | None,
+                pandas.Timestamp | None,
+                pandas.Timestamp | None,
+            ]:
+                """Return MFE/MAE percentages and dates from entry-basis excursions."""
+
+                favorable_percentage: float | None = None
+                adverse_percentage: float | None = None
+                favorable_date: pandas.Timestamp | None = None
+                adverse_date: pandas.Timestamp | None = None
+                for (
+                    bar_date,
+                    high_percentage,
+                    low_percentage,
+                    _open_percentage,
+                ) in bar_excursions:
+                    if (
+                        favorable_percentage is None
+                        or high_percentage > favorable_percentage
+                    ):
+                        favorable_percentage = high_percentage
+                        favorable_date = bar_date
+                    if (
+                        adverse_percentage is None
+                        or low_percentage < adverse_percentage
+                    ):
+                        adverse_percentage = low_percentage
+                        adverse_date = bar_date
+                return (
+                    favorable_percentage,
+                    adverse_percentage,
+                    favorable_date,
+                    adverse_date,
+                )
+
+            def _refresh_open_trade_from_same_symbol_signal(
+                *,
+                open_trade_identifier: int,
+                refresh_trade: Trade,
+            ) -> None:
+                """Refresh an open same-symbol position without closing/re-opening."""
+
+                nonlocal adaptive_close_counter
+                current_adjusted_trade = adaptive_trade_map.get(
+                    open_trade_identifier
+                )
+                if current_adjusted_trade is None:
+                    return
+                current_original_trade = adaptive_original_trade.get(
+                    id(current_adjusted_trade),
+                    current_adjusted_trade,
+                )
+                existing_excursions = list(
+                    current_adjusted_trade.bar_excursions or []
+                )
+                converted_refresh_excursions = (
+                    _convert_bar_excursions_to_entry_basis(
+                        refresh_trade,
+                        current_adjusted_trade.entry_price,
+                    )
+                )
+                if existing_excursions:
+                    last_existing_date = existing_excursions[-1][0]
+                    converted_refresh_excursions = [
+                        converted_excursion
+                        for converted_excursion in converted_refresh_excursions
+                        if converted_excursion[0] > last_existing_date
+                    ]
+                combined_excursions = (
+                    existing_excursions + converted_refresh_excursions
+                )
+                applied_percentages = adaptive_tp_sl_applied.get(
+                    id(current_adjusted_trade),
+                    (0.0, adaptive_tp_sl.min_sl),
+                )
+                active_stop_loss_percentage = applied_percentages[1]
+                if adaptive_tp_sl.fixed_sl is not None:
+                    active_stop_loss_percentage = adaptive_tp_sl.fixed_sl
+
+                replacement_trade = current_adjusted_trade
+                for refresh_bar_index, refresh_excursion in enumerate(
+                    converted_refresh_excursions,
+                    start=1,
+                ):
+                    bar_date = refresh_excursion[0]
+                    bar_low_percentage = refresh_excursion[2]
+                    if (
+                        refresh_bar_index >= minimum_holding_bars
+                        and bar_low_percentage <= -active_stop_loss_percentage
+                    ):
+                        stop_loss_exit_price = (
+                            current_adjusted_trade.entry_price
+                            * (1 - active_stop_loss_percentage)
+                        )
+                        excursions_until_stop = combined_excursions[
+                            : len(existing_excursions) + refresh_bar_index
+                        ]
+                        (
+                            favorable_percentage,
+                            adverse_percentage,
+                            favorable_date,
+                            adverse_date,
+                        ) = _excursion_extremes(excursions_until_stop)
+                        replacement_trade = replace(
+                            current_adjusted_trade,
+                            exit_date=bar_date,
+                            exit_price=stop_loss_exit_price,
+                            profit=stop_loss_exit_price
+                            - current_adjusted_trade.entry_price,
+                            holding_period=len(excursions_until_stop),
+                            exit_reason="adaptive_stop_loss",
+                            bar_excursions=excursions_until_stop,
+                            max_favorable_excursion_pct=favorable_percentage,
+                            max_adverse_excursion_pct=adverse_percentage,
+                            max_favorable_excursion_date=favorable_date,
+                            max_adverse_excursion_date=adverse_date,
+                        )
+                        break
+                else:
+                    (
+                        favorable_percentage,
+                        adverse_percentage,
+                        favorable_date,
+                        adverse_date,
+                    ) = _excursion_extremes(combined_excursions)
+                    replacement_trade = replace(
+                        current_adjusted_trade,
+                        exit_date=_far_future,
+                        exit_price=refresh_trade.exit_price,
+                        profit=refresh_trade.exit_price
+                        - current_adjusted_trade.entry_price,
+                        holding_period=len(combined_excursions),
+                        exit_reason="end_of_data",
+                        bar_excursions=combined_excursions,
+                        max_favorable_excursion_pct=favorable_percentage,
+                        max_adverse_excursion_pct=adverse_percentage,
+                        max_favorable_excursion_date=favorable_date,
+                        max_adverse_excursion_date=adverse_date,
+                    )
+                    adaptive_fallback_exits[open_trade_identifier] = (
+                        refresh_trade.exit_date,
+                        refresh_trade.exit_price,
+                        len(combined_excursions),
+                    )
+
+                trades_list = accepted_trades_by_set[label]
+                for trade_index, accepted_trade in enumerate(trades_list):
+                    if id(accepted_trade) == id(current_adjusted_trade):
+                        trades_list[trade_index] = replacement_trade
+                        break
+                adaptive_trade_map[open_trade_identifier] = replacement_trade
+                adaptive_original_trade[id(replacement_trade)] = (
+                    current_original_trade
+                )
+                adaptive_tp_sl_applied[id(replacement_trade)] = (
+                    adaptive_tp_sl_applied.pop(
+                        id(current_adjusted_trade),
+                        applied_percentages,
+                    )
+                )
+                if replacement_trade.exit_date != _far_future:
+                    adaptive_close_counter += 1
+                    heapq.heappush(
+                        adaptive_close_heap,
+                        (
+                            replacement_trade.exit_date,
+                            adaptive_close_counter,
+                            label,
+                            open_trade_identifier,
+                        ),
+                    )
+
         while entry_events or adaptive_close_heap:
             # Determine next event: either from entry_events or close_heap.
             next_entry = entry_events[0] if entry_events else None
@@ -1031,6 +1315,45 @@ def run_complex_simulation(
 
             process_close = False
             if next_entry is None and next_close is not None:
+                if use_evict_oldest and next_close[0] >= _far_future:
+                    # Evict-mode end-of-data: settle remaining open trades
+                    # at their original signal exit price/date.
+                    while adaptive_close_heap:
+                        _, _cnt2, cl, tid = heapq.heappop(adaptive_close_heap)
+                        if (cl, tid) not in open_trade_keys:
+                            continue
+                        adj = adaptive_trade_map.get(tid)
+                        if adj is None:
+                            continue
+                        if adj.exit_date != _far_future:
+                            continue
+                        orig = adaptive_original_trade.get(id(adj), adj)
+                        fallback_exit = adaptive_fallback_exits.get(
+                            tid,
+                            (orig.exit_date, orig.exit_price, orig.holding_period),
+                        )
+                        fallback_exit_date = fallback_exit[0]
+                        fallback_exit_price = fallback_exit[1]
+                        fallback_holding_period = fallback_exit[2]
+                        settled = replace(
+                            adj,
+                            exit_date=fallback_exit_date,
+                            exit_price=fallback_exit_price,
+                            profit=fallback_exit_price - adj.entry_price,
+                            holding_period=fallback_holding_period,
+                            exit_reason="end_of_data",
+                        )
+                        trades_list = accepted_trades_by_set[cl]
+                        for ti, t in enumerate(trades_list):
+                            if id(t) == id(adj):
+                                trades_list[ti] = settled
+                                break
+                        adaptive_trade_map[tid] = settled
+                        adaptive_original_trade[id(settled)] = orig
+                        adaptive_tp_sl_applied[id(settled)] = adaptive_tp_sl_applied.pop(
+                            id(adj), (0.0, 0.0)
+                        )
+                    break
                 process_close = True
             elif next_close is not None and next_entry is not None:
                 # Close events (type=0) before entry events (type=1) on same
@@ -1049,12 +1372,25 @@ def run_complex_simulation(
                     same_day_close_count = 0
                     last_close_date = close_date
                 close_key = (close_label, orig_trade_id)
+                if use_evict_oldest:
+                    adjusted_close_trade = adaptive_trade_map.get(orig_trade_id)
+                    if (
+                        adjusted_close_trade is not None
+                        and adjusted_close_trade.exit_date != close_date
+                    ):
+                        # A same-symbol refresh or eviction can replace the open
+                        # trade after an older close event has already been queued.
+                        # Ignore that stale heap event so it cannot close or settle
+                        # the refreshed/evicted position.
+                        continue
                 if close_key in open_trade_keys:
                     open_trade_keys.pop(close_key, None)
                     open_position_counts_by_set[close_label] = max(
                         0, open_position_counts_by_set[close_label] - 1
                     )
                     same_day_close_count += 1
+                    if use_evict_oldest:
+                        open_trade_entry_dates.pop(orig_trade_id, None)
                     # Decrement same-symbol counter.
                     closed_sym = open_trade_symbols.pop(orig_trade_id, None)
                     if closed_sym and closed_sym in open_symbol_counts:
@@ -1111,13 +1447,122 @@ def run_complex_simulation(
                 trade_key = (label, trade_identifier)
                 if trade_key in accepted_trade_keys:
                     continue
+                trade_sym = artifacts_by_set[label].trade_symbol_lookup.get(
+                    trade, "",
+                )
+                if use_evict_oldest and trade_sym:
+                    refreshed_trade_identifier: int | None = None
+                    for open_identifier, open_symbol in open_trade_symbols.items():
+                        if open_symbol == trade_sym:
+                            refreshed_trade_identifier = open_identifier
+                            break
+                    if refreshed_trade_identifier is not None:
+                        # Same-symbol signal refreshes the operating clock but
+                        # does not close/re-open the real position.  Accounting
+                        # entry date, entry price, and holding-period basis stay
+                        # on the original trade.
+                        _refresh_open_trade_from_same_symbol_signal(
+                            open_trade_identifier=refreshed_trade_identifier,
+                            refresh_trade=trade,
+                        )
+                        open_trade_entry_dates[refreshed_trade_identifier] = event_date
+                        accepted_trade_keys.add(trade_key)
+                        continue
                 # Slot check: add back same-day closes to prevent lookahead.
                 # Entries cannot use slots freed by closes on the same date
                 # because you don't know at entry time whether TP/SL will
                 # trigger later that day.
                 current_open_total = len(open_trade_keys) + same_day_close_count
                 if current_open_total >= maximum_position_count:
-                    continue
+                    if not use_evict_oldest:
+                        continue
+                    # Evict oldest open position past min_hold.
+                    evict_candidate: tuple[pandas.Timestamp, int, str] | None = None
+                    for (ek_label, ek_tid), ek_lbl in open_trade_keys.items():
+                        e_date = open_trade_entry_dates.get(ek_tid)
+                        if e_date is None:
+                            continue
+                        # Count business days held.
+                        held_days = len(pandas.bdate_range(e_date, event_date)) - 1
+                        if held_days < minimum_holding_bars:
+                            continue
+                        if evict_candidate is None or e_date < evict_candidate[0]:
+                            evict_candidate = (e_date, ek_tid, ek_label)
+                    if evict_candidate is None:
+                        continue  # all open positions within min_hold
+                    # Perform eviction.
+                    evict_entry_date, evict_tid, evict_label = evict_candidate
+                    evict_key = (evict_label, evict_tid)
+                    evicted_adjusted = adaptive_trade_map.get(evict_tid)
+                    if evicted_adjusted is None:
+                        continue
+                    evicted_original = adaptive_original_trade.get(
+                        id(evicted_adjusted), evicted_adjusted
+                    )
+                    # Find eviction day open price from bar_excursions.
+                    evict_exit_price = evicted_adjusted.entry_price  # fallback
+                    evict_holding = 0
+                    if evicted_original.bar_excursions:
+                        for bi, exc in enumerate(evicted_original.bar_excursions):
+                            exc_date = exc[0]
+                            exc_open_pct = exc[3] if len(exc) == 4 else 0.0
+                            if exc_date >= event_date:
+                                evict_exit_price = evicted_adjusted.entry_price * (1 + exc_open_pct)
+                                evict_holding = bi + 1
+                                break
+                        else:
+                            # event_date beyond last bar — use last bar close
+                            evict_exit_price = evicted_original.exit_price
+                            evict_holding = len(evicted_original.bar_excursions)
+                    evict_profit = evict_exit_price - evicted_adjusted.entry_price
+                    evicted_new = replace(
+                        evicted_adjusted,
+                        exit_date=event_date,
+                        exit_price=evict_exit_price,
+                        profit=evict_profit,
+                        holding_period=evict_holding,
+                        exit_reason="evicted",
+                        bar_excursions=(
+                            evicted_original.bar_excursions[:evict_holding]
+                            if evicted_original.bar_excursions else None
+                        ),
+                    )
+                    # Replace in accepted trades list.
+                    trades_list = accepted_trades_by_set[evict_label]
+                    for ti, t in enumerate(trades_list):
+                        if id(t) == id(evicted_adjusted):
+                            trades_list[ti] = evicted_new
+                            break
+                    adaptive_trade_map[evict_tid] = evicted_new
+                    adaptive_original_trade[id(evicted_new)] = evicted_original
+                    adaptive_tp_sl_applied[id(evicted_new)] = adaptive_tp_sl_applied.pop(
+                        id(evicted_adjusted), (0.0, 0.0)
+                    )
+                    # Clean up open tracking.
+                    open_trade_keys.pop(evict_key, None)
+                    open_position_counts_by_set[evict_label] = max(
+                        0, open_position_counts_by_set[evict_label] - 1
+                    )
+                    open_trade_entry_dates.pop(evict_tid, None)
+                    evict_sym = open_trade_symbols.pop(evict_tid, None)
+                    if evict_sym and evict_sym in open_symbol_counts:
+                        open_symbol_counts[evict_sym] = max(
+                            0, open_symbol_counts[evict_sym] - 1
+                        )
+                    # Update rolling stats with evicted trade's result.
+                    evict_pct = (
+                        evict_profit / evicted_adjusted.entry_price
+                        if evicted_adjusted.entry_price > 0 else 0.0
+                    )
+                    if adaptive_tp_sl.delayed_rolling_update:
+                        pending_rolling_updates.append((event_date, evict_pct))
+                    else:
+                        adaptive_closed_profits.append(evict_pct)
+                        if len(adaptive_closed_profits) > adaptive_tp_sl.window:
+                            adaptive_closed_profits.popleft()
+                    # Eviction is deliberate (not subject to lookahead like
+                    # TP/SL closes), so do NOT increment same_day_close_count.
+                    current_open_total = len(open_trade_keys) + same_day_close_count
                 if (
                     not multi_bucket_mode
                     and label.upper() == "B"
@@ -1132,7 +1577,6 @@ def run_complex_simulation(
 
                 # Check max_same_symbol limit.
                 if max_same_symbol < 999:
-                    trade_sym = artifacts_by_set[label].trade_symbol_lookup.get(trade, "")
                     if open_symbol_counts.get(trade_sym, 0) >= max_same_symbol:
                         continue
 
@@ -1140,6 +1584,8 @@ def run_complex_simulation(
                 tp_pct = adaptive_tp_sl.min_tp
                 sl_pct = adaptive_tp_sl.min_sl
                 rolling_mp = 0.0
+
+                _tp_pct_late: float | None = None
 
                 if (
                     adaptive_tp_sl.sector_rolling
@@ -1155,6 +1601,13 @@ def run_complex_simulation(
                     tp_pct, sl_pct = _compute_sector_tp_sl(
                         event_date, _trade_ff12, adaptive_tp_sl,
                     )
+                    # Compute global (uniform) TP for late phase (after min_hold).
+                    _global_tp, _ = _compute_sector_tp_sl(
+                        event_date, -1, adaptive_tp_sl,
+                    )
+                    # Use global TP as late-phase TP (falls back to global pool
+                    # since ff12=-1 won't match any sector).
+                    _tp_pct_late = _global_tp
                     # If fixed_sl is set, override sector SL with it.
                     if adaptive_tp_sl.fixed_sl is not None:
                         sl_pct = adaptive_tp_sl.fixed_sl
@@ -1197,18 +1650,28 @@ def run_complex_simulation(
                     trade, tp_pct, sl_pct, effective_min_hold,
                     minimum_holding_bars_tp=effective_min_hold_tp,
                     breakeven_trigger_pct=be_trigger,
+                    tp_pct_late=_tp_pct_late,
+                    sl_only=use_evict_oldest,
                 )
                 adaptive_trade_map[trade_identifier] = adjusted
                 adaptive_original_trade[id(adjusted)] = trade
+                adaptive_tp_sl_applied[id(adjusted)] = (tp_pct, sl_pct)
+                if use_evict_oldest and adjusted.exit_date == _far_future:
+                    adaptive_fallback_exits[trade_identifier] = (
+                        trade.exit_date,
+                        trade.exit_price,
+                        trade.holding_period,
+                    )
 
                 accepted_trade_keys.add(trade_key)
                 open_trade_keys[trade_key] = label
+                open_trade_entry_dates[trade_identifier] = event_date
                 open_position_counts_by_set[label] += 1
                 # Track same-symbol count.
+                if trade_sym:
+                    open_trade_symbols[trade_identifier] = trade_sym
                 if max_same_symbol < 999:
-                    entry_sym = artifacts_by_set[label].trade_symbol_lookup.get(trade, "")
-                    open_symbol_counts[entry_sym] = open_symbol_counts.get(entry_sym, 0) + 1
-                    open_trade_symbols[trade_identifier] = entry_sym
+                    open_symbol_counts[trade_sym] = open_symbol_counts.get(trade_sym, 0) + 1
                 accepted_trades_by_set[label].append(adjusted)
 
                 # Schedule close event.
@@ -1300,6 +1763,7 @@ def run_complex_simulation(
             entry_detail, exit_detail = artifacts.trade_detail_pairs[original_trade]
             # When adaptive TP/SL modified the trade, update the exit detail
             # to reflect the adjusted exit date, price, reason, and holding.
+            _applied = adaptive_tp_sl_applied.get(id(trade))
             if trade is not original_trade:
                 pct_change = (
                     (trade.exit_price - trade.entry_price) / trade.entry_price
@@ -1317,6 +1781,14 @@ def run_complex_simulation(
                     max_adverse_excursion_pct=trade.max_adverse_excursion_pct,
                     max_favorable_excursion_date=trade.max_favorable_excursion_date,
                     max_adverse_excursion_date=trade.max_adverse_excursion_date,
+                    adaptive_tp_pct=_applied[0] if _applied else None,
+                    adaptive_sl_pct=_applied[1] if _applied else None,
+                )
+            if _applied and exit_detail.adaptive_tp_pct is None:
+                exit_detail = replace(
+                    exit_detail,
+                    adaptive_tp_pct=_applied[0],
+                    adaptive_sl_pct=_applied[1],
                 )
             detail_pairs_with_label.append(
                 (
@@ -3022,6 +3494,7 @@ def _generate_strategy_evaluation_artifacts(
     price_score_max: float | None = None,
     confirmation_sma_angle_range: tuple[float, float] | None = None,
     exit_alpha_factor: float | None = None,
+    reentry_on_signal: bool = False,
 ) -> StrategyEvaluationArtifacts:
     """Build intermediate artifacts for strategy evaluation.
 
@@ -3366,6 +3839,7 @@ def _generate_strategy_evaluation_artifacts(
             pending_limit_entry=use_confirmation_angle and confirmation_entry_mode == "limit",
             pending_market_entry=use_confirmation_angle and confirmation_entry_mode == "market",
             cancel_pending_rule=cancel_rule if use_confirmation_angle else None,
+            reentry_on_signal=reentry_on_signal,
         )
         simulation_results.append(simulation_result)
         all_trades.extend(simulation_result.trades)

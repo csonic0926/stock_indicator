@@ -1542,6 +1542,8 @@ class StockShell(cmd.Cmd):
                     sector_rolling=bool(raw_adaptive.get("sector_rolling", False)),
                     sector_sl_sigma=float(raw_adaptive.get("sector_sl_sigma", 0.5)),
                     sector_min_rr=float(raw_adaptive.get("sector_min_rr", 2.0)),
+                    sector_lookback_days=int(raw_adaptive.get("sector_lookback_days", 0)),
+                    evict_oldest=bool(raw_adaptive.get("evict_oldest", False)),
                 )
             else:
                 # Boolean true -> use defaults.
@@ -1708,6 +1710,8 @@ class StockShell(cmd.Cmd):
                                 if detail.percentage_change is not None
                                 else None
                             ),
+                            "adaptive_tp_pct": detail.adaptive_tp_pct,
+                            "adaptive_sl_pct": detail.adaptive_sl_pct,
                         }
                     )
         if trade_records:
@@ -1751,6 +1755,8 @@ class StockShell(cmd.Cmd):
                     "exit_reason",
                     "holding_bars",
                     "profit_per_bar",
+                    "adaptive_tp_pct",
+                    "adaptive_sl_pct",
                 ],
             ).to_csv(output_file, index=False)
             self.stdout.write(f"Trade details saved to {output_file}\n")
