@@ -43,7 +43,7 @@ STOCK_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
 DATA_SOURCE_PATHS: dict[str, Path] = {
     "daily": DATA_DIRECTORY / "stock_data",
     "2014": DATA_DIRECTORY / "stock_data_2014",
-    "1989": DATA_DIRECTORY / "stock_data_1989",
+    "1994": DATA_DIRECTORY / "stock_data_1994",
 }
 
 

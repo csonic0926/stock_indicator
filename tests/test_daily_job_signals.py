@@ -39,7 +39,7 @@ def _register_test_strategy(monkeypatch: pytest.MonkeyPatch) -> None:
         entry_series = pandas.Series([False, False, True], index=index)
         price_frame["test_strategy_entry_signal"] = entry_series
         if include_raw_signals:
-            raw_series = pandas.Series([False, False, False], index=index)
+            raw_series = pandas.Series([False, False, True], index=index)
             price_frame["test_strategy_raw_entry_signal"] = raw_series
         price_frame["sma_angle"] = pandas.Series([0.0, 0.0, 0.0], index=index)
         price_frame["near_price_volume_ratio"] = pandas.Series(
@@ -72,6 +72,7 @@ def test_find_history_signal_includes_shifted_entries(
     """Signals should include entries when only shifted columns fire."""
 
     _register_test_strategy(monkeypatch)
+    monkeypatch.setattr(daily_job, "load_symbols", lambda: ["KO"])
     csv_path = temporary_data_directory / "KO.csv"
     frame = pandas.DataFrame(
         {
@@ -88,7 +89,7 @@ def test_find_history_signal_includes_shifted_entries(
     frame.to_csv(csv_path, index=False)
 
     result = daily_job.find_history_signal(
-        "2025-10-09",
+        "2025-10-10",
         "dollar_volume>0",
         "test_strategy",
         "test_strategy",
@@ -96,6 +97,43 @@ def test_find_history_signal_includes_shifted_entries(
     )
 
     assert "KO" in result.get("entry_signals", [])
+
+
+def test_find_history_signal_ignores_stale_cached_symbols(
+    temporary_data_directory: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cron signal checks should use the current symbol list, not stale CSVs."""
+
+    _register_test_strategy(monkeypatch)
+    monkeypatch.setattr(daily_job, "load_symbols", lambda: ["KO"])
+    frame = pandas.DataFrame(
+        {
+            "Date": pandas.to_datetime(
+                ["2025-10-08", "2025-10-09", "2025-10-10"]
+            ),
+            "Open": [10.0, 10.0, 10.0],
+            "High": [11.0, 11.0, 11.0],
+            "Low": [9.0, 9.0, 9.0],
+            "Close": [10.0, 10.0, 10.0],
+            "Volume": [1_000_000, 1_000_000, 1_000_000],
+        }
+    )
+    frame.to_csv(temporary_data_directory / "KO.csv", index=False)
+    frame.to_csv(temporary_data_directory / "STALE.csv", index=False)
+
+    result = daily_job.find_history_signal(
+        "2025-10-10",
+        "dollar_volume>0",
+        "test_strategy",
+        "test_strategy",
+        1.0,
+    )
+
+    assert "KO" in result.get("entry_signals", [])
+    assert "STALE" not in result.get("entry_signals", [])
+    assert {
+        symbol_name for symbol_name, _ in result.get("filtered_symbols", [])
+    } == {"KO"}
 
 
 def test_filter_debug_values_uses_latest_available_row(

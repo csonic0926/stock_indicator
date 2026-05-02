@@ -1,8 +1,8 @@
 {
   "max_position_count": 6,
   "starting_cash": 60000,
-  "start_date": "1989-01-01",
-  "data_source": "1989",
+  "start_date": "1994-01-01",
+  "data_source": "1994",
   "withdraw": 0,
   "min_hold": 5,
   "margin": 1.5,

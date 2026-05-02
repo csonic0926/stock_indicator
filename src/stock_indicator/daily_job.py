@@ -173,6 +173,61 @@ def update_all_data_from_yf(
             )
 
 
+def _load_current_symbols_with_cached_price(
+    evaluation_timestamp: pandas.Timestamp,
+) -> List[str]:
+    """Return current symbols that have a cached row for the evaluation date.
+
+    The live cron path must not treat old CSV files as the tradable universe.
+    The authoritative runtime universe is ``symbols.txt``; local CSVs only
+    prove that the current symbol has price data for the requested date.
+    """
+
+    current_symbol_list = [
+        symbol_name
+        for symbol_name in load_symbols()
+        if symbol_name and symbol_name != SP500_SYMBOL
+    ]
+    cached_symbol_set = {
+        csv_file_path.stem
+        for csv_file_path in STOCK_DATA_DIRECTORY.glob("*.csv")
+        if csv_file_path.stem and csv_file_path.stem != SP500_SYMBOL
+    }
+    stale_cached_symbols = sorted(cached_symbol_set - set(current_symbol_list))
+    if stale_cached_symbols:
+        LOGGER.info(
+            "Ignoring %d cached symbols that are not in the current symbol list",
+            len(stale_cached_symbols),
+        )
+
+    symbols_with_price: List[str] = []
+    missing_symbols: List[str] = []
+    for symbol_name in current_symbol_list:
+        csv_file_path = STOCK_DATA_DIRECTORY / f"{symbol_name}.csv"
+        if not csv_file_path.exists():
+            missing_symbols.append(symbol_name)
+            continue
+        try:
+            history_frame = pandas.read_csv(
+                csv_file_path, index_col=0, parse_dates=True
+            )
+        except Exception:  # noqa: BLE001
+            missing_symbols.append(symbol_name)
+            continue
+        if evaluation_timestamp in history_frame.index:
+            symbols_with_price.append(symbol_name)
+        else:
+            missing_symbols.append(symbol_name)
+
+    if missing_symbols:
+        LOGGER.debug(
+            "Skipping %d current symbols missing %s",
+            len(missing_symbols),
+            evaluation_timestamp.date().isoformat(),
+        )
+    return symbols_with_price
+
+
 def find_history_signal(
     date_string: str | None,
     dollar_volume_filter: str,
@@ -247,39 +302,7 @@ def find_history_signal(
     )
     start_timestamp = max(cached_start_timestamp, requested_start_timestamp)
     start_date_string = start_timestamp.date().isoformat()
-    try:
-        local_symbols = [
-            csv_path.stem
-            for csv_path in STOCK_DATA_DIRECTORY.glob("*.csv")
-            if csv_path.stem and csv_path.stem != "^GSPC"
-        ]
-    except Exception:  # noqa: BLE001
-        local_symbols = None
-    if local_symbols is not None:
-        missing_symbols: List[str] = []
-        for symbol_name in local_symbols:
-            csv_file_path = STOCK_DATA_DIRECTORY / f"{symbol_name}.csv"
-            try:
-                history_frame = pandas.read_csv(
-                    csv_file_path, index_col=0, parse_dates=True
-                )
-            except Exception:  # noqa: BLE001
-                missing_symbols.append(symbol_name)
-                continue
-            if evaluation_timestamp not in history_frame.index:
-                missing_symbols.append(symbol_name)
-        if missing_symbols:
-            missing_symbol_list = ", ".join(sorted(missing_symbols))
-            LOGGER.debug(
-                "Skipping symbols missing %s: %s",
-                date_string,
-                missing_symbol_list,
-            )
-            local_symbols = [
-                symbol_name
-                for symbol_name in local_symbols
-                if symbol_name not in missing_symbols
-            ]
+    local_symbols = _load_current_symbols_with_cached_price(evaluation_timestamp)
     (
         minimum_average_dollar_volume,
         top_dollar_volume_rank,
@@ -592,4 +615,3 @@ def filter_debug_values(
         "entry": entry_value,
         "exit": exit_value,
     }
-
