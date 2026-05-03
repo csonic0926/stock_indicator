@@ -882,7 +882,6 @@ async function placeTPSL() {
 }
 
 load();
-setInterval(load, 60000);
 </script>
 </body>
 </html>

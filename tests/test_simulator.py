@@ -174,12 +174,13 @@ def test_simulate_trades_closes_open_position_at_end() -> None:
     assert final_trade.exit_reason == "end_of_data"
 
 
-def test_simulate_trades_applies_stop_loss_next_open() -> None:
-    """Trades should close at the next open when the stop loss is reached."""
+def test_simulate_trades_applies_stop_loss_at_gap_down_open() -> None:
+    """Stop-loss market orders should exit at the open on a gap down."""
     price_data_frame = pandas.DataFrame(
         {
-            "open": [100.0, 95.0, 96.0],
-            "close": [100.0, 92.0, 97.0],
+            "open": [100.0, 90.0],
+            "low": [100.0, 89.0],
+            "close": [100.0, 91.0],
         }
     )
 
@@ -201,13 +202,75 @@ def test_simulate_trades_applies_stop_loss_next_open() -> None:
     assert len(result.trades) == 1
     completed_trade = result.trades[0]
     assert completed_trade.entry_price == 100.0
-    assert completed_trade.exit_price == 96.0
-    assert completed_trade.exit_date == price_data_frame.index[2]
-    expected_profit = (
-        -4.0 - calc_commission(1, 100.0) - calc_commission(1, 96.0)
+    assert completed_trade.exit_price == 90.0
+    assert completed_trade.exit_date == price_data_frame.index[1]
+    assert completed_trade.exit_reason == "stop_loss"
+
+
+def test_simulate_trades_applies_stop_loss_intraday_trigger() -> None:
+    """Stop-loss market orders should exit at stop price after intraday trigger."""
+    price_data_frame = pandas.DataFrame(
+        {
+            "open": [100.0, 95.0],
+            "low": [100.0, 92.0],
+            "close": [100.0, 94.0],
+        }
     )
-    assert completed_trade.profit == expected_profit
-    assert completed_trade.holding_period == 2
+
+    def entry_rule(current_row: pandas.Series) -> bool:
+        return current_row.name == 0
+
+    def exit_rule(current_row: pandas.Series, entry_row: pandas.Series) -> bool:
+        return False
+
+    result = simulate_trades(
+        price_data_frame,
+        entry_rule,
+        exit_rule,
+        entry_price_column="open",
+        exit_price_column="open",
+        stop_loss_percentage=0.075,
+    )
+
+    assert len(result.trades) == 1
+    completed_trade = result.trades[0]
+    assert completed_trade.entry_price == 100.0
+    assert completed_trade.exit_price == pytest.approx(92.5)
+    assert completed_trade.exit_date == price_data_frame.index[1]
+    assert completed_trade.exit_reason == "stop_loss"
+
+
+def test_simulate_trades_places_stop_loss_after_minimum_hold_passes() -> None:
+    """Stop-loss should not be active until the session after min hold passes."""
+    price_data_frame = pandas.DataFrame(
+        {
+            "open": [100.0, 95.0, 90.0],
+            "low": [100.0, 80.0, 89.0],
+            "close": [100.0, 81.0, 91.0],
+        }
+    )
+
+    def entry_rule(current_row: pandas.Series) -> bool:
+        return current_row.name == 0
+
+    def exit_rule(current_row: pandas.Series, entry_row: pandas.Series) -> bool:
+        return False
+
+    result = simulate_trades(
+        price_data_frame,
+        entry_rule,
+        exit_rule,
+        entry_price_column="open",
+        exit_price_column="open",
+        stop_loss_percentage=0.075,
+        minimum_holding_bars=1,
+    )
+
+    assert len(result.trades) == 1
+    completed_trade = result.trades[0]
+    assert completed_trade.exit_price == 90.0
+    assert completed_trade.exit_date == price_data_frame.index[2]
+    assert completed_trade.exit_reason == "stop_loss"
 
 
 def test_simulate_trades_applies_take_profit_intraday() -> None:

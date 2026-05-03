@@ -137,11 +137,13 @@ def simulate_trades(
         Column name used for calculating exit price. When ``None``,
         ``entry_price_column`` is used for both entry and exit prices.
     stop_loss_percentage: float, default 1.0
-        Fractional loss from the entry price for a stop order. When the current
-        bar's low touches the stop price, the position exits on the same bar at
-        the stop price (cap on loss). If the bar never reaches the stop but the
-        close is below the stop, an exit is scheduled for the next bar's open.
-        Values greater than or equal to ``1.0`` disable the stop-loss.
+        Fractional loss from the risk price for a stop order. The stop-loss
+        order is placed after ``minimum_holding_bars`` has fully passed, so the
+        first eligible stop-loss session is the next bar. If that bar opens at
+        or below the stop price, the position exits at the open price.
+        Otherwise, if the bar's low touches the stop price, the position exits
+        at the stop price. Values greater than or equal to ``1.0`` disable the
+        stop-loss.
     take_profit_percentage: float, default 0.0
         Fractional gain from the entry price that triggers a profit target.
         When the bar's high reaches the target, the position closes on the same
@@ -167,7 +169,6 @@ def simulate_trades(
     in_position = False
     entry_row: pandas.Series | None = None
     entry_row_index: int | None = None
-    stop_loss_pending = False
     take_profit_pending = False
     trailing_stop_pending = False
     trailing_high_price: float = 0.0
@@ -213,7 +214,6 @@ def simulate_trades(
                     entry_row = current_row
                     entry_row_index = row_index
                     sl_tp_reference_price = pending_limit_price
-                    stop_loss_pending = False
                     take_profit_pending = False
                     trailing_stop_pending = False
                     trailing_high_price = 0.0
@@ -233,7 +233,6 @@ def simulate_trades(
                     entry_row = current_row.copy()
                     entry_row["_limit_fill_price"] = fill_price
                     sl_tp_reference_price = None
-                    stop_loss_pending = False
                     take_profit_pending = False
                     trailing_stop_pending = False
                     trailing_high_price = 0.0
@@ -267,7 +266,6 @@ def simulate_trades(
                     entry_row = current_row
                     entry_row_index = row_index
                     sl_tp_reference_price = None
-                    stop_loss_pending = False
                     take_profit_pending = False
                     trailing_stop_pending = False
                     trailing_high_price = 0.0
@@ -363,7 +361,6 @@ def simulate_trades(
                     entry_row = None
                     entry_row_index = None
                     sl_tp_reference_price = None
-                    stop_loss_pending = False
                     take_profit_pending = False
                     trailing_stop_pending = False
                     trailing_high_price = 0.0
@@ -377,10 +374,29 @@ def simulate_trades(
                 if float(current_row["close"]) <= trailing_stop_price:
                     trailing_stop_pending = True
 
-            if 0 < stop_loss_percentage < 1:
+            stop_loss_order_is_active = (
+                0 < stop_loss_percentage < 1
+                and (row_index - entry_row_index) > minimum_holding_bars
+            )
+            if stop_loss_order_is_active:
                 stop_price = risk_price * (1 - stop_loss_percentage)
-                if has_low and float(current_row["low"]) <= stop_price:
-                    exit_price = float(stop_price)
+                stop_loss_exit_price: float | None = None
+                if "open" in data.columns:
+                    current_open_price = float(current_row["open"])
+                    if (
+                        not math.isnan(current_open_price)
+                        and current_open_price <= stop_price
+                    ):
+                        stop_loss_exit_price = current_open_price
+                if stop_loss_exit_price is None and has_low:
+                    current_low_price = float(current_row["low"])
+                    if (
+                        not math.isnan(current_low_price)
+                        and current_low_price <= stop_price
+                    ):
+                        stop_loss_exit_price = float(stop_price)
+                if stop_loss_exit_price is not None:
+                    exit_price = stop_loss_exit_price
                     profit_value = exit_price - entry_price
                     holding_period_value = row_index - entry_row_index
                     trades.append(
@@ -404,7 +420,6 @@ def simulate_trades(
                     entry_row = None
                     entry_row_index = None
                     sl_tp_reference_price = None
-                    stop_loss_pending = False
                     take_profit_pending = False
                     trailing_stop_pending = False
                     trailing_high_price = 0.0
@@ -442,7 +457,6 @@ def simulate_trades(
                     entry_row = None
                     entry_row_index = None
                     sl_tp_reference_price = None
-                    stop_loss_pending = False
                     take_profit_pending = False
                     trailing_stop_pending = False
                     trailing_high_price = 0.0
@@ -478,44 +492,9 @@ def simulate_trades(
                 entry_row = None
                 entry_row_index = None
                 sl_tp_reference_price = None
-                stop_loss_pending = False
                 take_profit_pending = False
                 trailing_stop_pending = False
                 trailing_high_price = 0.0
-                current_mfe_pct = None
-                current_mae_pct = None
-                current_mfe_date = None
-                current_mae_date = None
-                current_bar_excursions = []
-                last_exit_index = row_index
-                continue
-            if stop_loss_pending:
-                exit_price = float(current_row[price_column_name])
-                profit_value = exit_price - entry_price
-                holding_period_value = row_index - entry_row_index
-                trades.append(
-                    Trade(
-                        entry_date=data.index[entry_row_index],
-                        exit_date=data.index[row_index],
-                        entry_price=entry_price,
-                        exit_price=exit_price,
-                        profit=profit_value,
-                        holding_period=holding_period_value,
-                        exit_reason="stop_loss",
-                        signal_bar_open=sl_tp_reference_price,
-                        max_favorable_excursion_pct=current_mfe_pct,
-                        max_adverse_excursion_pct=current_mae_pct,
-                        max_favorable_excursion_date=current_mfe_date,
-                        max_adverse_excursion_date=current_mae_date,
-                        bar_excursions=current_bar_excursions if record_bar_excursions else None,
-                    )
-                )
-                in_position = False
-                entry_row = None
-                entry_row_index = None
-                sl_tp_reference_price = None
-                stop_loss_pending = False
-                take_profit_pending = False
                 current_mfe_pct = None
                 current_mae_pct = None
                 current_mfe_date = None
@@ -548,7 +527,6 @@ def simulate_trades(
                 entry_row = None
                 entry_row_index = None
                 sl_tp_reference_price = None
-                stop_loss_pending = False
                 take_profit_pending = False
                 current_mfe_pct = None
                 current_mae_pct = None
@@ -584,7 +562,6 @@ def simulate_trades(
                 entry_row = None
                 entry_row_index = None
                 sl_tp_reference_price = None
-                stop_loss_pending = False
                 take_profit_pending = False
                 current_mfe_pct = None
                 current_mae_pct = None
@@ -624,7 +601,6 @@ def simulate_trades(
                 entry_row = current_row
                 entry_row_index = row_index
                 sl_tp_reference_price = None
-                stop_loss_pending = False
                 take_profit_pending = False
                 trailing_stop_pending = False
                 trailing_high_price = 0.0
@@ -635,9 +611,6 @@ def simulate_trades(
                 current_bar_excursions = []
                 last_exit_index = row_index
                 continue
-            if 0 < stop_loss_percentage < 1 and not is_last_row:
-                if float(current_row["close"]) <= risk_price * (1 - stop_loss_percentage):
-                    stop_loss_pending = True
             if 0 < take_profit_percentage < 1 and not is_last_row:
                 if float(current_row["close"]) >= risk_price * (1 + take_profit_percentage):
                     take_profit_pending = True
