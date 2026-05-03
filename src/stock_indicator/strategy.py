@@ -175,12 +175,54 @@ def _extract_short_long_windows_for_20_50(
         return None
     return short_candidate, long_candidate
 
+
+def _symbol_lookup_aliases(symbol_name: str) -> set[str]:
+    """Return ticker aliases used by different data vendors for lookup only.
+
+    Yahoo Finance stores share-class separators as dashes, while SEC-derived
+    sector data commonly stores the same separator as a dot.  The raw symbol
+    from each source should remain unchanged; only lookup maps should include
+    both spellings.
+    """
+
+    normalized_symbol = str(symbol_name or "").strip().upper()
+    if not normalized_symbol:
+        return set()
+    aliases = {normalized_symbol}
+    if "." in normalized_symbol:
+        aliases.add(normalized_symbol.replace(".", "-"))
+    if "-" in normalized_symbol:
+        aliases.add(normalized_symbol.replace("-", "."))
+    return aliases
+
+
+def _add_symbol_aliases_to_group_lookup(
+    symbol_to_group_lookup: dict[str, int],
+    symbol_name: str,
+    group_identifier: int,
+) -> None:
+    """Add exact and vendor-alias ticker spellings to an FF12 lookup."""
+
+    for symbol_alias in _symbol_lookup_aliases(symbol_name):
+        symbol_to_group_lookup.setdefault(symbol_alias, group_identifier)
+
+
+def _expand_symbols_with_lookup_aliases(symbol_names: set[str]) -> set[str]:
+    """Return symbols plus vendor-specific dot/dash aliases for lookup sets."""
+
+    expanded_symbols: set[str] = set()
+    for symbol_name in symbol_names:
+        expanded_symbols.update(_symbol_lookup_aliases(symbol_name))
+    return expanded_symbols
+
+
 def load_symbols_excluded_by_industry() -> set[str]:
-    """Return symbols that should be excluded based on industry classification.
+    """Return symbols that should be excluded as non-stock instruments.
 
     When the sector classification dataset is available (``data/symbols_with_sector``),
-    exclude any symbols whose Fama–French 12-industry group (``ff12``) equals 12
-    ("Other"). If the dataset is not present, return an empty set.
+    exclude known non-common-stock SIC codes.  FF12 group 12 ("Other") is not
+    excluded by itself because many valid common stocks map outside the 11
+    Fama–French operating-industry buckets.
     """
     excluded_symbols: set[str] = set()
     try:
@@ -204,21 +246,25 @@ def load_symbols_excluded_by_industry() -> set[str]:
             return excluded_symbols
     except Exception:  # noqa: BLE001
         return excluded_symbols
-    # Normalize expected columns and filter ff12==12 plus non-stock SIC codes
+    # Normalize expected columns and filter non-stock SIC codes.
     sector_frame.columns = [str(c).strip().lower() for c in sector_frame.columns]
-    if "ticker" not in sector_frame.columns or "ff12" not in sector_frame.columns:
+    if "ticker" not in sector_frame.columns:
         excluded_symbols = set()
     else:
-        mask_other = sector_frame["ff12"] == 12
         # Exclude SIC codes that represent non-stock instruments:
         # 6221 = Commodity/crypto ETFs (GLD, SLV, USO, IBIT, GBTC, ...)
         # 6770 = SPACs / blank-check companies
         _excluded_sic_codes = {6221, 6770}
         if "sic" in sector_frame.columns:
-            mask_sic = sector_frame["sic"].isin(_excluded_sic_codes)
-            mask_other = mask_other | mask_sic
-        tickers_series = sector_frame.loc[mask_other, "ticker"].dropna().astype(str)
-        excluded_symbols = set(tickers_series.str.upper().tolist())
+            mask_non_stock = sector_frame["sic"].isin(_excluded_sic_codes)
+            tickers_series = (
+                sector_frame.loc[mask_non_stock, "ticker"].dropna().astype(str)
+            )
+            excluded_symbols = _expand_symbols_with_lookup_aliases(
+                set(tickers_series.str.upper().tolist())
+            )
+        else:
+            excluded_symbols = set()
 
     # Merge in any manual overrides that mark symbols as FF12=12
     try:
@@ -232,7 +278,9 @@ def load_symbols_excluded_by_industry() -> set[str]:
                 override_symbols = (
                     other_overrides["ticker"].dropna().astype(str).str.upper().tolist()
                 )
-                excluded_symbols.update(override_symbols)
+                excluded_symbols.update(
+                    _expand_symbols_with_lookup_aliases(set(override_symbols))
+                )
     except Exception:  # noqa: BLE001
         # If overrides cannot be read, proceed with what we have
         pass
@@ -270,10 +318,13 @@ def load_ff12_groups_by_symbol() -> dict[str, int]:
         return {}
     sector_frame = sector_frame.dropna(subset=["ticker", "ff12"])  # type: ignore[arg-type]
     sector_frame = sector_frame[sector_frame["ff12"] != 12]
-    symbol_to_group: dict[str, int] = {
-        str(row.ticker).upper(): int(row.ff12)
-        for row in sector_frame.itertuples(index=False)
-    }
+    symbol_to_group: dict[str, int] = {}
+    for sector_row in sector_frame.itertuples(index=False):
+        _add_symbol_aliases_to_group_lookup(
+            symbol_to_group,
+            str(sector_row.ticker),
+            int(sector_row.ff12),
+        )
     return symbol_to_group
 
 
@@ -770,6 +821,7 @@ def run_complex_simulation(
     confirmation_sma_angle_range: tuple[float, float] | None = None,
     adaptive_tp_sl: AdaptiveTPSLConfig | None = None,
     max_same_symbol: int = 1,
+    allowed_symbols: set[str] | None = None,
 ) -> ComplexSimulationMetrics:
     """Evaluate multiple strategy sets under a shared configuration.
 
@@ -831,7 +883,7 @@ def run_complex_simulation(
             start_date=start_date,
             maximum_position_count=maximum_positions_for_set,
             allowed_fama_french_groups=None,
-            allowed_symbols=None,
+            allowed_symbols=allowed_symbols,
             exclude_other_ff12=True,
             stop_loss_percentage=(
                 1.0 if adaptive_tp_sl is not None
@@ -952,12 +1004,22 @@ def run_complex_simulation(
         if sector_csv_path.exists():
             _sector_df = pandas.read_csv(sector_csv_path)
             if "ticker" in _sector_df.columns and "ff12" in _sector_df.columns:
-                _sector_symbol_ff12 = dict(
-                    zip(
-                        _sector_df["ticker"].str.upper(),
-                        _sector_df["ff12"].fillna(12).astype(int),
+                _sector_symbol_ff12 = {}
+                sector_symbol_series = _sector_df["ticker"].dropna().astype(str)
+                sector_group_series = _sector_df.loc[
+                    sector_symbol_series.index,
+                    "ff12",
+                ].fillna(12).astype(int)
+                for sector_symbol, sector_group_identifier in zip(
+                    sector_symbol_series,
+                    sector_group_series,
+                    strict=False,
+                ):
+                    _add_symbol_aliases_to_group_lookup(
+                        _sector_symbol_ff12,
+                        sector_symbol,
+                        int(sector_group_identifier),
                     )
-                )
         if not _sector_symbol_ff12:
             LOGGER.warning(
                 "sector_rolling enabled but symbols_with_sector.csv not found "
@@ -2056,11 +2118,13 @@ def compute_signals_for_date(
         avoid bias toward larger groups.
     allowed_fama_french_groups:
         Restrict the tradable universe to the specified FF12 group identifiers
-        (1–11). Group 12 ("Other") is always excluded when sector data exists.
+        (1–11). Group 12 ("Other") is not used for group-aware sector
+        selection.
     allowed_symbols:
         Optional whitelist of symbols (CSV stems) to consider.
     exclude_other_ff12:
-        When True, symbols in FF12 group 12 ("Other") are excluded.
+        When True, known non-stock instruments are skipped using SIC/override
+        data. FF12 group 12 common stocks are not excluded by this flag.
     maximum_symbols_per_group:
         Maximum number of symbols to select per group when
         ``top_dollar_volume_rank`` is provided.

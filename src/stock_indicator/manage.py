@@ -47,6 +47,14 @@ DATA_SOURCE_PATHS: dict[str, Path] = {
     "1994": DATA_DIRECTORY / "stock_data_1994",
 }
 
+SYMBOL_LIST_PATHS: dict[str, Path] = {
+    "2010_safe": (
+        DATA_DIRECTORY
+        / "backtest_universe_alpha_vantage"
+        / "backtest_yf_safe_symbols_2010_2026.txt"
+    ),
+}
+
 
 def resolve_data_source(source_name: str | None) -> Path:
     """Return the stock data directory for the given source name.
@@ -62,6 +70,24 @@ def resolve_data_source(source_name: str | None) -> Path:
             f"choose from: {', '.join(sorted(DATA_SOURCE_PATHS))}"
         )
     return path
+
+
+def load_symbol_list(symbol_list_name: str | None) -> set[str] | None:
+    """Return an optional symbol whitelist by configured name or file path."""
+
+    if not symbol_list_name:
+        return None
+    symbol_list_path = SYMBOL_LIST_PATHS.get(symbol_list_name)
+    if symbol_list_path is None:
+        symbol_list_path = Path(symbol_list_name).expanduser()
+    if not symbol_list_path.exists():
+        raise ValueError(f"symbol list not found: {symbol_list_path}")
+    symbols_to_keep: set[str] = set()
+    for line_text in symbol_list_path.read_text(encoding="utf-8").splitlines():
+        symbol_name = line_text.strip().upper()
+        if symbol_name:
+            symbols_to_keep.add(symbol_name)
+    return symbols_to_keep
 
 
 def _resolve_strategy_choice(raw_name: str, allowed: dict) -> str:
@@ -1520,6 +1546,13 @@ class StockShell(cmd.Cmd):
             )
             return
         self.stdout.write(f"Data source: {data_directory.name}\n")
+        try:
+            allowed_symbols = load_symbol_list(config_document.get("symbol_list"))
+        except ValueError as symbol_list_error:
+            self.stdout.write(f"{symbol_list_error}\n")
+            return
+        if allowed_symbols is not None:
+            self.stdout.write(f"Symbol list: {len(allowed_symbols)} symbols\n")
 
         # Parse adaptive TP/SL configuration.
         adaptive_tp_sl_config: strategy.AdaptiveTPSLConfig | None = None
@@ -1582,6 +1615,7 @@ class StockShell(cmd.Cmd):
                 confirmation_sma_angle_range=confirmation_sma_angle_range,
                 adaptive_tp_sl=adaptive_tp_sl_config,
                 max_same_symbol=int(config_document.get("max_same_symbol", 1)),
+                allowed_symbols=allowed_symbols,
             )
         except ValueError as error:
             self.stdout.write(f"{error}\n")
@@ -2470,7 +2504,7 @@ class StockShell(cmd.Cmd):
             "    dollar_volume=TopN (global Top-N each day with at most one\n"
             "    symbol per FF12 group), or combine with ranking using\n"
             "    dollar_volume>NUMBER,TopN or dollar_volume>N%,TopN. Legacy 'Nth' is also accepted for\n"
-            "    backward compatibility. 'Other' (FF12=12) is excluded.\n"
+            "    backward compatibility. Known non-stock instruments are excluded.\n"
             "  BUY/SELL or strategy=ID: Either provide explicit buy/sell strategy names, "
             "or a strategy id defined in data/strategy_sets.csv.\n"
             "  STOP_LOSS: Fractional loss for stop orders. If intraday low hits\n"
@@ -2483,7 +2517,7 @@ class StockShell(cmd.Cmd):
             "    Defaults to 0.0 (disabled).\n"
             "  SHOW_DETAILS: 'True' to print individual trades, 'False' to suppress them. Defaults to True.\n"
             "  group: Optional comma-separated FF12 group ids (1-11) to restrict\n"
-            "    tradable symbols. Group 12 (Other) is always excluded. Example:\n"
+            "    tradable symbols. Group 12 (Other) is not selectable. Example:\n"
             "    group=1,2,4,6,7,8,10,11\n"
             "Strategies may be suffixed with _N to set the window size to N; the default window size is 40 when no suffix is provided.\n"
             "Slope-aware strategies follow the ema_sma_signal_with_slope_n_k pattern and accept _LOWER_UPPER bounds after the optional window size; both bounds are floating-point numbers and may be negative.\n"

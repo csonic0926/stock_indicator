@@ -2774,3 +2774,81 @@ def test_complex_simulation_half_cap_for_set_b_rounds_up(
     assert "[A] Trades: 2" in output_text
     assert "[B] Trades: 1" in output_text
     assert output_text.index("[Total]") < output_text.index("[A]")
+
+
+def test_multi_bucket_simulation_forwards_symbol_list(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """JSON symbol_list should become an allowed-symbol whitelist."""
+
+    import json
+
+    import stock_indicator.manage as manage_module
+
+    data_directory = tmp_path / "prices"
+    data_directory.mkdir()
+    symbol_list_path = tmp_path / "safe_symbols.txt"
+    symbol_list_path.write_text("AAA\nBBB\n", encoding="utf-8")
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 2,
+                "starting_cash": 1000,
+                "start_date": "2020-01-01",
+                "data_source": "test",
+                "symbol_list": str(symbol_list_path),
+                "buckets": [
+                    {
+                        "label": "buy3_production",
+                        "strategy_id": "buy3",
+                        "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        manage_module,
+        "DATA_SOURCE_PATHS",
+        {"test": data_directory},
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "load_strategy_set_mapping",
+        lambda: {"buy3": ("ema_sma_cross", "ema_sma_cross")},
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "load_strategy_entry_filters",
+        lambda: {},
+    )
+    recorded_allowed_symbols: dict[str, set[str] | None] = {}
+
+    def fake_run_complex_simulation(
+        data_directory: Path,
+        set_definitions: dict[str, object],
+        **kwargs: object,
+    ) -> manage_module.strategy.ComplexSimulationMetrics:
+        recorded_allowed_symbols["value"] = kwargs.get("allowed_symbols")
+        empty_metrics = _create_empty_metrics()
+        return manage_module.strategy.ComplexSimulationMetrics(
+            overall_metrics=empty_metrics,
+            metrics_by_set={"buy3_production": empty_metrics},
+        )
+
+    monkeypatch.setattr(
+        manage_module.strategy,
+        "run_complex_simulation",
+        fake_run_complex_simulation,
+    )
+
+    output_buffer = io.StringIO()
+    shell = manage_module.StockShell(stdout=output_buffer)
+    shell.onecmd(f"multi_bucket_simulation {config_path}")
+
+    assert recorded_allowed_symbols["value"] == {"AAA", "BBB"}
+    assert "Symbol list: 2 symbols" in output_buffer.getvalue()

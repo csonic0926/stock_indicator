@@ -2,7 +2,7 @@
   "max_position_count": 6,
   "starting_cash": 60000,
   "start_date": "1994-01-01",
-  "data_source": "1994",
+  "data_source": "2010",
   "withdraw": 0,
   "min_hold": 5,
   "margin": 1.5,
@@ -16,7 +16,12 @@
     "fixed_sl": 0.03,
     "override_min_hold_tp_only": true,
     "min_hold_tp": 1,
-    "delayed_rolling_update": true
+    "delayed_rolling_update": true,
+    "sector_rolling": false,
+    "sector_sl_sigma": 0.0,
+    "sector_min_rr": 2.0,
+    "sector_lookback_days": 0,
+    "evict_oldest": false
   },
   "buckets": [
     {
@@ -29,5 +34,6 @@
       "max_positions": 6,
       "exit_alpha_factor": 3
     }
-  ]
+  ],
+  "symbol_list": "2010_safe"
 }

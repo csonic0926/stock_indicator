@@ -260,8 +260,8 @@ def find_history_signal(
         detection here but preserved for parity with other entry points.
     allowed_fama_french_groups:
         Optional set of FF12 group identifiers (1–11) used to restrict the
-        tradable universe. Group 12 (Other) is always excluded when sector data
-        is available.
+        tradable universe. Group 12 (Other) is not selectable for group-aware
+        filtering.
 
     Historical data starting from the later of
     ``SIGNAL_HISTORY_LOOKBACK_DAYS`` before the evaluation date or
