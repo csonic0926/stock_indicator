@@ -140,6 +140,163 @@ def _stub_metrics_functions(
     return call_records
 
 
+def test_adaptive_rolling_update_waits_for_raw_exit_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adaptive rolling stats must not learn raw signal results before raw exit."""
+
+    trades_with_details = []
+    for trade_index, symbol_name in enumerate(["AAA", "BBB", "CCC"]):
+        entry_day = 1 + trade_index * 2
+        adaptive_close_day = entry_day + 1
+        trade, detail_pair = _build_trade(
+            f"2024-01-{entry_day:02d}",
+            f"2024-01-{20 + trade_index:02d}",
+            entry_price=10.0,
+            exit_price=11.0,
+            profit=1.0,
+            symbol=symbol_name,
+        )
+        trade = strategy.replace(
+            trade,
+            bar_excursions=[
+                (
+                    pandas.Timestamp(f"2024-01-{adaptive_close_day:02d}"),
+                    0.02,
+                    0.00,
+                    0.00,
+                ),
+            ],
+        )
+        trades_with_details.append((trade, detail_pair))
+
+    probe_trade, probe_detail_pair = _build_trade(
+        "2024-01-08",
+        "2024-01-12",
+        entry_price=10.0,
+        exit_price=10.5,
+        profit=0.5,
+        symbol="DDD",
+    )
+    probe_trade = strategy.replace(
+        probe_trade,
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-09"), 0.025, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-10"), 0.025, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-11"), 0.025, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-12"), 0.025, 0.00, 0.00),
+        ],
+    )
+    trades_with_details.append((probe_trade, probe_detail_pair))
+    artifacts = _build_artifacts(trades_with_details)
+
+    def fake_generate(
+        *args: object,
+        **kwargs: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        return artifacts
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=1,
+        adaptive_tp_sl=strategy.AdaptiveTPSLConfig(
+            min_samples=1,
+            sigma_multiplier=0.0,
+            delayed_rolling_update=True,
+        ),
+    )
+
+    probe_close_detail = next(
+        detail
+        for detail_list in metrics.overall_metrics.trade_details_by_year.values()
+        for detail in detail_list
+        if detail.action == "close" and detail.symbol == "DDD"
+    )
+
+    assert probe_close_detail.adaptive_tp_pct == pytest.approx(0.02)
+
+
+def test_adaptive_stop_loss_uses_gap_down_open_price(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Adaptive SL should fill at open when the bar opens below stop."""
+
+    trade, detail_pair = _build_trade(
+        "2024-01-01",
+        "2024-01-05",
+        entry_price=10.0,
+        exit_price=10.5,
+        profit=0.5,
+        symbol="AAA",
+    )
+    trade = strategy.replace(
+        trade,
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-02"), 0.00, -0.04, -0.04),
+        ],
+    )
+    artifacts = _build_artifacts([(trade, detail_pair)])
+
+    def fake_generate(
+        *args: object,
+        **kwargs: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        return artifacts
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=1,
+        adaptive_tp_sl=strategy.AdaptiveTPSLConfig(
+            min_sl=0.03,
+            min_tp=0.06,
+        ),
+    )
+
+    close_detail = next(
+        detail
+        for detail_list in metrics.overall_metrics.trade_details_by_year.values()
+        for detail in detail_list
+        if detail.action == "close"
+    )
+
+    assert close_detail.exit_reason == "adaptive_stop_loss"
+    assert close_detail.price == pytest.approx(9.6)
+    assert close_detail.percentage_change == pytest.approx(-0.04)
+    assert metrics.overall_metrics.mean_loss_percentage == pytest.approx(0.04)
+
+
 def test_run_complex_simulation_enforces_shared_cap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -239,7 +396,11 @@ def test_evict_oldest_keeps_evicted_exit_from_far_future_settlement(
     ) -> strategy.StrategyEvaluationArtifacts:
         return artifacts
 
-    monkeypatch.setattr(strategy, "_generate_strategy_evaluation_artifacts", fake_generate)
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
     _stub_metrics_functions(monkeypatch)
 
     definitions = {
@@ -274,6 +435,91 @@ def test_evict_oldest_keeps_evicted_exit_from_far_future_settlement(
     assert first_close.date == pandas.Timestamp("2024-01-08")
     assert first_close.exit_reason == "evicted"
     assert metrics.overall_metrics.maximum_concurrent_positions == 1
+
+
+def test_same_symbol_refresh_uses_applied_stop_loss_not_fixed_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same-symbol refresh should respect the SL already applied to the trade."""
+
+    first_signal_trade, first_signal_details = _build_trade(
+        "2024-01-01",
+        "2024-01-08",
+        entry_price=10.0,
+        exit_price=12.0,
+        profit=2.0,
+        symbol="AAA",
+    )
+    first_signal_trade = strategy.replace(
+        first_signal_trade,
+        exit_reason="reentry",
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-02"), 0.01, 0.00, 0.00),
+        ],
+    )
+    refreshed_signal_trade, refreshed_signal_details = _build_trade(
+        "2024-01-03",
+        "2024-01-08",
+        entry_price=10.0,
+        exit_price=12.0,
+        profit=2.0,
+        symbol="AAA",
+    )
+    refreshed_signal_trade = strategy.replace(
+        refreshed_signal_trade,
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-04"), 0.01, -0.02, 0.00),
+        ],
+    )
+
+    artifacts = _build_artifacts(
+        [
+            (first_signal_trade, first_signal_details),
+            (refreshed_signal_trade, refreshed_signal_details),
+        ],
+    )
+
+    def fake_generate(
+        *args: object,
+        **kwargs: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        return artifacts
+
+    monkeypatch.setattr(strategy, "_generate_strategy_evaluation_artifacts", fake_generate)
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=1,
+        minimum_holding_bars=1,
+        adaptive_tp_sl=strategy.AdaptiveTPSLConfig(
+            fixed_sl=0.03,
+            evict_oldest=True,
+        ),
+    )
+
+    close_details = [
+        detail
+        for detail_list in metrics.overall_metrics.trade_details_by_year.values()
+        for detail in detail_list
+        if detail.action == "close"
+    ]
+
+    assert len(close_details) == 1
+    assert close_details[0].symbol == "AAA"
+    assert close_details[0].date == pandas.Timestamp("2024-01-04")
+    assert close_details[0].exit_reason == "adaptive_stop_loss"
+    assert close_details[0].price == pytest.approx(9.9)
+    assert close_details[0].adaptive_sl_pct == pytest.approx(0.01)
 
 
 def test_evict_oldest_refreshes_same_symbol_signal_age_without_reentry(

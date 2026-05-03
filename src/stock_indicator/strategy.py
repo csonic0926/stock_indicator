@@ -746,7 +746,10 @@ def _replay_trade_with_adaptive_tp_sl(
             holding >= minimum_holding_bars
             and bar_low_pct <= -active_sl_pct
         ):
-            adjusted_exit_price = trade.entry_price * (1 - active_sl_pct)
+            effective_sl_pct = active_sl_pct
+            if bar_open_pct <= -active_sl_pct:
+                effective_sl_pct = -bar_open_pct
+            adjusted_exit_price = trade.entry_price * (1 - effective_sl_pct)
             adjusted_profit = adjusted_exit_price - trade.entry_price
             return replace(
                 trade,
@@ -1274,8 +1277,6 @@ def run_complex_simulation(
                     (0.0, adaptive_tp_sl.min_sl),
                 )
                 active_stop_loss_percentage = applied_percentages[1]
-                if adaptive_tp_sl.fixed_sl is not None:
-                    active_stop_loss_percentage = adaptive_tp_sl.fixed_sl
 
                 replacement_trade = current_adjusted_trade
                 for refresh_bar_index, refresh_excursion in enumerate(
@@ -1474,8 +1475,17 @@ def run_complex_simulation(
                             if raw_trade.entry_price > 0
                             else 0.0
                         )
-                        if adaptive_tp_sl.delayed_rolling_update:
-                            pending_rolling_updates.append((close_date, pct))
+                        rolling_update_date = max(
+                            close_date,
+                            raw_trade.exit_date,
+                        )
+                        if (
+                            adaptive_tp_sl.delayed_rolling_update
+                            or rolling_update_date > close_date
+                        ):
+                            pending_rolling_updates.append(
+                                (rolling_update_date, pct)
+                            )
                         else:
                             adaptive_closed_profits.append(pct)
                             if len(adaptive_closed_profits) > adaptive_tp_sl.window:
@@ -3866,7 +3876,7 @@ def _generate_strategy_evaluation_artifacts(
             price_data_frame["_combined_sell_exit"] = False
 
         def entry_rule(current_row: pandas.Series) -> bool:
-            symbol_is_eligible = bool(symbol_mask.loc[current_row.name])
+            symbol_is_eligible = bool(symbol_mask.shift(1, fill_value=False).loc[current_row.name])
             return bool(current_row["_combined_buy_entry"]) and symbol_is_eligible
 
         def exit_rule(current_row: pandas.Series, entry_row: pandas.Series) -> bool:
