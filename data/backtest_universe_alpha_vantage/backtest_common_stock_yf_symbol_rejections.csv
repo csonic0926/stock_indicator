@@ -1,0 +1,14 @@
+symbol,first_snapshot_year,latest_snapshot_year,sources,asset_types,statuses,alpha_vantage_symbol,yahoo_symbol_candidate,local_symbol_candidate,symbol_suffix_type,needs_symbol_validation,yf_symbol,rejection_reason
+ETP-,2010,2021,alpha_vantage_listing_status,Stock,Active|Delisted,ETP-,ETP-,ETP-,class_or_suffix,False,ETP-,bad_edge_punctuation
+ASRV 8.45 06-30-28,2010,2021,alpha_vantage_listing_status,Stock,Active|Delisted,ASRV 8.45 06-30-28,ASRV 8.45 06-30-28,ASRV 8.45 06-30-28,class_or_suffix,False,ASRV 8.45 06-30-28,contains_whitespace
+CFX 5.75,2019,2021,alpha_vantage_listing_status,Stock,Active,CFX 5.75,CFX 5.75,CFX 5.75,class_or_suffix,False,CFX 5.75,contains_whitespace
+CHNG 6,2019,2021,alpha_vantage_listing_status,Stock,Active,CHNG 6,CHNG 6,CHNG 6,plain,False,CHNG 6,contains_whitespace
+DTE 6.25,2019,2021,alpha_vantage_listing_status,Stock,Active,DTE 6.25,DTE 6.25,DTE 6.25,class_or_suffix,False,DTE 6.25,contains_whitespace
+IFF 6,2018,2021,alpha_vantage_listing_status,Stock,Active|Delisted,IFF 6,IFF 6,IFF 6,plain,False,IFF 6,contains_whitespace
+NEE 6.219,2020,2021,alpha_vantage_listing_status,Stock,Delisted,NEE 6.219,NEE 6.219,NEE 6.219,class_or_suffix,False,NEE 6.219,contains_whitespace
+SJI 7.25,2018,2021,alpha_vantage_listing_status,Stock,Active|Delisted,SJI 7.25,SJI 7.25,SJI 7.25,class_or_suffix,False,SJI 7.25,contains_whitespace
+SO 6.75 08-01-22,2019,2021,alpha_vantage_listing_status,Stock,Active,SO 6.75 08-01-22,SO 6.75 08-01-22,SO 6.75 08-01-22,class_or_suffix,False,SO 6.75 08-01-22,contains_whitespace
+BC/PA,2018,2022,alpha_vantage_listing_status,Stock,Active,BC/PA,BC/PA,BC/PA,plain,False,BC/PA,invalid_characters
+BC/PB,2018,2022,alpha_vantage_listing_status,Stock,Active,BC/PB,BC/PB,BC/PB,plain,False,BC/PB,invalid_characters
+BC/PC,2019,2022,alpha_vantage_listing_status,Stock,Active,BC/PC,BC/PC,BC/PC,plain,False,BC/PC,invalid_characters
+DTV_1,2017,2021,alpha_vantage_listing_status,Stock,Delisted,DTV_1,DTV_1,DTV_1,plain,False,DTV_1,invalid_characters

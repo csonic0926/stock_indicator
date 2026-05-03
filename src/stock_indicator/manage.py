@@ -42,6 +42,7 @@ STOCK_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
 # data_source= token in simulation commands.
 DATA_SOURCE_PATHS: dict[str, Path] = {
     "daily": DATA_DIRECTORY / "stock_data",
+    "2010": DATA_DIRECTORY / "stock_data_2010_yf_clean",
     "2014": DATA_DIRECTORY / "stock_data_2014",
     "1994": DATA_DIRECTORY / "stock_data_1994",
 }
