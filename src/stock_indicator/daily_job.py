@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List
 from zoneinfo import ZoneInfo
@@ -30,6 +31,21 @@ MINIMUM_HISTORY_DATE = "2014-01-01"
 SIGNAL_HISTORY_LOOKBACK_DAYS = 756
 DATA_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "data"
 STOCK_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
+BACKTEST_UNIVERSE_DIRECTORY = DATA_DIRECTORY / "backtest_universe_alpha_vantage"
+ETF_SYMBOLS_PATH = (
+    BACKTEST_UNIVERSE_DIRECTORY / "backtest_etf_symbols_2010_2026_plus_runtime.csv"
+)
+LISTING_STATUS_RAW_PATH = (
+    BACKTEST_UNIVERSE_DIRECTORY / "listing_status_2010_2026_plus_runtime_raw.csv"
+)
+NON_COMMON_STOCK_NAME_PATTERN = re.compile(
+    r"\b(warrants?|units?|rights?|preferred|preference)\b",
+    flags=re.IGNORECASE,
+)
+NON_COMMON_STOCK_SYMBOL_PATTERN = re.compile(
+    r"(?:[.-](?:WT|WS|W|U|R)|(?:WS|WT))$",
+    flags=re.IGNORECASE,
+)
 
 
 def determine_latest_trading_date(
@@ -130,23 +146,172 @@ def determine_last_cached_date(data_directory: Path) -> datetime.date:
     return latest_date
 
 
+def _symbol_separator_aliases(symbol_name: str) -> set[str]:
+    """Return dot/dash aliases used by local CSV and vendor symbols."""
+
+    normalized_symbol = symbol_name.strip().upper()
+    aliases = {normalized_symbol}
+    if "." in normalized_symbol:
+        aliases.add(normalized_symbol.replace(".", "-"))
+    if "-" in normalized_symbol:
+        aliases.add(normalized_symbol.replace("-", "."))
+    return aliases
+
+
+def load_symbols_rejected_by_asset_metadata() -> set[str]:
+    """Return symbols identified as ETFs or funds by listing-status metadata."""
+
+    if not ETF_SYMBOLS_PATH.exists():
+        LOGGER.warning("ETF metadata not found: %s", ETF_SYMBOLS_PATH)
+        return set()
+
+    try:
+        etf_frame = pandas.read_csv(ETF_SYMBOLS_PATH)
+    except (OSError, pandas.errors.ParserError) as read_error:
+        LOGGER.warning(
+            "Could not read ETF metadata %s: %s",
+            ETF_SYMBOLS_PATH,
+            read_error,
+        )
+        return set()
+
+    symbol_columns = [
+        column_name
+        for column_name in (
+            "local_symbol_candidate",
+            "yahoo_symbol_candidate",
+            "alpha_vantage_symbol",
+            "symbol",
+        )
+        if column_name in etf_frame.columns
+    ]
+    rejected_symbols: set[str] = set()
+    for column_name in symbol_columns:
+        for symbol_name in etf_frame[column_name].dropna().astype(str):
+            rejected_symbols.update(_symbol_separator_aliases(symbol_name))
+    return rejected_symbols
+
+def load_symbols_rejected_by_listing_name() -> set[str]:
+    """Return symbols whose listing names identify non-common-stock instruments."""
+
+    if not LISTING_STATUS_RAW_PATH.exists():
+        LOGGER.warning(
+            "Listing-status raw metadata not found: %s", LISTING_STATUS_RAW_PATH
+        )
+        return set()
+
+    try:
+        listing_frame = pandas.read_csv(LISTING_STATUS_RAW_PATH, low_memory=False)
+    except (OSError, pandas.errors.ParserError) as read_error:
+        LOGGER.warning(
+            "Could not read listing-status raw metadata %s: %s",
+            LISTING_STATUS_RAW_PATH,
+            read_error,
+        )
+        return set()
+
+    if "symbol" not in listing_frame.columns or "name" not in listing_frame.columns:
+        return set()
+
+    named_listing_frame = listing_frame.dropna(subset=["symbol", "name"])
+    rejected_symbols: set[str] = set()
+    for listing_row in named_listing_frame.itertuples(index=False):
+        listing_name = str(getattr(listing_row, "name", ""))
+        if not NON_COMMON_STOCK_NAME_PATTERN.search(listing_name):
+            continue
+        symbol_name = str(getattr(listing_row, "symbol", ""))
+        rejected_symbols.update(_symbol_separator_aliases(symbol_name))
+    return rejected_symbols
+
+
+def load_runtime_download_symbols() -> list[str]:
+    """Return the sector-safe runtime universe for the daily Yahoo refresh.
+
+    Runtime trading must not depend on every cached CSV under ``stock_data``.
+    The current symbol cache is the starting point, then known non-stock
+    instruments are removed.  When FF12 sector data is available, only symbols
+    with a valid selectable FF12 group are downloaded because production
+    selection is group-aware and cannot buy symbols without that layer.
+    """
+
+    current_symbols = [
+        symbol_name.strip().upper()
+        for symbol_name in load_symbols()
+        if symbol_name and symbol_name.strip() and symbol_name != SP500_SYMBOL
+    ]
+    current_symbols = sorted(dict.fromkeys(current_symbols))
+    symbols_excluded_by_industry = strategy.load_symbols_excluded_by_industry()
+    symbol_to_group_identifier = strategy.load_ff12_groups_by_symbol()
+    symbols_rejected_by_asset_metadata = load_symbols_rejected_by_asset_metadata()
+    symbols_rejected_by_listing_name = load_symbols_rejected_by_listing_name()
+
+    if not symbol_to_group_identifier:
+        LOGGER.warning(
+            "FF12 sector map is unavailable; runtime refresh will only apply "
+            "known non-stock exclusions"
+        )
+    if not symbols_rejected_by_asset_metadata:
+        LOGGER.warning(
+            "ETF metadata is unavailable; refresh will not apply the "
+            "Alpha Vantage ETF/fund rejection layer"
+        )
+
+    runtime_symbols: list[str] = []
+    skipped_non_stock_count = 0
+    skipped_missing_sector_count = 0
+    skipped_asset_metadata_count = 0
+    skipped_listing_name_count = 0
+    for symbol_name in current_symbols:
+        if symbol_name in symbols_excluded_by_industry:
+            skipped_non_stock_count += 1
+            continue
+        if (
+            symbol_to_group_identifier
+            and symbol_name not in symbol_to_group_identifier
+        ):
+            skipped_missing_sector_count += 1
+            continue
+        if symbol_name in symbols_rejected_by_asset_metadata:
+            skipped_asset_metadata_count += 1
+            continue
+        if (
+            symbol_name in symbols_rejected_by_listing_name
+            or NON_COMMON_STOCK_SYMBOL_PATTERN.search(symbol_name)
+        ):
+            skipped_listing_name_count += 1
+            continue
+        runtime_symbols.append(symbol_name)
+
+    runtime_symbols.append(SP500_SYMBOL)
+    LOGGER.info(
+        "Runtime Yahoo refresh universe: %d symbols (%d current, "
+        "%d non-stock skipped, %d missing-sector skipped, "
+        "%d ETF/fund skipped, %d listing-name skipped)",
+        len(runtime_symbols),
+        len(current_symbols),
+        skipped_non_stock_count,
+        skipped_missing_sector_count,
+        skipped_asset_metadata_count,
+        skipped_listing_name_count,
+    )
+    return runtime_symbols
+
+
 def update_all_data_from_yf(
     start_date: str, end_date: str, data_directory: Path
 ) -> None:
-    """Download historical data for all symbols into ``data_directory``.
+    """Download historical data for the sector-safe runtime universe.
 
     The ``end_date`` argument is treated as inclusive. To accommodate the
     exclusive end-date semantics of the Yahoo Finance API, this function adds
-    one day to ``end_date`` before requesting data.
+    one day to ``end_date`` before requesting data. Per-symbol failures are
+    logged and skipped so one bad Yahoo response cannot stop the cron job.
     """
 
     exclusive_end_date = (
         datetime.date.fromisoformat(end_date) + datetime.timedelta(days=1)
     ).isoformat()
-    symbol_list = load_symbols()
-    if SP500_SYMBOL not in symbol_list:
-        symbol_list.append(SP500_SYMBOL)
-    for symbol_name in symbol_list:
+    for symbol_name in load_runtime_download_symbols():
         csv_path = data_directory / f"{symbol_name}.csv"
         try:
             download_history(
@@ -185,7 +350,7 @@ def _load_current_symbols_with_cached_price(
 
     current_symbol_list = [
         symbol_name
-        for symbol_name in load_symbols()
+        for symbol_name in load_runtime_download_symbols()
         if symbol_name and symbol_name != SP500_SYMBOL
     ]
     cached_symbol_set = {

@@ -515,42 +515,14 @@ class StockShell(cmd.Cmd):
             self.stdout.write("usage: update_all_data_from_yf START END\n")
             return
         start_date, end_date = argument_parts
-        exclusive_end_date = (
-            datetime.date.fromisoformat(end_date) + datetime.timedelta(days=1)
-        ).isoformat()
-        symbol_list = symbols.load_symbols()
-        # Ensure ^GSPC is also downloaded, but not stored in symbols.txt
-        if SP500_SYMBOL not in symbol_list:
-            symbol_list.append(SP500_SYMBOL)
-        for symbol_name in symbol_list:
-            data_frame: DataFrame = data_loader.download_history(
-                symbol_name, start_date, exclusive_end_date
-            )
-            _cleanup_yfinance_session()  # TODO: review
-            data_frame_with_date: DataFrame = (
-                data_frame.reset_index().rename(columns={"index": "Date"})
-            )
-            STOCK_DATA_DIRECTORY.mkdir(parents=True, exist_ok=True)
-            output_path = STOCK_DATA_DIRECTORY / f"{symbol_name}.csv"
-            try:
-                with output_path.open("w", encoding="utf-8") as file_handle:  # TODO: review
-                    data_frame_with_date.to_csv(file_handle, index=False)  # TODO: review
-            except OSError as first_error:  # TODO: review
-                LOGGER.error(
-                    "Error writing CSV for %s: %s", symbol_name, first_error
-                )  # TODO: review
-                time.sleep(1)  # TODO: review
-                try:
-                    with output_path.open("w", encoding="utf-8") as file_handle:  # TODO: review
-                        data_frame_with_date.to_csv(file_handle, index=False)  # TODO: review
-                except OSError as second_error:  # TODO: review
-                    LOGGER.error(
-                        "Skipping %s due to repeated write failure: %s",
-                        symbol_name,
-                        second_error,
-                    )  # TODO: review
-                    continue
-            self.stdout.write(f"Data written to {output_path}\n")
+        daily_job.update_all_data_from_yf(
+            start_date,
+            end_date,
+            STOCK_DATA_DIRECTORY,
+        )
+        self.stdout.write(
+            "Data refresh completed for sector-safe runtime universe\n"
+        )
 
     def help_update_all_data_from_yf(self) -> None:
         """Display help for the update_all_data_from_yf command."""

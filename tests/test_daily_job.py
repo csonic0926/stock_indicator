@@ -42,6 +42,18 @@ def test_update_all_data_from_yf_deduplicates_history(
 
     monkeypatch.setattr(daily_job, "download_history", fake_download_history)
     monkeypatch.setattr(daily_job, "load_symbols", lambda: ["AAA"])
+    monkeypatch.setattr(
+        daily_job.strategy, "load_ff12_groups_by_symbol", lambda: {"AAA": 1}
+    )
+    monkeypatch.setattr(
+        daily_job.strategy, "load_symbols_excluded_by_industry", lambda: set()
+    )
+    monkeypatch.setattr(
+        daily_job, "load_symbols_rejected_by_asset_metadata", lambda: set()
+    )
+    monkeypatch.setattr(
+        daily_job, "load_symbols_rejected_by_listing_name", lambda: set()
+    )
     daily_job.update_all_data_from_yf(
         "2024-01-01", "2024-01-04", data_directory
     )
@@ -76,10 +88,22 @@ def test_update_all_data_from_yf_treats_end_as_inclusive(
 
     monkeypatch.setattr(daily_job, "download_history", fake_download_history)
     monkeypatch.setattr(daily_job, "load_symbols", lambda: ["AAA"])
+    monkeypatch.setattr(
+        daily_job.strategy, "load_ff12_groups_by_symbol", lambda: {"AAA": 1}
+    )
+    monkeypatch.setattr(
+        daily_job.strategy, "load_symbols_excluded_by_industry", lambda: set()
+    )
+    monkeypatch.setattr(
+        daily_job, "load_symbols_rejected_by_asset_metadata", lambda: set()
+    )
+    monkeypatch.setattr(
+        daily_job, "load_symbols_rejected_by_listing_name", lambda: set()
+    )
 
     daily_job.update_all_data_from_yf("2024-01-01", "2024-01-01", tmp_path)
 
-    assert recorded_end_dates == ["2024-01-02"]
+    assert recorded_end_dates == ["2024-01-02", "2024-01-02"]
 
 
 def test_update_all_data_from_yf_preserves_existing_rows(
@@ -113,6 +137,18 @@ def test_update_all_data_from_yf_preserves_existing_rows(
 
     monkeypatch.setattr(daily_job, "download_history", fake_download_history)
     monkeypatch.setattr(daily_job, "load_symbols", lambda: ["AAA"])
+    monkeypatch.setattr(
+        daily_job.strategy, "load_ff12_groups_by_symbol", lambda: {"AAA": 1}
+    )
+    monkeypatch.setattr(
+        daily_job.strategy, "load_symbols_excluded_by_industry", lambda: set()
+    )
+    monkeypatch.setattr(
+        daily_job, "load_symbols_rejected_by_asset_metadata", lambda: set()
+    )
+    monkeypatch.setattr(
+        daily_job, "load_symbols_rejected_by_listing_name", lambda: set()
+    )
 
     daily_job.update_all_data_from_yf(
         "2024-01-01", "2024-01-05", data_directory
@@ -145,6 +181,20 @@ def test_update_all_data_from_yf_logs_warning_on_error(
 
     monkeypatch.setattr(daily_job, "download_history", fake_download_history)
     monkeypatch.setattr(daily_job, "load_symbols", lambda: ["AAA", "BBB"])
+    monkeypatch.setattr(
+        daily_job.strategy,
+        "load_ff12_groups_by_symbol",
+        lambda: {"AAA": 1, "BBB": 2},
+    )
+    monkeypatch.setattr(
+        daily_job.strategy, "load_symbols_excluded_by_industry", lambda: set()
+    )
+    monkeypatch.setattr(
+        daily_job, "load_symbols_rejected_by_asset_metadata", lambda: set()
+    )
+    monkeypatch.setattr(
+        daily_job, "load_symbols_rejected_by_listing_name", lambda: set()
+    )
 
     with caplog.at_level(logging.WARNING):
         daily_job.update_all_data_from_yf(
@@ -153,3 +203,68 @@ def test_update_all_data_from_yf_logs_warning_on_error(
 
     assert any("BBB" in record.message for record in caplog.records)
 
+
+
+def test_load_runtime_download_symbols_skips_non_stock_and_missing_sector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime refresh should only include sector-classified common stocks."""
+
+    monkeypatch.setattr(
+        daily_job,
+        "load_symbols",
+        lambda: ["AAA", "BBB", "CCC", daily_job.SP500_SYMBOL],
+    )
+    monkeypatch.setattr(
+        daily_job.strategy,
+        "load_ff12_groups_by_symbol",
+        lambda: {"AAA": 1, "CCC": 6},
+    )
+    monkeypatch.setattr(
+        daily_job.strategy,
+        "load_symbols_excluded_by_industry",
+        lambda: {"CCC"},
+    )
+    monkeypatch.setattr(
+        daily_job, "load_symbols_rejected_by_asset_metadata", lambda: set()
+    )
+    monkeypatch.setattr(
+        daily_job, "load_symbols_rejected_by_listing_name", lambda: set()
+    )
+
+    assert daily_job.load_runtime_download_symbols() == [
+        "AAA",
+        daily_job.SP500_SYMBOL,
+    ]
+
+
+def test_load_runtime_download_symbols_skips_asset_and_listing_name_rejections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime refresh should remove known ETFs, warrants and units."""
+
+    monkeypatch.setattr(
+        daily_job,
+        "load_symbols",
+        lambda: ["AAA", "ETF", "UNKNOWN", "WARRANT"],
+    )
+    monkeypatch.setattr(
+        daily_job.strategy,
+        "load_ff12_groups_by_symbol",
+        lambda: {"AAA": 1, "ETF": 1, "UNKNOWN": 1, "WARRANT": 1},
+    )
+    monkeypatch.setattr(
+        daily_job.strategy, "load_symbols_excluded_by_industry", lambda: set()
+    )
+    monkeypatch.setattr(
+        daily_job, "load_symbols_rejected_by_asset_metadata", lambda: {"ETF"}
+    )
+    monkeypatch.setattr(
+        daily_job, "load_symbols_rejected_by_listing_name", lambda: {"WARRANT"}
+    )
+
+    assert daily_job.load_runtime_download_symbols() == [
+        "AAA",
+        "UNKNOWN",
+        daily_job.SP500_SYMBOL,
+    ]

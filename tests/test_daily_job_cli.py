@@ -38,15 +38,36 @@ def test_manager_cli_generates_logs_and_signals(
     monkeypatch.setattr(daily_job_module, "DATA_DIRECTORY", data_directory)
     monkeypatch.setattr(daily_job_module, "STOCK_DATA_DIRECTORY", stock_data_directory)
 
-    monkeypatch.setattr(manage_module.symbols, "load_symbols", lambda: ["AAA"])
+    monkeypatch.setattr(daily_job_module, "load_symbols", lambda: ["AAA"])
+    monkeypatch.setattr(
+        daily_job_module.strategy, "load_ff12_groups_by_symbol", lambda: {"AAA": 1}
+    )
+    monkeypatch.setattr(
+        daily_job_module.strategy, "load_symbols_excluded_by_industry", lambda: set()
+    )
+    monkeypatch.setattr(
+        daily_job_module, "load_symbols_rejected_by_asset_metadata", lambda: set()
+    )
+    monkeypatch.setattr(
+        daily_job_module, "load_symbols_rejected_by_listing_name", lambda: set()
+    )
 
     recorded_end_dates: list[str] = []
 
-    def fake_download_history(symbol_name: str, start: str, end: str) -> pandas.DataFrame:
+    def fake_download_history(
+        symbol_name: str,
+        start: str,
+        end: str,
+        cache_path: Path | None = None,
+    ) -> pandas.DataFrame:
         recorded_end_dates.append(end)
-        return pandas.DataFrame(
+        data_frame = pandas.DataFrame(
             {"open": [1.0], "close": [1.0]}, index=pandas.to_datetime(["2024-01-10"])
         )
+        if cache_path is not None:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            data_frame.to_csv(cache_path)
+        return data_frame
 
     monkeypatch.setattr(manage_module.data_loader, "download_history", fake_download_history)
     monkeypatch.setattr(daily_job_module, "download_history", fake_download_history)

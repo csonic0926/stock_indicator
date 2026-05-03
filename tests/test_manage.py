@@ -108,16 +108,45 @@ def test_update_all_data_from_yf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     download_calls: list[str] = []
     recorded_end_dates: list[str] = []
 
-    def fake_download_history(symbol_name: str, start: str, end: str) -> pandas.DataFrame:
+    def fake_download_history(
+        symbol_name: str,
+        start: str,
+        end: str,
+        cache_path: Path | None = None,
+    ) -> pandas.DataFrame:
         download_calls.append(symbol_name)
         recorded_end_dates.append(end)
-        return pandas.DataFrame(
+        data_frame = pandas.DataFrame(
             {"close": [1.0]}, index=pandas.to_datetime(["2023-01-01"])
         ).rename_axis("Date")
+        if cache_path is not None:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            data_frame.to_csv(cache_path)
+        return data_frame
 
-    monkeypatch.setattr(manage_module.symbols, "load_symbols", fake_load_symbols)
+    monkeypatch.setattr(manage_module.daily_job, "load_symbols", fake_load_symbols)
     monkeypatch.setattr(
-        manage_module.data_loader, "download_history", fake_download_history
+        manage_module.daily_job, "download_history", fake_download_history
+    )
+    monkeypatch.setattr(
+        manage_module.daily_job.strategy,
+        "load_ff12_groups_by_symbol",
+        lambda: {"AAA": 1, "BBB": 2},
+    )
+    monkeypatch.setattr(
+        manage_module.daily_job.strategy,
+        "load_symbols_excluded_by_industry",
+        lambda: set(),
+    )
+    monkeypatch.setattr(
+        manage_module.daily_job,
+        "load_symbols_rejected_by_asset_metadata",
+        lambda: set(),
+    )
+    monkeypatch.setattr(
+        manage_module.daily_job,
+        "load_symbols_rejected_by_listing_name",
+        lambda: set(),
     )
     monkeypatch.setattr(manage_module, "DATA_DIRECTORY", tmp_path)
     monkeypatch.setattr(manage_module, "STOCK_DATA_DIRECTORY", tmp_path)
