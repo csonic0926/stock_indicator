@@ -8,7 +8,7 @@ Logic:
 2. Query open sell orders → which positions already have TP / SL
 3. Query history filled BUY → earliest fill date per code = entry date
 4. Missing TP → GTC limit sell at cost_price * (1 + tp%)
-5. Missing SL + bars_held >= min_hold → GTC stop at cost_price * (1 - sl%)
+5. Missing SL + bars_held >= sl_min_hold → GTC stop at cost_price * (1 - sl%)
 
 Usage:
     venv/bin/python -m stock_indicator.place_tp_sl [--dry-run]
@@ -29,7 +29,14 @@ LOGGER = logging.getLogger(__name__)
 LOGS_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "logs"
 
 TRADING_ENV = "REAL"
-MIN_HOLD_BARS = 5
+# SL-specific min_hold (decoupled from signal-exit min_hold). SL is risk
+# control, not STATE confirmation, so it should not inherit signal latency.
+# Mirrors AdaptiveTPSLConfig.min_hold_sl in strategy.py.
+SL_MIN_HOLD_BARS = 1
+# Skip SL order placement entirely. Matches new design where SL is computed
+# as rolling regime indicator (drives dynamic min_hold throttle in backtest)
+# but never fires as an actual exit. Live trades exit only via TP or signal.
+SL_PLACEMENT_DISABLED = True
 
 
 DATA_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "data"
@@ -243,8 +250,16 @@ def main() -> None:
         LOGGER.info("  TP: %s", tp_result["status"])
         _log_order(tp_result)
 
-    # --- 5. Place SL for positions past min_hold and missing SL ---
-    LOGGER.info("--- SL check (min_hold=%d) ---", MIN_HOLD_BARS)
+    # --- 5. Place SL for positions past sl_min_hold and missing SL ---
+    if SL_PLACEMENT_DISABLED:
+        LOGGER.info(
+            "--- SL placement DISABLED — design uses rolling SL as regime "
+            "indicator only, no actual SL orders placed ---"
+        )
+        trd_ctx.close()
+        LOGGER.info("Done")
+        return
+    LOGGER.info("--- SL check (sl_min_hold=%d) ---", SL_MIN_HOLD_BARS)
     for code, pos in positions.items():
         symbol = code.replace("US.", "")
 
@@ -265,17 +280,17 @@ def main() -> None:
         except Exception:
             bars_held = 0
 
-        if bars_held < MIN_HOLD_BARS:
+        if bars_held < SL_MIN_HOLD_BARS:
             LOGGER.info(
-                "%s: bars_held=%d < min_hold=%d, SL deferred",
-                symbol, bars_held, MIN_HOLD_BARS,
+                "%s: bars_held=%d < sl_min_hold=%d, SL deferred",
+                symbol, bars_held, SL_MIN_HOLD_BARS,
             )
             continue
 
         sl_price = round(pos["cost_price"] * (1 - sl_pct), 2)
         LOGGER.info(
-            "%s: bars_held=%d >= min_hold=%d → SL=$%.2f (-%.2f%%) [GTC stop]",
-            symbol, bars_held, MIN_HOLD_BARS, sl_price, sl_pct * 100,
+            "%s: bars_held=%d >= sl_min_hold=%d → SL=$%.2f (-%.2f%%) [GTC stop]",
+            symbol, bars_held, SL_MIN_HOLD_BARS, sl_price, sl_pct * 100,
         )
 
         if dry_run:

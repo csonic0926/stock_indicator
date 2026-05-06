@@ -638,8 +638,8 @@ function render(state, futu) {
   } else {
     html += stat('Status', 'Futu OpenD not connected', 'negative');
     // Show signal-based positions
-    const buy3 = positions.buy3 || [];
-    html += stat('Signal Positions', buy3.length + '/6');
+    const fish_head = positions.fish_head_production || [];
+    html += stat('Signal Positions', fish_head.length + '/6');
   }
   $('#account-stats').innerHTML = html;
 
@@ -680,10 +680,10 @@ function render(state, futu) {
     }
     html += '</table>';
   } else {
-    const buy3 = positions.buy3 || [];
-    if (buy3.length > 0) {
+    const fish_head = positions.fish_head_production || [];
+    if (fish_head.length > 0) {
       html += '<table><tr><th>Symbol</th><th>Entry Date</th></tr>';
-      for (const p of buy3) {
+      for (const p of fish_head) {
         html += `<tr><td><strong>${p.symbol}</strong></td><td>${p.entry_date||'—'}</td></tr>`;
       }
       html += '</table>';

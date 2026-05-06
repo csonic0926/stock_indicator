@@ -232,6 +232,93 @@ def test_adaptive_rolling_update_waits_for_raw_exit_date(
     assert probe_close_detail.adaptive_tp_pct == pytest.approx(0.02)
 
 
+def test_adaptive_stop_loss_uses_rolling_signal_losses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rolling SL should come from recent signal losses, not TP / target_r."""
+
+    trades_with_details = []
+    prior_trade_specs = [
+        ("2024-01-01", "2024-01-02", "AAA", 0.30),
+        ("2024-01-02", "2024-01-03", "BBB", 0.30),
+        ("2024-01-03", "2024-01-04", "CCC", 0.30),
+        ("2024-01-04", "2024-01-05", "DDD", -0.04),
+        ("2024-01-05", "2024-01-06", "EEE", -0.04),
+        ("2024-01-06", "2024-01-07", "FFF", -0.04),
+    ]
+    for entry_date, exit_date, symbol_name, raw_return in prior_trade_specs:
+        exit_price = 10.0 * (1.0 + raw_return)
+        trade, detail_pair = _build_trade(
+            entry_date,
+            exit_date,
+            entry_price=10.0,
+            exit_price=exit_price,
+            profit=exit_price - 10.0,
+            symbol=symbol_name,
+        )
+        trades_with_details.append((trade, detail_pair))
+
+    probe_trade, probe_detail_pair = _build_trade(
+        "2024-01-10",
+        "2024-01-15",
+        entry_price=10.0,
+        exit_price=11.0,
+        profit=1.0,
+        symbol="ZZZ",
+    )
+    probe_trade = strategy.replace(
+        probe_trade,
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-11"), 0.00, -0.05, 0.00),
+        ],
+    )
+    trades_with_details.append((probe_trade, probe_detail_pair))
+    artifacts = _build_artifacts(trades_with_details)
+
+    def fake_generate(
+        *args: object,
+        **kwargs: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        return artifacts
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=6,
+        adaptive_tp_sl=strategy.AdaptiveTPSLConfig(
+            min_samples=6,
+            sigma_multiplier=0.0,
+            min_sl=0.01,
+        ),
+    )
+
+    probe_close_detail = next(
+        detail
+        for detail_list in metrics.overall_metrics.trade_details_by_year.values()
+        for detail in detail_list
+        if detail.action == "close" and detail.symbol == "ZZZ"
+    )
+
+    assert probe_close_detail.exit_reason == "adaptive_stop_loss"
+    assert probe_close_detail.adaptive_tp_pct == pytest.approx(0.30)
+    assert probe_close_detail.adaptive_sl_pct == pytest.approx(0.04)
+
+
 def test_adaptive_stop_loss_uses_gap_down_open_price(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -295,6 +382,428 @@ def test_adaptive_stop_loss_uses_gap_down_open_price(
     assert close_detail.price == pytest.approx(9.6)
     assert close_detail.percentage_change == pytest.approx(-0.04)
     assert metrics.overall_metrics.mean_loss_percentage == pytest.approx(0.04)
+
+
+def test_early_adaptive_stop_loss_keeps_old_min_hold_slot_rhythm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Early SL should affect P/L while slot timing follows min_hold replay."""
+
+    stopped_trade, stopped_details = _build_trade(
+        "2024-01-01",
+        "2024-01-10",
+        entry_price=10.0,
+        exit_price=10.0,
+        profit=0.0,
+        symbol="AAA",
+    )
+    stopped_trade = strategy.replace(
+        stopped_trade,
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-02"), 0.00, -0.03, 0.00),
+            (pandas.Timestamp("2024-01-03"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-04"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-05"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-08"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-09"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-10"), 0.00, 0.00, 0.00),
+        ],
+    )
+    blocked_trade, blocked_details = _build_trade(
+        "2024-01-09",
+        "2024-01-10",
+        symbol="BBB",
+    )
+
+    artifacts = _build_artifacts(
+        [
+            (stopped_trade, stopped_details),
+            (blocked_trade, blocked_details),
+        ],
+    )
+
+    def fake_generate(
+        *args: object,
+        **kwargs: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        return artifacts
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=1,
+        minimum_holding_bars=5,
+        adaptive_tp_sl=strategy.AdaptiveTPSLConfig(
+            # Stress regime: SL > TP → R = TP/SL = 0.67 → dynamic lock = round(5 * 1.5) = 8 bars
+            # AAA bar 1 low = -0.03 ≤ -0.03 SL → SL fires bar 1.
+            # Shadow lock extends past BBB entry (Jan 9 = bar 6) → BBB blocked.
+            min_sl=0.03,
+            min_tp=0.02,
+            override_min_hold_sl_only=True,
+            min_hold_sl=1,
+        ),
+    )
+
+    close_details = [
+        detail
+        for detail_list in metrics.overall_metrics.trade_details_by_year.values()
+        for detail in detail_list
+        if detail.action == "close"
+    ]
+
+    assert [detail.symbol for detail in close_details] == ["AAA"]
+    assert close_details[0].date == pandas.Timestamp("2024-01-02")
+    assert close_details[0].exit_reason == "adaptive_stop_loss"
+
+
+def test_early_adaptive_stop_loss_uses_slot_trade_for_concurrency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Capital metrics should use shadow slot timing, not accounting SL timing."""
+
+    stopped_trade, stopped_details = _build_trade(
+        "2024-01-01",
+        "2024-01-10",
+        entry_price=10.0,
+        exit_price=10.0,
+        profit=0.0,
+        symbol="AAA",
+    )
+    stopped_trade = strategy.replace(
+        stopped_trade,
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-02"), 0.00, -0.03, 0.00),
+            (pandas.Timestamp("2024-01-03"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-04"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-05"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-08"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-09"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-10"), 0.00, 0.00, 0.00),
+        ],
+    )
+    overlapping_trade, overlapping_details = _build_trade(
+        "2024-01-03",
+        "2024-01-04",
+        symbol="BBB",
+    )
+
+    artifacts = _build_artifacts(
+        [
+            (stopped_trade, stopped_details),
+            (overlapping_trade, overlapping_details),
+        ],
+    )
+
+    def fake_generate(
+        *args: object,
+        **kwargs: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        return artifacts
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=2,
+        minimum_holding_bars=5,
+        adaptive_tp_sl=strategy.AdaptiveTPSLConfig(
+            # Choppy regime: TP = SL → R = 1 → dynamic lock = round(5 * 1) = 5 bars
+            # AAA bar 1 low = -0.03 ≤ -0.03 SL → SL fires bar 1, slot locked to bar 5 (Jan 8).
+            # BBB (Jan 3-4) overlaps with AAA slot lock.
+            # max_concurrent = 2 (AAA locked slot + BBB active).
+            min_sl=0.03,
+            min_tp=0.03,
+            override_min_hold_sl_only=True,
+            min_hold_sl=1,
+        ),
+    )
+
+    close_details = [
+        detail
+        for detail_list in metrics.overall_metrics.trade_details_by_year.values()
+        for detail in detail_list
+        if detail.action == "close"
+    ]
+
+    assert metrics.overall_metrics.total_trades == 2
+    assert metrics.overall_metrics.maximum_concurrent_positions == 2
+    assert close_details[0].symbol == "AAA"
+    assert close_details[0].date == pandas.Timestamp("2024-01-02")
+
+
+def test_dynamic_min_hold_releases_before_raw_signal_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dynamic slot lock should not hold until raw signal exit by default."""
+
+    stopped_trade, stopped_details = _build_trade(
+        "2024-01-01",
+        "2024-01-10",
+        entry_price=10.0,
+        exit_price=10.0,
+        profit=0.0,
+        symbol="AAA",
+    )
+    stopped_trade = strategy.replace(
+        stopped_trade,
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-02"), 0.00, -0.03, 0.00),
+            (pandas.Timestamp("2024-01-03"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-04"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-05"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-08"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-09"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-10"), 0.00, 0.00, 0.00),
+        ],
+    )
+    next_trade, next_details = _build_trade(
+        "2024-01-09",
+        "2024-01-10",
+        symbol="BBB",
+    )
+
+    artifacts = _build_artifacts(
+        [
+            (stopped_trade, stopped_details),
+            (next_trade, next_details),
+        ],
+    )
+
+    def fake_generate(
+        *args: object,
+        **kwargs: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        return artifacts
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=1,
+        minimum_holding_bars=5,
+        adaptive_tp_sl=strategy.AdaptiveTPSLConfig(
+            min_sl=0.03,
+            min_tp=0.03,
+            override_min_hold_sl_only=True,
+            min_hold_sl=1,
+        ),
+    )
+
+    close_symbols = [
+        detail.symbol
+        for detail_list in metrics.overall_metrics.trade_details_by_year.values()
+        for detail in detail_list
+        if detail.action == "close"
+    ]
+
+    assert close_symbols == ["AAA", "BBB"]
+
+
+def test_dynamic_min_hold_extends_slot_after_signal_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dynamic slot lock should use the price calendar beyond raw exit."""
+
+    throttled_trade, throttled_details = _build_trade(
+        "2024-01-01",
+        "2024-01-03",
+        entry_price=10.0,
+        exit_price=10.0,
+        profit=0.0,
+        symbol="AAA",
+    )
+    throttled_trade = strategy.replace(
+        throttled_trade,
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-02"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-03"), 0.00, 0.00, 0.00),
+        ],
+    )
+    blocked_trade, blocked_details = _build_trade(
+        "2024-01-08",
+        "2024-01-09",
+        symbol="BBB",
+    )
+
+    artifacts = _build_artifacts(
+        [
+            (throttled_trade, throttled_details),
+            (blocked_trade, blocked_details),
+        ],
+    )
+    full_calendar = pandas.bdate_range("2024-01-01", "2024-01-12")
+    artifacts.closing_price_series_by_symbol["AAA"] = pandas.Series(
+        [10.0] * len(full_calendar),
+        index=full_calendar,
+    )
+
+    def fake_generate(
+        *args: object,
+        **kwargs: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        return artifacts
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=1,
+        minimum_holding_bars=5,
+        adaptive_tp_sl=strategy.AdaptiveTPSLConfig(
+            min_tp=0.02,
+            min_sl=0.03,
+            disable_sl_trigger=True,
+        ),
+    )
+
+    close_details = [
+        detail
+        for detail_list in metrics.overall_metrics.trade_details_by_year.values()
+        for detail in detail_list
+        if detail.action == "close"
+    ]
+
+    assert [detail.symbol for detail in close_details] == ["AAA"]
+    assert close_details[0].date == pandas.Timestamp("2024-01-03")
+    assert close_details[0].exit_reason == "signal"
+
+
+def test_early_adaptive_take_profit_releases_slot_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TP should not inherit the outer min_hold slot delay."""
+
+    winning_trade, winning_details = _build_trade(
+        "2024-01-01",
+        "2024-01-10",
+        entry_price=10.0,
+        exit_price=10.0,
+        profit=0.0,
+        symbol="AAA",
+    )
+    winning_trade = strategy.replace(
+        winning_trade,
+        bar_excursions=[
+            (pandas.Timestamp("2024-01-02"), 0.03, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-03"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-04"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-05"), 0.00, 0.00, 0.00),
+            (pandas.Timestamp("2024-01-08"), 0.00, 0.00, 0.00),
+        ],
+    )
+    next_trade, next_details = _build_trade(
+        "2024-01-03",
+        "2024-01-05",
+        symbol="BBB",
+    )
+
+    artifacts = _build_artifacts(
+        [
+            (winning_trade, winning_details),
+            (next_trade, next_details),
+        ],
+    )
+
+    def fake_generate(
+        *args: object,
+        **kwargs: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        return artifacts
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=1,
+        minimum_holding_bars=5,
+        adaptive_tp_sl=strategy.AdaptiveTPSLConfig(
+            min_sl=0.50,
+            min_tp=0.03,
+            override_min_hold_tp_only=True,
+            min_hold_tp=1,
+        ),
+    )
+
+    close_details = [
+        detail
+        for detail_list in metrics.overall_metrics.trade_details_by_year.values()
+        for detail in detail_list
+        if detail.action == "close"
+    ]
+
+    assert [detail.symbol for detail in close_details] == ["AAA", "BBB"]
+    assert close_details[0].exit_reason == "adaptive_take_profit"
 
 
 def test_run_complex_simulation_enforces_shared_cap(

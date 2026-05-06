@@ -351,3 +351,96 @@ def bsv(
         },
         index=close_series.index,
     )
+
+
+def compute_shape_descriptor(
+    price_window: pandas.Series,
+    sample_count: int = 5,
+) -> dict[str, float]:
+    """Sample evenly-spaced points across a price window and compute
+    deviations of middle samples from the head-to-tail linear baseline.
+
+    For a sustained "sideways then up turn" shape: tail > head, and middle
+    samples sit BELOW the head-to-tail line — producing negative deviations
+    (a U-shape relative to the linear baseline).
+
+    Parameters
+    ----------
+    price_window : pandas.Series
+        Price values over the lookback window. Must have at least
+        ``sample_count`` points.
+    sample_count : int
+        Number of evenly-spaced samples to take across the window.
+        Default 5 → samples at 0%, 25%, 50%, 75%, 100% positions.
+        First and last define the linear baseline; the middle
+        ``sample_count - 2`` samples produce deviations.
+
+    Returns
+    -------
+    dict
+        - ``slope`` : (tail - head) / head, normalized first-to-last move.
+        - ``deviation_<i>`` (i = 1 .. sample_count - 2) : the i-th middle
+          sample's deviation from the baseline at its position, normalized
+          by abs(head). Negative when the sample sits below the line.
+        - ``head`` : price at the start of the window.
+        - ``tail`` : price at the end of the window.
+    """
+    if len(price_window) < sample_count:
+        raise ValueError(
+            f"price_window length {len(price_window)} < sample_count {sample_count}"
+        )
+    indices = [
+        int(round(position * (len(price_window) - 1) / (sample_count - 1)))
+        for position in range(sample_count)
+    ]
+    samples = [float(price_window.iloc[index]) for index in indices]
+    head = samples[0]
+    tail = samples[-1]
+    if head == 0 or pandas.isna(head) or pandas.isna(tail):
+        return {
+            "head": head,
+            "tail": tail,
+            "slope": float("nan"),
+            **{f"deviation_{i}": float("nan") for i in range(1, sample_count - 1)},
+        }
+    slope = (tail - head) / head
+    descriptor: dict[str, float] = {
+        "head": head,
+        "tail": tail,
+        "slope": slope,
+    }
+    for i in range(1, sample_count - 1):
+        position_fraction = i / (sample_count - 1)
+        baseline_at_sample = head + (tail - head) * position_fraction
+        descriptor[f"deviation_{i}"] = (samples[i] - baseline_at_sample) / abs(head)
+    return descriptor
+
+
+def is_sideways_then_up_shape(
+    descriptor: dict[str, float],
+    slope_min: float,
+    dev_50_max: float,
+) -> bool:
+    """Test whether a shape descriptor matches sideways-then-up-turn pattern.
+
+    Conditions:
+    - ``slope >= slope_min``: window had meaningful upward move overall.
+    - ``deviation_2 <= dev_50_max``: midpoint sample sits sufficiently below
+      the head-to-tail baseline (negative U-shape valley).
+
+    Other middle deviations are not gated; midpoint is the strongest
+    structural anchor for the sideways→up shape.
+    """
+    slope = descriptor.get("slope")
+    midpoint_key = "deviation_2"
+    midpoint = descriptor.get(midpoint_key)
+    if slope is None or midpoint is None:
+        return False
+    if pandas.isna(slope) or pandas.isna(midpoint):
+        return False
+    if slope < slope_min:
+        return False
+    if midpoint > dev_50_max:
+        return False
+    return True
+

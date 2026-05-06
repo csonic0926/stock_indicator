@@ -1,4 +1,4 @@
-strategy_id,buy,sell,d_sma_min,d_sma_max,ema_min,ema_max,d_ema_min,d_ema_max,price_score_min,price_score_max,near_delta_min,near_delta_max,price_tightness_min,price_tightness_max
+strategy_id,buy,sell,d_sma_min,d_sma_max,ema_min,ema_max,d_ema_min,d_ema_max,price_score_min,price_score_max,near_delta_min,near_delta_max,price_tightness_min,price_tightness_max,shape_slope_min,shape_dev_50_max,shape_bsv_lookback
 s99,"ema_sma_cross_testing_4_-99_99_-99.0,99.0_0.0,1.00","ema_sma_cross_testing_10_-99_99_-99.0,99.0_0.0,1.00",,,,,,,,,,,,
 near_close_raw,"ema_sma_cross_testing_3_-99_99_0.0,0.09_0.0,0.973","ema_sma_cross_testing_15_-99_99_-99.0,99.0_0.0,1.00",,,,,,,,,,,,
 s1,"ema_sma_cross_testing_4_-0.5_99_-99.0,0.2_0.7,1.00","ema_sma_cross_testing_5_-99_99_-99.0,99.0_0.0,1.00",,,,,,,,
@@ -18,9 +18,11 @@ s54,"ema_sma_cross_testing_4_-99_99_-99.0,99.0_0.0,1.00","ema_sma_cross_testing_
 s55,"ema_sma_cross_testing_4_-99_99_-99.0,99.0_0.0,1.00","ema_sma_cross_testing_10_-0.01_65_-10.0,10.0_0.78,1.00",,,,,,,0.031,0.045
 buy4,"ema_sma_cross_testing_4_-99_99_-99.0,99.0_0.943,0.973","ema_sma_cross_testing_10_-0.01_65_-10.0,10.0_0.78,1.00",,,,,,,,
 s561,"ema_sma_cross_testing_3_-99_99_-99.0,99.0_0.943,0.973","ema_sma_cross_testing_3_-0.01_65_-10.0,10.0_0.78,1.00",,,,,,,,
-buy3,"ema_sma_cross_testing_3_-99_99_-99.0,99.0_0.973,1.0","ema_sma_cross_testing_3_-0.01_65_-10.0,10.0_0.78,1.00",,,,,,,,
-buy3_hold,"ema_sma_cross_testing_3_-99_99_-99.0,99.0_0.973,1.0","ema_sma_cross_testing_9999_-99_99_-99.0,99.0_0.0,1.00",,,,,,,,
-buy3_10,"ema_sma_cross_testing_3_-99_99_-99.0,99.0_0.943,0.973","ema_sma_cross_testing_10_-0.01_65_-10.0,10.0_0.78,1.00",,,,,,,,
+fish_head_vacuum_turn,"ema_sma_cross_testing_3_-99_99_-99.0,99.0_0.973,1.0","ema_sma_cross_testing_3_-0.01_65_-10.0,10.0_0.78,1.00",,,,,,,,
+fish_tail_blow_off_top,"ema_sma_cross_testing_3_-99_99_-99.0,99.0_0.06,0.09","ema_sma_cross_testing_3_-0.01_65_-10.0,10.0_0.78,1.00",,,,,,,,
+fish_head_bh,"ema_sma_cross_testing_3_-99_99_-99.0,99.0_0.9,1.0","ema_sma_cross_testing_3_-0.01_65_-10.0,10.0_0.78,1.00",,,,,,,,
+fish_head_10,"ema_sma_cross_testing_3_-99_99_-99.0,99.0_0.943,0.973","ema_sma_cross_testing_10_-0.01_65_-10.0,10.0_0.78,1.00",,,,,,,,
+fish_body_trend_join,"ema_sma_cross_testing_3_-99_99_-99.0,99.0_0.1,0.973","ema_sma_cross_testing_3_-0.01_65_-10.0,10.0_0.78,1.00",,,,,,,,,,,,,0.03,-0.02,10
 vcp_study,"ema_sma_cross_testing_3_-99_99_0.0,1.0_0.0,1.0","ema_sma_cross_testing_9999_-99_99_-99.0,99.0_0.0,1.00",,,,,,,,
 near_close,"ema_sma_cross_testing_3_-99_99_0.0,0.09_0.0,0.973","ema_sma_cross_testing_15_-99_99_-99.0,99.0_0.0,1.00",,,,,,,,,-0.35,-0.03,0.0,0.133
 ftd_raw,"ema_sma_cross_testing_3_-99_99_-99.0,99.0_0.0,1.00","ema_sma_cross_testing_15_-99_99_-99.0,99.0_0.0,1.00",,,,,,,,,,,,

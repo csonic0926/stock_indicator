@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import bisect
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace
 import heapq
@@ -11,14 +10,14 @@ import logging
 import math
 from math import ceil
 from pathlib import Path
-from statistics import mean, stdev
+from statistics import mean, median, stdev
 from typing import Callable, Dict, Iterable, List, Tuple
 import re
 
 import numpy
 import pandas
 
-from .indicators import ema, kalman_filter, sma
+from .indicators import bsv, ema, kalman_filter, sma
 from .chip_filter import calculate_chip_concentration_metrics
 from .simulator import (
     SimulationResult,
@@ -606,6 +605,35 @@ class ComplexStrategySetDefinition:
     price_score_min: float | None = None
     price_score_max: float | None = None
     exit_alpha_factor: float | None = None
+    # Fish-body shape + BSV gate (third instance — trend join after vacuum
+    # turn). All three set → entry signal additionally requires:
+    # 1) 60-bar shape slope >= shape_slope_min
+    # 2) 60-bar midpoint deviation <= shape_dev_50_max (negative U-shape)
+    # 3) BSV footprint observed in last shape_bsv_lookback bars
+    shape_slope_min: float | None = None
+    shape_dev_50_max: float | None = None
+    shape_bsv_lookback: int | None = None
+    # Per-bucket override for adaptive_tp_sl.tp_regime_adjust. When None, the
+    # bucket inherits the top-level adaptive setting; when True/False it
+    # overrides it for this bucket only. Used to enable TP regime scaling on
+    # one bucket (e.g. break_high momentum) while keeping another static
+    # (e.g. buy3 V-bottom needs wide TP for fat-tail rebounds).
+    tp_regime_adjust: bool | None = None
+    # Per-bucket override for adaptive_tp_sl.fixed_tp / fixed_sl. When None,
+    # bucket inherits the top-level value (which may itself be None). Allows
+    # per-bucket tight static TP/SL when each strategy has its own optimal
+    # tight stops.
+    fixed_tp: float | None = None
+    fixed_sl: float | None = None
+    # Per-bucket override for min_hold gates on TP and SL. None = inherit
+    # top-level. Needed because different bucket narratives demand opposite
+    # SL gate behavior — buy3 V-bottom needs SL to wait for min_hold (give
+    # recovery time), break_high momentum needs SL to fire fast (no recovery
+    # to wait for, gap-down at bar 5 makes SL exit much worse than intended).
+    override_min_hold_tp_only: bool | None = None
+    min_hold_tp: int | None = None
+    override_min_hold_sl_only: bool | None = None
+    min_hold_sl: int | None = None
     # Multi-bucket extensions (ignored by run_complex_simulation A/B path):
     # - entry_priority: lower number = wins entry contention first (used by
     #   run_multi_bucket_simulation as a tiebreaker in the event sort key).
@@ -624,25 +652,31 @@ class ComplexStrategySetDefinition:
 class AdaptiveTPSLConfig:
     """Configuration for adaptive (rolling) take-profit and stop-loss.
 
-    TP = rolling_MP + sigma_multiplier * rolling_σ_profit
-    SL = TP / target_r (capped by fixed_sl when set)
+    TP = rolling_MP + sigma_multiplier * rolling_σ_profit.
+    SL sensor = median rolling raw signal loss, capped by fixed_sl when set.
 
-    When ``sector_rolling`` is True, TP and SL are computed per FF12 sector
-    using ALL raw trades in the universe (not just accepted trades), so each
-    sector's rolling window fills quickly.  SL in sector mode uses:
-        SL = min(ML + sector_sl_sigma * σ_ML, TP)
-    guaranteeing R:R >= 1.0.  The global rolling deque is used as fallback
-    when a sector has fewer than ``min_samples`` closed trades.
+    TP/SL rolling uses accepted signal history only.  Sector-specific rolling
+    was removed because repeated tests showed signal-based rolling is the
+    useful mechanism.
     """
 
     window: int = 20
     sigma_multiplier: float = 0.5
+    # Backward-compatible config field. Rolling SL is no longer derived from
+    # TP / target_r; it is kept so older JSON files still parse.
     target_r: float = 2.0
+    # Backward-compatible config field. Rolling SL now uses median raw signal
+    # loss as a robust regime sensor, so this field is no longer applied.
+    sl_sigma_multiplier: float | None = None
     min_tp: float = 0.02
     min_sl: float = 0.01
     min_samples: int = 5
     # When set, SL is fixed at this value (TP remains adaptive).
     fixed_sl: float | None = None
+    # When set, TP is fixed at this value (overrides rolling TP and regime
+    # adjustment). Mirror of fixed_sl. Use both to run a fully static
+    # TP/SL configuration without removing the adaptive_tp_sl block.
+    fixed_tp: float | None = None
     # When True, adaptive TP/SL can trigger before minimum_holding_bars.
     override_min_hold: bool = False
     # When True, TP uses min_hold_tp instead of the global min_hold.
@@ -650,6 +684,25 @@ class AdaptiveTPSLConfig:
     # Minimum bars before TP can trigger (when override_min_hold_tp_only=True).
     # 0 = immediate, 1 = realistic (T+2 morning TP known, place order intraday).
     min_hold_tp: int = 0
+    # When True, SL uses min_hold_sl instead of the global min_hold.
+    # SL is risk control, not STATE confirmation, so it should not inherit the
+    # signal-exit min_hold latency.
+    override_min_hold_sl_only: bool = False
+    # Minimum bars before SL can trigger (when override_min_hold_sl_only=True).
+    # 0 = immediate, 1 = realistic (T+2 morning fill).
+    min_hold_sl: int = 0
+    # When True, SL is computed (rolling sl_pct as regime indicator) but never
+    # fires as an exit. Used for dynamic min_hold throttle: rolling sl_pct/tp_pct
+    # ratio drives slot lock duration, but trades exit only via TP or signal.
+    # Avoids recovery-kill while preserving SL as regime sensor.
+    disable_sl_trigger: bool = False
+    # When True, scale the rolling TP target by (tp_pct / sl_pct) capped to
+    # [tp_regime_ratio_min, tp_regime_ratio_max]. Calm regime (tp >> sl) widens
+    # TP; stress regime (sl approaches or exceeds tp) shrinks TP so the smaller
+    # stress-regime winners lock in before mean-reversion eats them.
+    tp_regime_adjust: bool = False
+    tp_regime_ratio_min: float = 0.5
+    tp_regime_ratio_max: float = 1.5
     # When True, rolling stats only include trades that closed BEFORE the
     # current entry date (not same-day closes). This lets TP% be computed
     # on entry signal night (T), so TP orders can be placed at T+1 open.
@@ -657,15 +710,6 @@ class AdaptiveTPSLConfig:
     # When True, SL is tightened to break-even (entry price) once unrealized
     # profit reaches the rolling mean profit (MP).
     breakeven_at_mp: bool = False
-    # When True, TP/SL are computed per FF12 sector using all raw trades.
-    sector_rolling: bool = False
-    # Sigma multiplier for sector SL: SL = min(ML + sector_sl_sigma * σ_ML, TP/sector_min_rr).
-    sector_sl_sigma: float = 0.5
-    # Minimum R:R ratio for sector mode: SL <= TP / sector_min_rr.
-    sector_min_rr: float = 2.0
-    # Max calendar days to look back for sector rolling trades.
-    # 0 = use count-based window (original behaviour).
-    sector_lookback_days: int = 0
     # When True, no TP or signal exit. New entry signals evict the oldest
     # open position (past min_hold) to free a slot. Exit price = eviction
     # day open of the evicted symbol.
@@ -692,15 +736,64 @@ class StrategyEvaluationArtifacts:
     simulation_start_date: pandas.Timestamp | None
 
 
+def _resolve_slot_release_date(
+    trade: Trade,
+    target_holding_bars: int,
+    symbol: str,
+    closing_price_series_by_symbol: Dict[str, pandas.Series],
+) -> tuple[
+    pandas.Timestamp,
+    int,
+    list[tuple[pandas.Timestamp, float, float, float]] | None,
+]:
+    """Return the date for a target holding period, extending past raw exit.
+
+    ``Trade.bar_excursions`` only covers the raw trade lifetime.  Dynamic slot
+    throttling can intentionally lock a slot after a signal/SL exit, so it must
+    fall back to the symbol's trading calendar when the target bar is beyond
+    the raw trade's excursion path.
+    """
+
+    if trade.bar_excursions and target_holding_bars <= len(trade.bar_excursions):
+        target_index = target_holding_bars - 1
+        return (
+            trade.bar_excursions[target_index][0],
+            target_holding_bars,
+            trade.bar_excursions[:target_holding_bars],
+        )
+
+    price_series = closing_price_series_by_symbol.get(symbol)
+    if price_series is not None and not price_series.empty:
+        future_dates = [
+            pandas.Timestamp(price_date)
+            for price_date in price_series.index
+            if pandas.Timestamp(price_date) > trade.entry_date
+        ]
+        future_dates.sort()
+        if target_holding_bars <= len(future_dates):
+            return (
+                future_dates[target_holding_bars - 1],
+                target_holding_bars,
+                trade.bar_excursions,
+            )
+
+    if target_holding_bars <= trade.holding_period:
+        return trade.exit_date, trade.holding_period, trade.bar_excursions
+
+    return trade.exit_date, trade.holding_period, trade.bar_excursions
+
+
 def _replay_trade_with_adaptive_tp_sl(
     trade: Trade,
     tp_pct: float,
     sl_pct: float,
     minimum_holding_bars: int = 0,
     minimum_holding_bars_tp: int | None = None,
+    minimum_holding_bars_sl: int | None = None,
     breakeven_trigger_pct: float = 0.0,
     tp_pct_late: float | None = None,
     sl_only: bool = False,
+    disable_sl_trigger: bool = False,
 ) -> Trade:
     """Replay a raw trade using adaptive TP/SL levels.
 
@@ -708,9 +801,17 @@ def _replay_trade_with_adaptive_tp_sl(
     the signal-based exit.  Returns a new Trade with adjusted exit if
     triggered, or the original trade unchanged.
 
+    *minimum_holding_bars* is the signal-exit min_hold (used as the default
+    for TP and SL checks, and for the tp_pct_late switch).
+
     When *minimum_holding_bars_tp* is provided it overrides
     *minimum_holding_bars* for TP checks only, allowing TP to trigger
-    earlier than SL.
+    earlier than the signal-exit min_hold.
+
+    When *minimum_holding_bars_sl* is provided it overrides
+    *minimum_holding_bars* for SL checks only, allowing SL to trigger
+    earlier than the signal-exit min_hold (risk control should not be
+    delayed by STATE-confirmation latency).
 
     When *breakeven_trigger_pct* > 0, once the bar high reaches that level
     the SL is tightened to break-even (entry price).
@@ -724,6 +825,10 @@ def _replay_trade_with_adaptive_tp_sl(
         return trade
     effective_min_hold_tp = (
         minimum_holding_bars_tp if minimum_holding_bars_tp is not None
+        else minimum_holding_bars
+    )
+    effective_min_hold_sl = (
+        minimum_holding_bars_sl if minimum_holding_bars_sl is not None
         else minimum_holding_bars
     )
     active_sl_pct = sl_pct
@@ -741,9 +846,12 @@ def _replay_trade_with_adaptive_tp_sl(
             and bar_high_pct >= breakeven_trigger_pct
         ):
             active_sl_pct = 0.0  # break-even = entry price
-        # Check SL (respects minimum_holding_bars)
+        # Check SL (respects effective_min_hold_sl, decoupled from signal min_hold).
+        # When disable_sl_trigger=True, SL value used as regime indicator only,
+        # never fires as exit — skip the check entirely.
         if (
-            holding >= minimum_holding_bars
+            not disable_sl_trigger
+            and holding >= effective_min_hold_sl
             and bar_low_pct <= -active_sl_pct
         ):
             effective_sl_pct = active_sl_pct
@@ -916,6 +1024,9 @@ def run_complex_simulation(
             price_score_max=definition.price_score_max,
             confirmation_sma_angle_range=confirmation_sma_angle_range,
             exit_alpha_factor=definition.exit_alpha_factor,
+            shape_slope_min=definition.shape_slope_min,
+            shape_dev_50_max=definition.shape_dev_50_max,
+            shape_bsv_lookback=definition.shape_bsv_lookback,
             reentry_on_signal=(
                 adaptive_tp_sl.evict_oldest if adaptive_tp_sl is not None else False
             ),
@@ -994,128 +1105,11 @@ def run_complex_simulation(
         key=lambda event: (event[0], event[1], event[2], event[3], event[4])
     )
 
-    # --- Pre-computed sector rolling lookup (for sector_rolling mode) ---
-    # Maps ff12 sector -> sorted list of (exit_date, raw_pct) for ALL raw
-    # trades in the universe.  A global list is also built for fallback.
-    _sector_raw_trades: Dict[int, list[tuple[pandas.Timestamp, float]]] = {}
-    _global_raw_trades: list[tuple[pandas.Timestamp, float]] = []
-    _sector_symbol_ff12: Dict[str, int] = {}
-
-    if adaptive_tp_sl is not None and adaptive_tp_sl.sector_rolling:
-        # Load sector map from symbols_with_sector.csv.
-        sector_csv_path = data_directory.parent / "symbols_with_sector.csv"
-        if sector_csv_path.exists():
-            _sector_df = pandas.read_csv(sector_csv_path)
-            if "ticker" in _sector_df.columns and "ff12" in _sector_df.columns:
-                _sector_symbol_ff12 = {}
-                sector_symbol_series = _sector_df["ticker"].dropna().astype(str)
-                sector_group_series = _sector_df.loc[
-                    sector_symbol_series.index,
-                    "ff12",
-                ].fillna(12).astype(int)
-                for sector_symbol, sector_group_identifier in zip(
-                    sector_symbol_series,
-                    sector_group_series,
-                    strict=False,
-                ):
-                    _add_symbol_aliases_to_group_lookup(
-                        _sector_symbol_ff12,
-                        sector_symbol,
-                        int(sector_group_identifier),
-                    )
-        if not _sector_symbol_ff12:
-            LOGGER.warning(
-                "sector_rolling enabled but symbols_with_sector.csv not found "
-                "or empty at %s — falling back to global rolling",
-                sector_csv_path,
-            )
-
-        # Collect ALL raw trades from every bucket's artifacts.
-        _sector_raw_trades_unsorted: Dict[
-            int, list[tuple[pandas.Timestamp, float]]
-        ] = defaultdict(list)
-        _global_raw_trades_unsorted: list[tuple[pandas.Timestamp, float]] = []
-        for label, artifacts in artifacts_by_set.items():
-            for trade in artifacts.trades:
-                if trade.entry_price <= 0:
-                    continue
-                raw_pct = (
-                    (trade.exit_price - trade.entry_price) / trade.entry_price
-                )
-                sym = artifacts.trade_symbol_lookup.get(trade, "")
-                ff12 = _sector_symbol_ff12.get(sym.upper(), 12)
-                _sector_raw_trades_unsorted[ff12].append(
-                    (trade.exit_date, raw_pct)
-                )
-                _global_raw_trades_unsorted.append(
-                    (trade.exit_date, raw_pct)
-                )
-        # Sort by exit_date for binary search.
-        for ff12 in _sector_raw_trades_unsorted:
-            _sector_raw_trades[ff12] = sorted(
-                _sector_raw_trades_unsorted[ff12], key=lambda x: x[0]
-            )
-        _global_raw_trades = sorted(
-            _global_raw_trades_unsorted, key=lambda x: x[0]
-        )
-
-    def _compute_sector_tp_sl(
-        entry_date: pandas.Timestamp,
-        ff12: int,
-        config: AdaptiveTPSLConfig,
-    ) -> tuple[float, float]:
-        """Compute sector-specific TP/SL using pre-computed raw trades.
-
-        Only uses trades with exit_date strictly before entry_date.
-        Falls back to global pool if sector has < min_samples trades.
-        """
-        # Find trades with exit_date < entry_date via bisect.
-        def _rolling_from_pool(
-            pool: list[tuple[pandas.Timestamp, float]],
-        ) -> list[float]:
-            idx = bisect.bisect_left(pool, (entry_date,))
-            if config.sector_lookback_days > 0:
-                cutoff = entry_date - pandas.Timedelta(
-                    days=config.sector_lookback_days,
-                )
-                start = bisect.bisect_left(pool, (cutoff,))
-                start = min(start, idx)
-                return [pct for _, pct in pool[start:idx]]
-            start = max(0, idx - config.window)
-            return [pct for _, pct in pool[start:idx]]
-
-        sector_pool = _sector_raw_trades.get(ff12, [])
-        recent = _rolling_from_pool(sector_pool)
-        if len(recent) < config.min_samples:
-            recent = _rolling_from_pool(_global_raw_trades)
-
-        tp_pct = config.min_tp
-        sl_pct = config.min_sl
-
-        if len(recent) >= config.min_samples:
-            # TP from positive trades.
-            profits = [p for p in recent if p > 0]
-            if len(profits) >= 3:
-                mp = sum(profits) / len(profits)
-                sp = stdev(profits) if len(profits) >= 2 else 0.0
-                tp_pct = max(config.min_tp, mp + config.sigma_multiplier * sp)
-
-            # SL from negative trades: min(ML + σ_ML * sector_sl_sigma, TP).
-            losses = [abs(p) for p in recent if p <= 0]
-            if len(losses) >= 3:
-                ml = sum(losses) / len(losses)
-                sl_std = stdev(losses) if len(losses) >= 2 else 0.0
-                sl_pct = max(
-                    config.min_sl,
-                    ml + config.sector_sl_sigma * sl_std,
-                )
-                # Cap SL at TP/sector_min_rr to guarantee minimum R:R.
-                sl_pct = min(sl_pct, tp_pct / config.sector_min_rr)
-
-        return tp_pct, sl_pct
-
-    # Adaptive TP/SL state: rolling window of recently closed trades.
-    adaptive_closed_profits: deque[float] = deque()
+    # Adaptive TP/SL state: rolling window of recently closed trades, split
+    # by outcome so TP and SL each draw from their own last-N sample.
+    # Each deque holds signed pct values: winners > 0 only, losers < 0 only.
+    adaptive_closed_winners: deque[float] = deque()
+    adaptive_closed_losers: deque[float] = deque()
     # Map from original trade id -> adjusted trade for adaptive mode.
     adaptive_trade_map: Dict[int, Trade] = {}
     # Reverse map: adjusted trade -> original trade (for detail pair lookups).
@@ -1125,13 +1119,18 @@ def run_complex_simulation(
     # Far-future adaptive trades need a real end-of-data fallback that can move
     # forward after same-symbol signal refreshes.
     adaptive_fallback_exits: Dict[int, tuple[pandas.Timestamp, float, int]] = {}
+    # Slot occupancy can differ from accounting exit when SL is allowed earlier
+    # than the outer min_hold.  The accounting trade records the real SL fill;
+    # this map keeps the capital slot on the old min_hold-gated replay path.
+    adaptive_slot_close_dates: Dict[int, pandas.Timestamp] = {}
+    adaptive_slot_trade_map: Dict[int, Trade] = {}
     # Pending close events for adaptive mode (heap of
     # (close_date, counter, label, original_trade_id)).
     adaptive_close_heap: list[tuple[pandas.Timestamp, int, str, int]] = []
     adaptive_close_counter = 0
     # When delayed_rolling_update is True, closed trade pcts are buffered
-    # here and only flushed into adaptive_closed_profits when an entry
-    # event on a LATER date is processed.
+    # here and only flushed into adaptive_closed_winners / adaptive_closed_losers
+    # when an entry event on a LATER date is processed.
     pending_rolling_updates: list[tuple[pandas.Timestamp, float]] = []
     # For evict_oldest: track the latest active signal date for each open
     # trade.  This is intentionally separate from Trade.entry_date: accounting
@@ -1437,9 +1436,15 @@ def run_complex_simulation(
                 close_key = (close_label, orig_trade_id)
                 if use_evict_oldest:
                     adjusted_close_trade = adaptive_trade_map.get(orig_trade_id)
+                    expected_close_date = adaptive_slot_close_dates.get(
+                        orig_trade_id,
+                        adjusted_close_trade.exit_date
+                        if adjusted_close_trade is not None
+                        else close_date,
+                    )
                     if (
                         adjusted_close_trade is not None
-                        and adjusted_close_trade.exit_date != close_date
+                        and expected_close_date != close_date
                     ):
                         # A same-symbol refresh or eviction can replace the open
                         # trade after an older close event has already been queued.
@@ -1487,9 +1492,14 @@ def run_complex_simulation(
                                 (rolling_update_date, pct)
                             )
                         else:
-                            adaptive_closed_profits.append(pct)
-                            if len(adaptive_closed_profits) > adaptive_tp_sl.window:
-                                adaptive_closed_profits.popleft()
+                            if pct > 0:
+                                adaptive_closed_winners.append(pct)
+                                if len(adaptive_closed_winners) > adaptive_tp_sl.window:
+                                    adaptive_closed_winners.popleft()
+                            elif pct < 0:
+                                adaptive_closed_losers.append(pct)
+                                if len(adaptive_closed_losers) > adaptive_tp_sl.window:
+                                    adaptive_closed_losers.popleft()
             else:
                 (
                     event_date,
@@ -1506,9 +1516,14 @@ def run_complex_simulation(
                     remaining: list[tuple[pandas.Timestamp, float]] = []
                     for closed_date, closed_pct in pending_rolling_updates:
                         if closed_date < event_date:
-                            adaptive_closed_profits.append(closed_pct)
-                            if len(adaptive_closed_profits) > adaptive_tp_sl.window:
-                                adaptive_closed_profits.popleft()
+                            if closed_pct > 0:
+                                adaptive_closed_winners.append(closed_pct)
+                                if len(adaptive_closed_winners) > adaptive_tp_sl.window:
+                                    adaptive_closed_winners.popleft()
+                            elif closed_pct < 0:
+                                adaptive_closed_losers.append(closed_pct)
+                                if len(adaptive_closed_losers) > adaptive_tp_sl.window:
+                                    adaptive_closed_losers.popleft()
                         else:
                             remaining.append((closed_date, closed_pct))
                     pending_rolling_updates[:] = remaining
@@ -1629,9 +1644,14 @@ def run_complex_simulation(
                     if adaptive_tp_sl.delayed_rolling_update:
                         pending_rolling_updates.append((event_date, evict_pct))
                     else:
-                        adaptive_closed_profits.append(evict_pct)
-                        if len(adaptive_closed_profits) > adaptive_tp_sl.window:
-                            adaptive_closed_profits.popleft()
+                        if evict_pct > 0:
+                            adaptive_closed_winners.append(evict_pct)
+                            if len(adaptive_closed_winners) > adaptive_tp_sl.window:
+                                adaptive_closed_winners.popleft()
+                        elif evict_pct < 0:
+                            adaptive_closed_losers.append(evict_pct)
+                            if len(adaptive_closed_losers) > adaptive_tp_sl.window:
+                                adaptive_closed_losers.popleft()
                     # Eviction is deliberate (not subject to lookahead like
                     # TP/SL closes), so do NOT increment same_day_close_count.
                     current_open_total = len(open_trade_keys) + same_day_close_count
@@ -1660,52 +1680,78 @@ def run_complex_simulation(
                 _tp_pct_late: float | None = None
 
                 if (
-                    adaptive_tp_sl.sector_rolling
-                    and _sector_symbol_ff12
+                    len(adaptive_closed_winners) + len(adaptive_closed_losers)
+                    >= adaptive_tp_sl.min_samples
                 ):
-                    # Sector-specific TP/SL from pre-computed raw trades.
-                    _trade_sym = artifacts_by_set[label].trade_symbol_lookup.get(
-                        trade, ""
+                    profits = list(adaptive_closed_winners)
+                    if len(profits) >= 3:
+                        mean_profit_percentage = sum(profits) / len(profits)
+                        rolling_mp = mean_profit_percentage
+                        if len(profits) >= 2:
+                            profit_standard_deviation = stdev(profits)
+                        else:
+                            profit_standard_deviation = 0.0
+                        tp_pct = max(
+                            adaptive_tp_sl.min_tp,
+                            mean_profit_percentage
+                            + adaptive_tp_sl.sigma_multiplier
+                            * profit_standard_deviation,
+                        )
+
+                    losses = [
+                        abs(loss_percentage)
+                        for loss_percentage in adaptive_closed_losers
+                    ]
+                    if len(losses) >= 3:
+                        sl_pct = max(
+                            adaptive_tp_sl.min_sl,
+                            median(losses),
+                        )
+                # Resolve per-bucket overrides for fixed_tp / fixed_sl /
+                # tp_regime_adjust. Bucket-level value (when not None) wins;
+                # otherwise fall back to top-level adaptive setting.
+                bucket_def = set_definitions[label]
+                effective_fixed_sl = (
+                    bucket_def.fixed_sl
+                    if bucket_def.fixed_sl is not None
+                    else adaptive_tp_sl.fixed_sl
+                )
+                effective_fixed_tp = (
+                    bucket_def.fixed_tp
+                    if bucket_def.fixed_tp is not None
+                    else adaptive_tp_sl.fixed_tp
+                )
+                effective_tp_regime_adjust = (
+                    bucket_def.tp_regime_adjust
+                    if bucket_def.tp_regime_adjust is not None
+                    else adaptive_tp_sl.tp_regime_adjust
+                )
+
+                # Apply fixed_sl as ceiling (cap): SL never exceeds this.
+                if effective_fixed_sl is not None:
+                    sl_pct = min(sl_pct, effective_fixed_sl)
+
+                # Regime-adaptive TP: multiply TP target by capped tp/sl ratio.
+                # Skipped when fixed_tp is in effect (fixed value below wins).
+                if (
+                    effective_tp_regime_adjust
+                    and sl_pct > 0
+                    and effective_fixed_tp is None
+                ):
+                    raw_ratio = tp_pct / sl_pct
+                    capped_ratio = max(
+                        adaptive_tp_sl.tp_regime_ratio_min,
+                        min(adaptive_tp_sl.tp_regime_ratio_max, raw_ratio),
                     )
-                    _trade_ff12 = _sector_symbol_ff12.get(
-                        _trade_sym.upper(), 12
+                    tp_pct = max(
+                        adaptive_tp_sl.min_tp,
+                        tp_pct * capped_ratio,
                     )
-                    tp_pct, sl_pct = _compute_sector_tp_sl(
-                        event_date, _trade_ff12, adaptive_tp_sl,
-                    )
-                    # Compute global (uniform) TP for late phase (after min_hold).
-                    _global_tp, _ = _compute_sector_tp_sl(
-                        event_date, -1, adaptive_tp_sl,
-                    )
-                    # Use global TP as late-phase TP (falls back to global pool
-                    # since ff12=-1 won't match any sector).
-                    _tp_pct_late = _global_tp
-                    # If fixed_sl is set, override sector SL with it.
-                    if adaptive_tp_sl.fixed_sl is not None:
-                        sl_pct = adaptive_tp_sl.fixed_sl
-                else:
-                    if len(adaptive_closed_profits) >= adaptive_tp_sl.min_samples:
-                        profits = [
-                            p for p in adaptive_closed_profits if p > 0
-                        ]
-                        if len(profits) >= 3:
-                            mp = sum(profits) / len(profits)
-                            rolling_mp = mp
-                            if len(profits) >= 2:
-                                sp = stdev(profits)
-                            else:
-                                sp = 0.0
-                            tp_pct = max(
-                                adaptive_tp_sl.min_tp,
-                                mp + adaptive_tp_sl.sigma_multiplier * sp,
-                            )
-                            sl_pct = max(
-                                adaptive_tp_sl.min_sl,
-                                tp_pct / adaptive_tp_sl.target_r,
-                            )
-                    # Apply fixed_sl as ceiling (cap): SL never exceeds this.
-                    if adaptive_tp_sl.fixed_sl is not None:
-                        sl_pct = min(sl_pct, adaptive_tp_sl.fixed_sl)
+
+                # Apply fixed_tp as override: forces TP to this exact value,
+                # bypassing rolling stats and regime adjustment. Last word.
+                if effective_fixed_tp is not None:
+                    tp_pct = effective_fixed_tp
 
                 # Break-even trigger: rolling MP (before sigma adjustment).
                 be_trigger = rolling_mp if adaptive_tp_sl.breakeven_at_mp else 0.0
@@ -1715,16 +1761,83 @@ def run_complex_simulation(
                     0 if adaptive_tp_sl.override_min_hold
                     else minimum_holding_bars
                 )
+                # Per-bucket override for min_hold gates (None = inherit top-level).
+                effective_override_tp = (
+                    bucket_def.override_min_hold_tp_only
+                    if bucket_def.override_min_hold_tp_only is not None
+                    else adaptive_tp_sl.override_min_hold_tp_only
+                )
+                effective_min_hold_tp_value = (
+                    bucket_def.min_hold_tp
+                    if bucket_def.min_hold_tp is not None
+                    else adaptive_tp_sl.min_hold_tp
+                )
+                effective_override_sl = (
+                    bucket_def.override_min_hold_sl_only
+                    if bucket_def.override_min_hold_sl_only is not None
+                    else adaptive_tp_sl.override_min_hold_sl_only
+                )
+                effective_min_hold_sl_value = (
+                    bucket_def.min_hold_sl
+                    if bucket_def.min_hold_sl is not None
+                    else adaptive_tp_sl.min_hold_sl
+                )
                 effective_min_hold_tp: int | None = None
-                if adaptive_tp_sl.override_min_hold_tp_only:
-                    effective_min_hold_tp = adaptive_tp_sl.min_hold_tp
+                if effective_override_tp:
+                    effective_min_hold_tp = effective_min_hold_tp_value
+                effective_min_hold_sl: int | None = None
+                if effective_override_sl:
+                    effective_min_hold_sl = effective_min_hold_sl_value
                 adjusted = _replay_trade_with_adaptive_tp_sl(
                     trade, tp_pct, sl_pct, effective_min_hold,
                     minimum_holding_bars_tp=effective_min_hold_tp,
+                    minimum_holding_bars_sl=effective_min_hold_sl,
                     breakeven_trigger_pct=be_trigger,
                     tp_pct_late=_tp_pct_late,
                     sl_only=use_evict_oldest,
+                    disable_sl_trigger=adaptive_tp_sl.disable_sl_trigger,
                 )
+                # Dynamic min_hold throttle based on R-multiple (rolling SL/TP).
+                # TP exits release immediately.  Non-TP exits keep the slot
+                # locked until max(min_hold, round(min_hold * SL / TP)).
+                if tp_pct > 0 and effective_min_hold > 0:
+                    dynamic_min_hold = max(
+                        effective_min_hold,
+                        round(effective_min_hold * sl_pct / tp_pct),
+                    )
+                else:
+                    dynamic_min_hold = effective_min_hold
+
+                slot_release_date = adjusted.exit_date
+                slot_release_holding = adjusted.holding_period
+                slot_release_bar_excursions = adjusted.bar_excursions
+                if (
+                    adjusted.exit_reason != "adaptive_take_profit"
+                    and dynamic_min_hold > adjusted.holding_period
+                ):
+                    trade_symbol = artifacts_by_set[label].trade_symbol_lookup.get(
+                        trade,
+                        "",
+                    )
+                    (
+                        slot_release_date,
+                        slot_release_holding,
+                        slot_release_bar_excursions,
+                    ) = _resolve_slot_release_date(
+                        trade,
+                        dynamic_min_hold,
+                        trade_symbol,
+                        artifacts_by_set[label].closing_price_series_by_symbol,
+                    )
+
+                slot_trade = replace(
+                    adjusted,
+                    exit_date=slot_release_date,
+                    holding_period=slot_release_holding,
+                    bar_excursions=slot_release_bar_excursions,
+                )
+                adaptive_slot_close_dates[trade_identifier] = slot_trade.exit_date
+                adaptive_slot_trade_map[id(adjusted)] = slot_trade
                 adaptive_trade_map[trade_identifier] = adjusted
                 adaptive_original_trade[id(adjusted)] = trade
                 adaptive_tp_sl_applied[id(adjusted)] = (tp_pct, sl_pct)
@@ -1750,7 +1863,12 @@ def run_complex_simulation(
                 adaptive_close_counter += 1
                 heapq.heappush(
                     adaptive_close_heap,
-                    (adjusted.exit_date, adaptive_close_counter, label, trade_identifier),
+                    (
+                        adaptive_slot_close_dates[trade_identifier],
+                        adaptive_close_counter,
+                        label,
+                        trade_identifier,
+                    ),
                 )
     else:
         # Original non-adaptive event processing.
@@ -1798,6 +1916,7 @@ def run_complex_simulation(
 
     metrics_by_set: Dict[str, StrategyMetrics] = {}
     aggregated_trades: List[Trade] = []
+    aggregated_slot_trades: List[Trade] = []
     aggregated_trade_profit_list: List[float] = []
     aggregated_profit_percentage_list: List[float] = []
     aggregated_loss_percentage_list: List[float] = []
@@ -1806,6 +1925,7 @@ def run_complex_simulation(
         Tuple[TradeDetail, TradeDetail]
     ] = []
     aggregated_trade_symbol_lookup: Dict[Trade, str] = {}
+    aggregated_slot_trade_symbol_lookup: Dict[Trade, str] = {}
     aggregated_simulation_results: List[SimulationResult] = []
     aggregated_closing_price_series_by_symbol: Dict[str, pandas.Series] = {}
 
@@ -1869,12 +1989,24 @@ def run_complex_simulation(
                 )
             )
 
+        slot_trades_for_set = [
+            adaptive_slot_trade_map.get(id(trade), trade)
+            for trade in trades_for_set
+        ]
+        filtered_slot_trade_symbol_lookup = {
+            adaptive_slot_trade_map.get(id(trade), trade): filtered_trade_symbol_lookup[
+                trade
+            ]
+            for trade in trades_for_set
+            if trade in filtered_trade_symbol_lookup
+        }
+
         trade_details_by_year = _organize_trade_details_by_year(detail_pairs_with_label)
         filtered_simulation_results: List[SimulationResult] = []
-        if trades_for_set:
+        if slot_trades_for_set:
             filtered_simulation_results.append(
                 SimulationResult(
-                    trades=trades_for_set,
+                    trades=slot_trades_for_set,
                     total_profit=sum(trade.profit for trade in trades_for_set),
                 )
             )
@@ -1902,20 +2034,20 @@ def run_complex_simulation(
         if simulation_start_date is None:
             simulation_start_date = pandas.Timestamp.now()
         annual_returns = calculate_annual_returns(
-            trades_for_set,
+            slot_trades_for_set,
             starting_cash,
             position_limits_by_set[label],
             simulation_start_date,
             withdraw_amount,
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
-            trade_symbol_lookup=filtered_trade_symbol_lookup,
+            trade_symbol_lookup=filtered_slot_trade_symbol_lookup,
             closing_price_series_by_symbol=artifacts.closing_price_series_by_symbol,
             settlement_lag_days=1,
         )
         annual_trade_counts = calculate_annual_trade_counts(trades_for_set)
         final_balance = simulate_portfolio_balance(
-            trades_for_set,
+            slot_trades_for_set,
             starting_cash,
             position_limits_by_set[label],
             withdraw_amount,
@@ -1925,6 +2057,9 @@ def run_complex_simulation(
         # Propagate commission data from Trade objects (set by
         # simulate_portfolio_balance) back to the corresponding TradeDetails.
         for trade in trades_for_set:
+            slot_trade = adaptive_slot_trade_map.get(id(trade), trade)
+            trade.total_commission = slot_trade.total_commission
+            trade.share_count = slot_trade.share_count
             orig = adaptive_original_trade.get(id(trade), trade)
             if orig in artifacts.trade_detail_pairs:
                 _, exit_detail = artifacts.trade_detail_pairs[orig]
@@ -1932,18 +2067,18 @@ def run_complex_simulation(
                 exit_detail.share_count = trade.share_count
 
         maximum_drawdown = calculate_max_drawdown(
-            trades_for_set,
+            slot_trades_for_set,
             starting_cash,
             position_limits_by_set[label],
-            filtered_trade_symbol_lookup,
+            filtered_slot_trade_symbol_lookup,
             artifacts.closing_price_series_by_symbol,
             withdraw_amount,
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
         )
-        if trades_for_set:
+        if slot_trades_for_set:
             last_trade_exit_date = max(
-                trade.exit_date for trade in trades_for_set
+                trade.exit_date for trade in slot_trades_for_set
             )
         else:
             last_trade_exit_date = simulation_start_date
@@ -1975,12 +2110,14 @@ def run_complex_simulation(
         )
 
         aggregated_trades.extend(trades_for_set)
+        aggregated_slot_trades.extend(slot_trades_for_set)
         aggregated_trade_profit_list.extend(trade_profit_list)
         aggregated_profit_percentage_list.extend(profit_percentage_list)
         aggregated_loss_percentage_list.extend(loss_percentage_list)
         aggregated_holding_period_list.extend(holding_period_list)
         aggregated_detail_pairs_with_label.extend(detail_pairs_with_label)
         aggregated_trade_symbol_lookup.update(filtered_trade_symbol_lookup)
+        aggregated_slot_trade_symbol_lookup.update(filtered_slot_trade_symbol_lookup)
         aggregated_simulation_results.extend(filtered_simulation_results)
         for symbol_name, closing_series in (
             artifacts.closing_price_series_by_symbol.items()
@@ -2009,14 +2146,14 @@ def run_complex_simulation(
         else:
             aggregated_simulation_start_date = pandas.Timestamp.now()
         aggregated_annual_returns = calculate_annual_returns(
-            aggregated_trades,
+            aggregated_slot_trades,
             starting_cash,
             maximum_position_count,
             aggregated_simulation_start_date,
             withdraw_amount,
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
-            trade_symbol_lookup=aggregated_trade_symbol_lookup,
+            trade_symbol_lookup=aggregated_slot_trade_symbol_lookup,
             closing_price_series_by_symbol=(
                 aggregated_closing_price_series_by_symbol
             ),
@@ -2026,7 +2163,7 @@ def run_complex_simulation(
             aggregated_trades
         )
         aggregated_final_balance = simulate_portfolio_balance(
-            aggregated_trades,
+            aggregated_slot_trades,
             starting_cash,
             maximum_position_count,
             withdraw_amount,
@@ -2034,16 +2171,16 @@ def run_complex_simulation(
             margin_interest_annual_rate=effective_interest_rate,
         )
         aggregated_maximum_drawdown = calculate_max_drawdown(
-            aggregated_trades,
+            aggregated_slot_trades,
             starting_cash,
             maximum_position_count,
-            aggregated_trade_symbol_lookup,
+            aggregated_slot_trade_symbol_lookup,
             aggregated_closing_price_series_by_symbol,
             withdraw_amount,
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
         )
-        last_exit_date = max(trade.exit_date for trade in aggregated_trades)
+        last_exit_date = max(trade.exit_date for trade in aggregated_slot_trades)
         aggregated_compound_annual_growth_rate = 0.0
         if starting_cash > 0 and aggregated_simulation_start_date is not None:
             duration_days = (last_exit_date - aggregated_simulation_start_date).days
@@ -2836,6 +2973,9 @@ def attach_ema_sma_cross_testing_signals(
     price_score_max: float | None = None,
     confirmation_sma_angle_range: tuple[float, float] | None = None,
     exit_alpha_factor: float | None = None,
+    shape_slope_min: float | None = None,
+    shape_dev_50_max: float | None = None,
+    shape_bsv_lookback: int | None = None,
 ) -> None:
     """Attach EMA/SMA cross testing signals with angle and chip filters.
 
@@ -3108,6 +3248,63 @@ def attach_ema_sma_cross_testing_signals(
         ftd_lookback = 10
         ftd_recent = ftd_signal.rolling(window=ftd_lookback, min_periods=1).max().astype(bool)
         entry_conditions = entry_conditions & ftd_recent
+
+    # Fish-body shape + BSV gate (third instance: trend join after vacuum
+    # turn). Active when all three params are set. Gates entry on:
+    # 1) 60-bar shape descriptor's slope >= shape_slope_min
+    # 2) midpoint deviation <= shape_dev_50_max (negative U-shape valley)
+    # 3) BSV footprint observed in last shape_bsv_lookback bars
+    if (
+        shape_slope_min is not None
+        and shape_dev_50_max is not None
+        and shape_bsv_lookback is not None
+    ):
+        shape_window_size = 60
+        sample_count = 5
+        close_series = price_data_frame["close"].astype(float)
+        slope_pass = pandas.Series(False, index=price_data_frame.index)
+        dev50_pass = pandas.Series(False, index=price_data_frame.index)
+        for row_index in range(shape_window_size - 1, len(price_data_frame)):
+            window_start = row_index - (shape_window_size - 1)
+            window_slice = close_series.iloc[window_start : row_index + 1]
+            head_value = float(window_slice.iloc[0])
+            if head_value == 0 or pandas.isna(head_value):
+                continue
+            sample_indices = [
+                int(round(position * (shape_window_size - 1) / (sample_count - 1)))
+                for position in range(sample_count)
+            ]
+            samples = [float(window_slice.iloc[idx]) for idx in sample_indices]
+            head = samples[0]
+            tail = samples[-1]
+            slope_value = (tail - head) / head
+            midpoint_position_fraction = 0.5
+            baseline_at_midpoint = head + (tail - head) * midpoint_position_fraction
+            midpoint_deviation = (samples[2] - baseline_at_midpoint) / abs(head)
+            if slope_value >= shape_slope_min:
+                slope_pass.iloc[row_index] = True
+            if midpoint_deviation <= shape_dev_50_max:
+                dev50_pass.iloc[row_index] = True
+        # Shape pass uses T (signal date) — shift by 1 so signal at T+1 reads T's shape.
+        shape_pass_at_t = (slope_pass & dev50_pass).shift(1, fill_value=False)
+
+        # BSV footprint detection
+        bsv_frame = bsv(
+            high_series=price_data_frame["high"],
+            low_series=price_data_frame["low"],
+            close_series=price_data_frame["close"],
+            volume_series=price_data_frame["volume"],
+        )
+        bsv_active = (bsv_frame["footprint_flag"] > 0).fillna(False)
+        # BSV in last shape_bsv_lookback bars (inclusive of T)
+        bsv_recent_at_t = (
+            bsv_active.rolling(window=shape_bsv_lookback, min_periods=1)
+            .max()
+            .astype(bool)
+            .shift(1, fill_value=False)
+        )
+
+        entry_conditions = entry_conditions & shape_pass_at_t & bsv_recent_at_t
 
     price_data_frame["ema_sma_cross_testing_entry_signal"] = entry_conditions
 
@@ -3568,6 +3765,9 @@ def _generate_strategy_evaluation_artifacts(
     price_score_max: float | None = None,
     confirmation_sma_angle_range: tuple[float, float] | None = None,
     exit_alpha_factor: float | None = None,
+    shape_slope_min: float | None = None,
+    shape_dev_50_max: float | None = None,
+    shape_bsv_lookback: int | None = None,
     reentry_on_signal: bool = False,
 ) -> StrategyEvaluationArtifacts:
     """Build intermediate artifacts for strategy evaluation.
@@ -3793,6 +3993,12 @@ def _generate_strategy_evaluation_artifacts(
                         kwargs["confirmation_sma_angle_range"] = confirmation_sma_angle_range
                     if exit_alpha_factor is not None:
                         kwargs["exit_alpha_factor"] = exit_alpha_factor
+                    if shape_slope_min is not None:
+                        kwargs["shape_slope_min"] = shape_slope_min
+                    if shape_dev_50_max is not None:
+                        kwargs["shape_dev_50_max"] = shape_dev_50_max
+                    if shape_bsv_lookback is not None:
+                        kwargs["shape_bsv_lookback"] = shape_bsv_lookback
             buy_function(price_data_frame, **kwargs)
             rename_signal_columns(price_data_frame, base_name, buy_name)
             entry_column_name = f"{buy_name}_entry_signal"

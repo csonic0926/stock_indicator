@@ -2830,8 +2830,8 @@ def test_multi_bucket_simulation_forwards_symbol_list(
                 "symbol_list": str(symbol_list_path),
                 "buckets": [
                     {
-                        "label": "buy3_production",
-                        "strategy_id": "buy3",
+                        "label": "fish_head_production",
+                        "strategy_id": "fish_head_vacuum_turn",
                         "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
                     }
                 ],
@@ -2848,7 +2848,7 @@ def test_multi_bucket_simulation_forwards_symbol_list(
     monkeypatch.setattr(
         manage_module,
         "load_strategy_set_mapping",
-        lambda: {"buy3": ("ema_sma_cross", "ema_sma_cross")},
+        lambda: {"fish_head_vacuum_turn": ("ema_sma_cross", "ema_sma_cross")},
     )
     monkeypatch.setattr(
         manage_module,
@@ -2866,7 +2866,7 @@ def test_multi_bucket_simulation_forwards_symbol_list(
         empty_metrics = _create_empty_metrics()
         return manage_module.strategy.ComplexSimulationMetrics(
             overall_metrics=empty_metrics,
-            metrics_by_set={"buy3_production": empty_metrics},
+            metrics_by_set={"fish_head_production": empty_metrics},
         )
 
     monkeypatch.setattr(

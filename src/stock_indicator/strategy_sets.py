@@ -51,6 +51,15 @@ class StrategyEntryFilters:
     near_delta_max: float | None = None
     price_tightness_min: float | None = None
     price_tightness_max: float | None = None
+    # Fish-body shape + BSV filters (third instance: trend join after vacuum
+    # turn). When all three are set, entry signal is gated by:
+    # 1) 60-bar shape descriptor's overall slope >= shape_slope_min
+    # 2) 60-bar shape descriptor's midpoint deviation <= shape_dev_50_max
+    # 3) BSV footprint observed within last shape_bsv_lookback bars
+    # When any is None, fish-body gating is disabled.
+    shape_slope_min: float | None = None
+    shape_dev_50_max: float | None = None
+    shape_bsv_lookback: int | None = None
 
 
 def load_strategy_entry_filters(
@@ -78,6 +87,12 @@ def load_strategy_entry_filters(
                     return None
                 return float(raw)
 
+            def _int_or_none(key: str) -> int | None:
+                raw = (row.get(key) or "").strip()
+                if not raw:
+                    return None
+                return int(raw)
+
             filters = StrategyEntryFilters(
                 d_sma_min=_float_or_none("d_sma_min"),
                 d_sma_max=_float_or_none("d_sma_max"),
@@ -91,6 +106,9 @@ def load_strategy_entry_filters(
                 near_delta_max=_float_or_none("near_delta_max"),
                 price_tightness_min=_float_or_none("price_tightness_min"),
                 price_tightness_max=_float_or_none("price_tightness_max"),
+                shape_slope_min=_float_or_none("shape_slope_min"),
+                shape_dev_50_max=_float_or_none("shape_dev_50_max"),
+                shape_bsv_lookback=_int_or_none("shape_bsv_lookback"),
             )
             result[strategy_id] = filters
     return result

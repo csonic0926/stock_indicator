@@ -1424,6 +1424,13 @@ class StockShell(cmd.Cmd):
                     )
                 price_score_min_value = entry_filters.price_score_min
                 price_score_max_value = entry_filters.price_score_max
+                shape_slope_min_value = entry_filters.shape_slope_min
+                shape_dev_50_max_value = entry_filters.shape_dev_50_max
+                shape_bsv_lookback_value = entry_filters.shape_bsv_lookback
+            else:
+                shape_slope_min_value = None
+                shape_dev_50_max_value = None
+                shape_bsv_lookback_value = None
 
             raw_exit_alpha_factor = raw_bucket.get("exit_alpha_factor")
             exit_alpha_factor_value: float | None = None
@@ -1501,6 +1508,51 @@ class StockShell(cmd.Cmd):
                 maximum_positions=bucket_maximum_positions,
                 fill_remaining=bool(raw_bucket.get("fill_remaining", False)),
                 exit_alpha_factor=exit_alpha_factor_value,
+                shape_slope_min=shape_slope_min_value,
+                shape_dev_50_max=shape_dev_50_max_value,
+                shape_bsv_lookback=shape_bsv_lookback_value,
+                tp_regime_adjust=(
+                    bool(raw_bucket["tp_regime_adjust"])
+                    if "tp_regime_adjust" in raw_bucket
+                    and raw_bucket["tp_regime_adjust"] is not None
+                    else None
+                ),
+                fixed_tp=(
+                    float(raw_bucket["fixed_tp"])
+                    if "fixed_tp" in raw_bucket
+                    and raw_bucket["fixed_tp"] is not None
+                    else None
+                ),
+                fixed_sl=(
+                    float(raw_bucket["fixed_sl"])
+                    if "fixed_sl" in raw_bucket
+                    and raw_bucket["fixed_sl"] is not None
+                    else None
+                ),
+                override_min_hold_tp_only=(
+                    bool(raw_bucket["override_min_hold_tp_only"])
+                    if "override_min_hold_tp_only" in raw_bucket
+                    and raw_bucket["override_min_hold_tp_only"] is not None
+                    else None
+                ),
+                min_hold_tp=(
+                    int(raw_bucket["min_hold_tp"])
+                    if "min_hold_tp" in raw_bucket
+                    and raw_bucket["min_hold_tp"] is not None
+                    else None
+                ),
+                override_min_hold_sl_only=(
+                    bool(raw_bucket["override_min_hold_sl_only"])
+                    if "override_min_hold_sl_only" in raw_bucket
+                    and raw_bucket["override_min_hold_sl_only"] is not None
+                    else None
+                ),
+                min_hold_sl=(
+                    int(raw_bucket["min_hold_sl"])
+                    if "min_hold_sl" in raw_bucket
+                    and raw_bucket["min_hold_sl"] is not None
+                    else None
+                ),
             )
 
         if start_date_string is None:
@@ -1536,38 +1588,70 @@ class StockShell(cmd.Cmd):
                     window=int(raw_adaptive.get("window", 20)),
                     sigma_multiplier=float(raw_adaptive.get("sigma", 0.5)),
                     target_r=float(raw_adaptive.get("target_r", 2.0)),
+                    sl_sigma_multiplier=(
+                        float(raw_adaptive["sl_sigma_multiplier"])
+                        if "sl_sigma_multiplier" in raw_adaptive
+                        else (
+                            float(raw_adaptive["sl_sigma"])
+                            if "sl_sigma" in raw_adaptive
+                            else None
+                        )
+                    ),
                     min_tp=float(raw_adaptive.get("min_tp", 0.02)),
                     min_sl=float(raw_adaptive.get("min_sl", 0.01)),
                     min_samples=int(raw_adaptive.get("min_samples", 5)),
                     fixed_sl=float(raw_fixed_sl) if raw_fixed_sl is not None else None,
-                    override_min_hold=bool(raw_adaptive.get("override_min_hold", False)),
-                    override_min_hold_tp_only=bool(raw_adaptive.get("override_min_hold_tp_only", False)),
+                    override_min_hold=bool(
+                        raw_adaptive.get("override_min_hold", False),
+                    ),
+                    override_min_hold_tp_only=bool(
+                        raw_adaptive.get("override_min_hold_tp_only", False),
+                    ),
                     min_hold_tp=int(raw_adaptive.get("min_hold_tp", 0)),
-                    delayed_rolling_update=bool(raw_adaptive.get("delayed_rolling_update", False)),
+                    override_min_hold_sl_only=bool(
+                        raw_adaptive.get("override_min_hold_sl_only", False),
+                    ),
+                    min_hold_sl=int(raw_adaptive.get("min_hold_sl", 0)),
+                    fixed_tp=(
+                        float(raw_adaptive["fixed_tp"])
+                        if raw_adaptive.get("fixed_tp") is not None
+                        else None
+                    ),
+                    disable_sl_trigger=bool(
+                        raw_adaptive.get("disable_sl_trigger", False),
+                    ),
+                    tp_regime_adjust=bool(
+                        raw_adaptive.get("tp_regime_adjust", False),
+                    ),
+                    tp_regime_ratio_min=float(
+                        raw_adaptive.get("tp_regime_ratio_min", 0.5),
+                    ),
+                    tp_regime_ratio_max=float(
+                        raw_adaptive.get("tp_regime_ratio_max", 1.5),
+                    ),
+                    delayed_rolling_update=bool(
+                        raw_adaptive.get("delayed_rolling_update", False),
+                    ),
                     breakeven_at_mp=bool(raw_adaptive.get("breakeven_at_mp", False)),
-                    sector_rolling=bool(raw_adaptive.get("sector_rolling", False)),
-                    sector_sl_sigma=float(raw_adaptive.get("sector_sl_sigma", 0.5)),
-                    sector_min_rr=float(raw_adaptive.get("sector_min_rr", 2.0)),
-                    sector_lookback_days=int(raw_adaptive.get("sector_lookback_days", 0)),
                     evict_oldest=bool(raw_adaptive.get("evict_oldest", False)),
                 )
             else:
                 # Boolean true -> use defaults.
                 adaptive_tp_sl_config = strategy.AdaptiveTPSLConfig()
-            sl_desc = (
-                f"fixed_sl={adaptive_tp_sl_config.fixed_sl}"
-                if adaptive_tp_sl_config.fixed_sl is not None
-                else f"target_r={adaptive_tp_sl_config.target_r}"
+            sl_sigma_description = (
+                adaptive_tp_sl_config.sl_sigma_multiplier
+                if adaptive_tp_sl_config.sl_sigma_multiplier is not None
+                else adaptive_tp_sl_config.sigma_multiplier
             )
-            sector_desc = (
-                f" sector_rolling=True sector_sl_sigma={adaptive_tp_sl_config.sector_sl_sigma}"
-                if adaptive_tp_sl_config.sector_rolling
-                else ""
+            sl_desc = (
+                f"fixed_sl_cap={adaptive_tp_sl_config.fixed_sl}"
+                if adaptive_tp_sl_config.fixed_sl is not None
+                else f"rolling_loss_sl_sigma={sl_sigma_description}"
             )
             self.stdout.write(
                 f"Adaptive TP/SL: window={adaptive_tp_sl_config.window} "
                 f"sigma={adaptive_tp_sl_config.sigma_multiplier} "
-                f"{sl_desc}{sector_desc}\n"
+                f"{sl_desc}\n"
             )
 
         try:
@@ -3378,6 +3462,10 @@ class StockShell(cmd.Cmd):
         # Action instructions
         self.stdout.write(f"\n--- {strategy_id or ''} actions ---\n")
         self.stdout.write(
+            "[SIGNAL LAYER — signal_trades.json sim positions, "
+            "NOT live Futu portfolio. Live positions managed by place_tp_sl.py.]\n"
+        )
+        self.stdout.write(
             "TP/SL: adaptive (will be computed in next day's "
             "compute_adaptive_tp_sl after entry)\n"
         )
@@ -3419,15 +3507,17 @@ class StockShell(cmd.Cmd):
         TP/SL percentages and writes them back to adaptive_state.json for
         System B (place_tp_sl.py) to read.
 
-        Config: window=20, sigma=0.5, target_r=2.0, fixed_sl_cap=0.03
+        Config: window=20, sigma=0.5, SL sensor=median rolling loss.
         """
         state_path = DATA_DIRECTORY / "adaptive_state.json"
 
-        # Adaptive parameters (matching production config)
+        # Adaptive parameters (matching new design):
+        # - sl_pct computed as robust rolling median loss indicator
+        # - SL never actually placed in live (place_tp_sl.py skips placement)
+        # - sl_pct still recorded in adaptive_state for diagnostic / future use
         window = 20
         sigma_mult = 0.5
-        target_r = 2.0
-        fixed_sl_cap = 0.03
+        fixed_sl_cap = 1.0  # large enough to never bind in practice
         min_tp = 0.02
         min_sl = 0.01
         min_samples = 5
@@ -3512,13 +3602,32 @@ class StockShell(cmd.Cmd):
         tp_pct = min_tp
         sl_pct = min_sl
         if len(raw_profits) >= min_samples:
-            wins = [p for p in raw_profits if p > 0]
+            from statistics import median as _median
+            from statistics import stdev as _stdev
+
+            wins = [
+                profit_percentage
+                for profit_percentage in raw_profits
+                if profit_percentage > 0
+            ]
             if len(wins) >= 3:
-                from statistics import stdev as _stdev
-                mp = sum(wins) / len(wins)
-                sp = _stdev(wins) if len(wins) >= 2 else 0.0
-                tp_pct = max(min_tp, mp + sigma_mult * sp)
-                sl_pct = max(min_sl, tp_pct / target_r)
+                mean_profit_percentage = sum(wins) / len(wins)
+                profit_standard_deviation = (
+                    _stdev(wins) if len(wins) >= 2 else 0.0
+                )
+                tp_pct = max(
+                    min_tp,
+                    mean_profit_percentage
+                    + sigma_mult * profit_standard_deviation,
+                )
+
+            losses = [
+                abs(loss_percentage)
+                for loss_percentage in raw_profits
+                if loss_percentage < 0
+            ]
+            if len(losses) >= 3:
+                sl_pct = max(min_sl, _median(losses))
                 sl_pct = min(sl_pct, fixed_sl_cap)
 
         # Always write back: rolling history, closed trades, and TP/SL %.
@@ -3576,6 +3685,11 @@ class StockShell(cmd.Cmd):
         total_count = sum(len(v) for v in all_positions.values())
         self.stdout.write(
             f"\n--- Concurrent positions after entry ({total_count} total) ---\n"
+        )
+        self.stdout.write(
+            "[SIGNAL LAYER — signal_trades.json sim positions used for rolling "
+            "TP/SL computation. NOT live Futu portfolio. Live positions queried "
+            "from Futu API by place_tp_sl.py — they may not match this list.]\n"
         )
         for strat_id, strat_positions in all_positions.items():
             if strat_positions:
