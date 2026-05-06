@@ -1549,6 +1549,18 @@ class StockShell(cmd.Cmd):
                     and raw_bucket["slope_min"] is not None
                     else None
                 ),
+                free_fall_slope=(
+                    float(raw_bucket["free_fall_slope"])
+                    if "free_fall_slope" in raw_bucket
+                    and raw_bucket["free_fall_slope"] is not None
+                    else None
+                ),
+                free_fall_near_delta=(
+                    float(raw_bucket["free_fall_near_delta"])
+                    if "free_fall_near_delta" in raw_bucket
+                    and raw_bucket["free_fall_near_delta"] is not None
+                    else None
+                ),
                 override_min_hold_tp_only=(
                     bool(raw_bucket["override_min_hold_tp_only"])
                     if "override_min_hold_tp_only" in raw_bucket

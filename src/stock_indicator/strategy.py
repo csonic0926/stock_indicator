@@ -639,11 +639,17 @@ class ComplexStrategySetDefinition:
     # Per-bucket bounds on entry slope_60 (60-bar slope at signal date).
     # When set, candidates outside the bounds are skipped at the trade-
     # decision step. slope_max excludes blow-off territory (e.g. slope >
-    # 50%) or caps to a "body" zone; slope_min excludes free-fall territory
-    # (e.g. slope < -20% for fish_head when paired with no nearby volume
-    # support).
+    # 50%); slope_min excludes deep declines.
     slope_max: float | None = None
     slope_min: float | None = None
+    # Compound free-fall filter for fish_head: skip when BOTH
+    # slope_60 < free_fall_slope AND near_delta < free_fall_near_delta.
+    # Targets the diagnostic toxic cell where deep crash combines with
+    # absent nearby volume floor (no-bid territory) — distinct from
+    # slope_min which is unconditional. Both fields must be set together
+    # to activate; if either is None, filter does not fire.
+    free_fall_slope: float | None = None
+    free_fall_near_delta: float | None = None
     # Per-bucket override for min_hold gates on TP and SL. None = inherit
     # top-level. Needed because different bucket narratives demand opposite
     # SL gate behavior — buy3 V-bottom needs SL to wait for min_hold (give
@@ -1556,20 +1562,25 @@ def run_complex_simulation(
                 trade_sym = artifacts_by_set[label].trade_symbol_lookup.get(
                     trade, "",
                 )
-                # Per-bucket slope bounds: skip candidates with 60-bar slope
-                # at signal date outside [slope_min, slope_max]. slope_max
-                # excludes blow-off; slope_min excludes free-fall. Reads
-                # from trade detail's slope_60 (computed upstream).
+                # Per-bucket entry filters reading from trade detail
+                # (slope_60 / near_delta computed upstream).
                 _bucket_def_slope = set_definitions[label]
-                if (
+                _need_detail = (
                     _bucket_def_slope.slope_max is not None
                     or _bucket_def_slope.slope_min is not None
-                ):
+                    or (
+                        _bucket_def_slope.free_fall_slope is not None
+                        and _bucket_def_slope.free_fall_near_delta is not None
+                    )
+                )
+                if _need_detail:
                     _detail_pair = artifacts_by_set[label].trade_detail_pairs.get(
                         trade
                     )
                     if _detail_pair is not None:
                         _entry_slope = _detail_pair[0].slope_60
+                        _entry_near_delta = _detail_pair[0].near_delta
+                        # Independent slope bounds (unconditional).
                         if _entry_slope is not None:
                             if (
                                 _bucket_def_slope.slope_max is not None
@@ -1581,6 +1592,17 @@ def run_complex_simulation(
                                 and _entry_slope < _bucket_def_slope.slope_min
                             ):
                                 continue
+                        # Compound free-fall filter (AND): both must trigger.
+                        if (
+                            _bucket_def_slope.free_fall_slope is not None
+                            and _bucket_def_slope.free_fall_near_delta is not None
+                            and _entry_slope is not None
+                            and _entry_near_delta is not None
+                            and _entry_slope < _bucket_def_slope.free_fall_slope
+                            and _entry_near_delta
+                            < _bucket_def_slope.free_fall_near_delta
+                        ):
+                            continue
                 if use_evict_oldest and trade_sym:
                     refreshed_trade_identifier: int | None = None
                     for open_identifier, open_symbol in open_trade_symbols.items():
