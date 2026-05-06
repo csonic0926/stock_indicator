@@ -525,6 +525,11 @@ class TradeDetail:
     d_sma_angle: float | None = None
     ema_angle: float | None = None
     d_ema_angle: float | None = None
+    # 60-bar slope at signal date (T): (close[T] - close[T-59]) / close[T-59].
+    # Captures the trade's macro slope context — fish_head trades fire on
+    # negative slope (post-vacuum), fish_tail on extreme positive (post-rally),
+    # fish_body across the middle. Useful for slope-based regime filtering.
+    slope_60: float | None = None
     # B-layer confirmation-day (T+1) sma_angle value. Recorded alongside the
     # signal-date (T) ``sma_angle`` so you can inspect what the confirmation
     # gate actually saw for each trade.
@@ -4289,11 +4294,17 @@ def _generate_strategy_evaluation_artifacts(
                 price_data_frame["d_sma_angle"] = price_data_frame["sma_angle"].diff()
             if "ema_angle" in price_data_frame.columns and "d_ema_angle" not in price_data_frame.columns:
                 price_data_frame["d_ema_angle"] = price_data_frame["ema_angle"].diff()
+            if "close" in price_data_frame.columns and "slope_60" not in price_data_frame.columns:
+                close_60_bars_ago = price_data_frame["close"].shift(59)
+                price_data_frame["slope_60"] = (
+                    price_data_frame["close"] - close_60_bars_ago
+                ) / close_60_bars_ago
 
             sma_angle_for_signal = _lookup_signal_value("sma_angle")
             d_sma_angle_for_signal = _lookup_signal_value("d_sma_angle")
             ema_angle_for_signal = _lookup_signal_value("ema_angle")
             d_ema_angle_for_signal = _lookup_signal_value("d_ema_angle")
+            slope_60_for_signal = _lookup_signal_value("slope_60")
             sma_angle_confirmation_value = _lookup_confirmation_value("sma_angle")
             entry_detail = TradeDetail(
                 date=completed_trade.entry_date,
@@ -4316,6 +4327,7 @@ def _generate_strategy_evaluation_artifacts(
                 d_sma_angle=d_sma_angle_for_signal,
                 ema_angle=ema_angle_for_signal,
                 d_ema_angle=d_ema_angle_for_signal,
+                slope_60=slope_60_for_signal,
                 sma_angle_confirmation=sma_angle_confirmation_value,
                 signal_bar_open=completed_trade.signal_bar_open,
             )
