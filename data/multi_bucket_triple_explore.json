@@ -35,6 +35,7 @@
       "min_sl": 0.01,
       "fixed_sl": null,
       "fixed_tp": null,
+      "slope_min": -0.20,
       "override_min_hold_tp_only": true,
       "min_hold_tp": 1,
       "override_min_hold_sl_only": true,
