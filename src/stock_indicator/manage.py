@@ -1537,6 +1537,12 @@ class StockShell(cmd.Cmd):
                     and raw_bucket["min_sl"] is not None
                     else None
                 ),
+                slope_max=(
+                    float(raw_bucket["slope_max"])
+                    if "slope_max" in raw_bucket
+                    and raw_bucket["slope_max"] is not None
+                    else None
+                ),
                 override_min_hold_tp_only=(
                     bool(raw_bucket["override_min_hold_tp_only"])
                     if "override_min_hold_tp_only" in raw_bucket
