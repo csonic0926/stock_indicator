@@ -10,8 +10,9 @@ REPOSITORY_ROOT="${REPO:-$SCRIPT_DIRECTORY}"
 SOURCE_DIRECTORY="${SRC:-$REPOSITORY_ROOT/src}"
 VIRTUAL_ENVIRONMENT_DIRECTORY="${VENV:-$REPOSITORY_ROOT/venv}"
 
-# Production Buy3 config: Top500 Pick5, adaptive TP/SL with fixed SL cap 3%
-ARG_LINE_1='dollar_volume>0.02%,Top500,Pick5 0.03 strategy=buy3 tp=0.078 max_pos=6 min_hold=5'
+# Production Buy3 config: Top500 Pick5, NO SL (sl=1.0, never triggers).
+# Matches no-SL backtest baseline: CAGR 17.14%, MDD 38.01%, Calmar 0.45.
+ARG_LINE_1='dollar_volume>0.02%,Top500,Pick5 1.0 strategy=buy3 tp=0.078 max_pos=6 min_hold=5'
 
 # Set up logging directories
 LOG_DIRECTORY="$REPOSITORY_ROOT/cron_logs"

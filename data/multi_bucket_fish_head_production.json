@@ -1,7 +1,7 @@
 {
   "max_position_count": 6,
   "starting_cash": 60000,
-  "start_date": "1994-01-01",
+  "start_date": "2010-01-01",
   "data_source": "2010",
   "withdraw": 0,
   "min_hold": 5,
@@ -13,9 +13,12 @@
   "adaptive_tp_sl": {
     "window": 20,
     "sigma": 0.5,
+    "target_r": 2.0,
     "fixed_sl": 0.03,
     "override_min_hold_tp_only": true,
     "min_hold_tp": 1,
+    "override_min_hold_sl_only": true,                                                                                                                 
+    "min_hold_sl": 1,
     "delayed_rolling_update": true,
     "sector_rolling": false,
     "sector_sl_sigma": 0.0,
@@ -25,8 +28,8 @@
   },
   "buckets": [
     {
-      "label": "buy3_production",
-      "strategy_id": "buy3",
+      "label": "fish_head_production",
+      "strategy_id": "fish_head_vacuum_turn",
       "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
       "stop_loss": 1.0,
       "take_profit": 0.0,

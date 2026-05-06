@@ -1,16 +1,20 @@
 {
-  "buy3": [
+  "fish_head_production": [
     {
-      "symbol": "ABBV",
-      "entry_date": "2026-04-24"
+      "symbol": "JNJ",
+      "entry_date": "2026-05-05"
     },
     {
-      "symbol": "LLY",
-      "entry_date": "2026-04-28"
+      "symbol": "HD",
+      "entry_date": "2026-05-05"
     },
     {
-      "symbol": "MRK",
-      "entry_date": "2026-04-28"
+      "symbol": "ABT",
+      "entry_date": "2026-05-05"
+    },
+    {
+      "symbol": "MCD",
+      "entry_date": "2026-05-05"
     }
   ]
 }

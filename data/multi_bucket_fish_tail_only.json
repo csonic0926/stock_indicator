@@ -6,21 +6,22 @@
   "start_date": "2010-01-01",
   "data_source": "2010",
   "symbol_list": "2010_safe",
-  "min_hold": 3,
+  "min_hold": 5,
   "show_trade_details": false,
   "adaptive_tp_sl": {
-    "fixed_tp": 0.03,
-    "fixed_sl": 0.01,
-    "override_min_hold_tp_only": false,
+    "fixed_sl": 0.03,
+    "min_sl": 0.03,
+    "override_min_hold_tp_only": true,
     "min_hold_tp": 1,
-    "override_min_hold_sl_only": false,
-    "min_hold_sl": 1
+    "override_min_hold_sl_only": true,
+    "min_hold_sl": 2,
+    "disable_sl_trigger": false
   },
   "buckets": [
     {
-      "label": "fish_head_production",
-      "strategy_id": "fish_head_vacuum_turn",
-      "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+      "label": "fish_tail_explore",
+      "strategy_id": "fish_tail_blow_off_top",
+      "dollar_volume_filter": "dollar_volume>0.05%,Top200,Pick3",
       "priority": 1,
       "max_positions": 6,
       "exit_alpha_factor": 3
