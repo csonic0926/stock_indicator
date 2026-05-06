@@ -608,7 +608,8 @@ class ComplexStrategySetDefinition:
     # Fish-body shape + BSV gate (third instance — trend join after vacuum
     # turn). All three set → entry signal additionally requires:
     # 1) 60-bar shape slope >= shape_slope_min
-    # 2) 60-bar midpoint deviation <= shape_dev_50_max (negative U-shape)
+    # 2) ALL middle samples (25%, 50%, 75%) deviation <= shape_dev_50_max
+    #    (full concave U-shape: every interior point at-or-below baseline)
     # 3) BSV footprint observed in last shape_bsv_lookback bars
     shape_slope_min: float | None = None
     shape_dev_50_max: float | None = None
@@ -625,6 +626,11 @@ class ComplexStrategySetDefinition:
     # tight stops.
     fixed_tp: float | None = None
     fixed_sl: float | None = None
+    # Per-bucket override for adaptive_tp_sl.min_sl. fixed_sl alone caps SL
+    # from above; without raising min_sl, a bucket cannot widen SL beyond the
+    # shared floor. Setting min_sl per bucket lets each instance configure its
+    # own SL floor independently.
+    min_sl: float | None = None
     # Per-bucket override for min_hold gates on TP and SL. None = inherit
     # top-level. Needed because different bucket narratives demand opposite
     # SL gate behavior — buy3 V-bottom needs SL to wait for min_hold (give
@@ -1672,9 +1678,34 @@ def run_complex_simulation(
                     if open_symbol_counts.get(trade_sym, 0) >= max_same_symbol:
                         continue
 
+                # Resolve per-bucket overrides up front. min_sl is needed
+                # before rolling computation since it is the SL floor; the
+                # rest are applied after rolling stats are computed.
+                bucket_def = set_definitions[label]
+                effective_min_sl = (
+                    bucket_def.min_sl
+                    if bucket_def.min_sl is not None
+                    else adaptive_tp_sl.min_sl
+                )
+                effective_fixed_sl = (
+                    bucket_def.fixed_sl
+                    if bucket_def.fixed_sl is not None
+                    else adaptive_tp_sl.fixed_sl
+                )
+                effective_fixed_tp = (
+                    bucket_def.fixed_tp
+                    if bucket_def.fixed_tp is not None
+                    else adaptive_tp_sl.fixed_tp
+                )
+                effective_tp_regime_adjust = (
+                    bucket_def.tp_regime_adjust
+                    if bucket_def.tp_regime_adjust is not None
+                    else adaptive_tp_sl.tp_regime_adjust
+                )
+
                 # Compute adaptive TP/SL from rolling stats.
                 tp_pct = adaptive_tp_sl.min_tp
-                sl_pct = adaptive_tp_sl.min_sl
+                sl_pct = effective_min_sl
                 rolling_mp = 0.0
 
                 _tp_pct_late: float | None = None
@@ -1704,28 +1735,9 @@ def run_complex_simulation(
                     ]
                     if len(losses) >= 3:
                         sl_pct = max(
-                            adaptive_tp_sl.min_sl,
+                            effective_min_sl,
                             median(losses),
                         )
-                # Resolve per-bucket overrides for fixed_tp / fixed_sl /
-                # tp_regime_adjust. Bucket-level value (when not None) wins;
-                # otherwise fall back to top-level adaptive setting.
-                bucket_def = set_definitions[label]
-                effective_fixed_sl = (
-                    bucket_def.fixed_sl
-                    if bucket_def.fixed_sl is not None
-                    else adaptive_tp_sl.fixed_sl
-                )
-                effective_fixed_tp = (
-                    bucket_def.fixed_tp
-                    if bucket_def.fixed_tp is not None
-                    else adaptive_tp_sl.fixed_tp
-                )
-                effective_tp_regime_adjust = (
-                    bucket_def.tp_regime_adjust
-                    if bucket_def.tp_regime_adjust is not None
-                    else adaptive_tp_sl.tp_regime_adjust
-                )
 
                 # Apply fixed_sl as ceiling (cap): SL never exceeds this.
                 if effective_fixed_sl is not None:
@@ -3252,7 +3264,9 @@ def attach_ema_sma_cross_testing_signals(
     # Fish-body shape + BSV gate (third instance: trend join after vacuum
     # turn). Active when all three params are set. Gates entry on:
     # 1) 60-bar shape descriptor's slope >= shape_slope_min
-    # 2) midpoint deviation <= shape_dev_50_max (negative U-shape valley)
+    # 2) ALL three middle samples (25%, 50%, 75%) deviation <=
+    #    shape_dev_50_max (every interior point sits at-or-below the
+    #    head-to-tail baseline — full concave U-shape, not just midpoint dip)
     # 3) BSV footprint observed in last shape_bsv_lookback bars
     if (
         shape_slope_min is not None
@@ -3263,7 +3277,7 @@ def attach_ema_sma_cross_testing_signals(
         sample_count = 5
         close_series = price_data_frame["close"].astype(float)
         slope_pass = pandas.Series(False, index=price_data_frame.index)
-        dev50_pass = pandas.Series(False, index=price_data_frame.index)
+        dev_pass = pandas.Series(False, index=price_data_frame.index)
         for row_index in range(shape_window_size - 1, len(price_data_frame)):
             window_start = row_index - (shape_window_size - 1)
             window_slice = close_series.iloc[window_start : row_index + 1]
@@ -3278,15 +3292,25 @@ def attach_ema_sma_cross_testing_signals(
             head = samples[0]
             tail = samples[-1]
             slope_value = (tail - head) / head
-            midpoint_position_fraction = 0.5
-            baseline_at_midpoint = head + (tail - head) * midpoint_position_fraction
-            midpoint_deviation = (samples[2] - baseline_at_midpoint) / abs(head)
             if slope_value >= shape_slope_min:
                 slope_pass.iloc[row_index] = True
-            if midpoint_deviation <= shape_dev_50_max:
-                dev50_pass.iloc[row_index] = True
+            # Check all middle samples (positions 1 .. sample_count - 2)
+            # against the head-to-tail linear baseline. Every interior
+            # deviation must be <= shape_dev_50_max.
+            all_below = True
+            for sample_index in range(1, sample_count - 1):
+                position_fraction = sample_index / (sample_count - 1)
+                baseline_at_sample = head + (tail - head) * position_fraction
+                sample_deviation = (
+                    samples[sample_index] - baseline_at_sample
+                ) / abs(head)
+                if sample_deviation > shape_dev_50_max:
+                    all_below = False
+                    break
+            if all_below:
+                dev_pass.iloc[row_index] = True
         # Shape pass uses T (signal date) — shift by 1 so signal at T+1 reads T's shape.
-        shape_pass_at_t = (slope_pass & dev50_pass).shift(1, fill_value=False)
+        shape_pass_at_t = (slope_pass & dev_pass).shift(1, fill_value=False)
 
         # BSV footprint detection
         bsv_frame = bsv(

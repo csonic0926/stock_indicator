@@ -31,7 +31,15 @@
       "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
       "priority": 2,
       "max_positions": 6,
-      "exit_alpha_factor": 3
+      "exit_alpha_factor": 3,
+      "min_sl": 0.01,
+      "fixed_sl": null,
+      "fixed_tp": null,
+      "override_min_hold_tp_only": true,
+      "min_hold_tp": 1,
+      "override_min_hold_sl_only": true,
+      "min_hold_sl": 1,
+      "tp_regime_adjust": false
     },
     {
       "label": "fish_body_explore",
@@ -39,7 +47,15 @@
       "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
       "priority": 1,
       "max_positions": 6,
-      "exit_alpha_factor": 3
+      "exit_alpha_factor": 3,
+      "min_sl": 0.01,
+      "fixed_sl": null,
+      "fixed_tp": null,
+      "override_min_hold_tp_only": true,
+      "min_hold_tp": 1,
+      "override_min_hold_sl_only": true,
+      "min_hold_sl": 1,
+      "tp_regime_adjust": false
     },
     {
       "label": "fish_tail_explore",
@@ -48,6 +64,13 @@
       "priority": 2,
       "max_positions": 6,
       "exit_alpha_factor": 3,
+      "min_sl": 0.01,
+      "fixed_sl": null,
+      "fixed_tp": null,
+      "override_min_hold_tp_only": true,
+      "min_hold_tp": 1,
+      "override_min_hold_sl_only": true,
+      "min_hold_sl": 1,
       "tp_regime_adjust": true
     }
   ]

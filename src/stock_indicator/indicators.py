@@ -311,7 +311,7 @@ def bsv(
     low_series: pandas.Series,
     close_series: pandas.Series,
     volume_series: pandas.Series,
-    balance_threshold: float = 0.1,
+    balance_threshold: float = 0.15,
 ) -> pandas.DataFrame:
     """Buy/Sell Volume balance indicator.
 
@@ -323,8 +323,9 @@ def bsv(
     ----------
     high_series, low_series, close_series, volume_series : pandas.Series
         Standard OHLCV columns.
-    balance_threshold : float, default 0.1
+    balance_threshold : float, default 0.15
         Maximum allowed |buy_ratio - sell_ratio| to flag a bar as balanced.
+        0.15 → close must sit within central 57.5%-42.5% of bar's H-L range.
 
     Returns
     -------
@@ -425,22 +426,26 @@ def is_sideways_then_up_shape(
 
     Conditions:
     - ``slope >= slope_min``: window had meaningful upward move overall.
-    - ``deviation_2 <= dev_50_max``: midpoint sample sits sufficiently below
-      the head-to-tail baseline (negative U-shape valley).
-
-    Other middle deviations are not gated; midpoint is the strongest
-    structural anchor for the sideways→up shape.
+    - Every interior deviation (``deviation_1`` .. ``deviation_<n-2>``) is
+      ``<= dev_50_max``: every middle sample sits at-or-below the head-to-tail
+      linear baseline. Enforces a full concave U-shape across all interior
+      samples, not just a midpoint dip.
     """
     slope = descriptor.get("slope")
-    midpoint_key = "deviation_2"
-    midpoint = descriptor.get(midpoint_key)
-    if slope is None or midpoint is None:
-        return False
-    if pandas.isna(slope) or pandas.isna(midpoint):
+    if slope is None or pandas.isna(slope):
         return False
     if slope < slope_min:
         return False
-    if midpoint > dev_50_max:
+    deviation_keys = sorted(
+        key for key in descriptor.keys() if key.startswith("deviation_")
+    )
+    if not deviation_keys:
         return False
+    for key in deviation_keys:
+        deviation_value = descriptor.get(key)
+        if deviation_value is None or pandas.isna(deviation_value):
+            return False
+        if deviation_value > dev_50_max:
+            return False
     return True
 
