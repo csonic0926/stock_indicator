@@ -650,6 +650,14 @@ class ComplexStrategySetDefinition:
     # to activate; if either is None, filter does not fire.
     free_fall_slope: float | None = None
     free_fall_near_delta: float | None = None
+    # Dead-zone slope filter (skip INSIDE band): skip candidates with
+    # slope_60 in [slope_dead_zone_min, slope_dead_zone_max]. Both fields
+    # must be set together to activate. Used for fish_tail's mid-rally
+    # dead zone (slope 10-25%) where cross fires but is structurally
+    # noise — not regime transition. Inverse semantics from slope_min /
+    # slope_max which skip OUTSIDE the band.
+    slope_dead_zone_min: float | None = None
+    slope_dead_zone_max: float | None = None
     # Per-bucket override for min_hold gates on TP and SL. None = inherit
     # top-level. Needed because different bucket narratives demand opposite
     # SL gate behavior — buy3 V-bottom needs SL to wait for min_hold (give
@@ -1572,6 +1580,10 @@ def run_complex_simulation(
                         _bucket_def_slope.free_fall_slope is not None
                         and _bucket_def_slope.free_fall_near_delta is not None
                     )
+                    or (
+                        _bucket_def_slope.slope_dead_zone_min is not None
+                        and _bucket_def_slope.slope_dead_zone_max is not None
+                    )
                 )
                 if _need_detail:
                     _detail_pair = artifacts_by_set[label].trade_detail_pairs.get(
@@ -1601,6 +1613,16 @@ def run_complex_simulation(
                             and _entry_slope < _bucket_def_slope.free_fall_slope
                             and _entry_near_delta
                             < _bucket_def_slope.free_fall_near_delta
+                        ):
+                            continue
+                        # Dead-zone slope filter (skip INSIDE band).
+                        if (
+                            _bucket_def_slope.slope_dead_zone_min is not None
+                            and _bucket_def_slope.slope_dead_zone_max is not None
+                            and _entry_slope is not None
+                            and _bucket_def_slope.slope_dead_zone_min
+                            <= _entry_slope
+                            <= _bucket_def_slope.slope_dead_zone_max
                         ):
                             continue
                 if use_evict_oldest and trade_sym:
