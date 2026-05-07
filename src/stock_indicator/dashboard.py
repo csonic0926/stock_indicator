@@ -638,7 +638,7 @@ function render(state, futu) {
   } else {
     html += stat('Status', 'Futu OpenD not connected', 'negative');
     // Show signal-based positions
-    const fish_head = positions.fish_head_production || [];
+    const fish_head = positions.fish_head_vacuum_turn || [];
     html += stat('Signal Positions', fish_head.length + '/6');
   }
   $('#account-stats').innerHTML = html;
@@ -680,7 +680,7 @@ function render(state, futu) {
     }
     html += '</table>';
   } else {
-    const fish_head = positions.fish_head_production || [];
+    const fish_head = positions.fish_head_vacuum_turn || [];
     if (fish_head.length > 0) {
       html += '<table><tr><th>Symbol</th><th>Entry Date</th></tr>';
       for (const p of fish_head) {

@@ -74,7 +74,7 @@
       "min_hold_tp": 1,
       "override_min_hold_sl_only": true,
       "min_hold_sl": 1,
-      "tp_regime_adjust": true
+      "tp_regime_adjust": false
     }
   ]
 }
