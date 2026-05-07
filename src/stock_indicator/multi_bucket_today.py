@@ -476,6 +476,12 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
                 and raw_bucket["slope_dead_zone_max"] is not None
                 else None
             ),
+            v_filter_threshold=(
+                float(raw_bucket["v_filter_threshold"])
+                if "v_filter_threshold" in raw_bucket
+                and raw_bucket["v_filter_threshold"] is not None
+                else None
+            ),
             tp_slope_amplify=bool(raw_bucket.get("tp_slope_amplify", False)),
             override_min_hold_tp_only=(
                 bool(raw_bucket["override_min_hold_tp_only"])
@@ -719,14 +725,18 @@ def passes_per_bucket_entry_filters(
     bucket_def: strategy.ComplexStrategySetDefinition,
     slope_60: float | None,
     near_delta: float | None,
+    above_pv: float | None = None,
+    above_pv_previous: float | None = None,
 ) -> bool:
-    """Mirror simulator strategy.py:1684-1728 entry filters.
+    """Mirror simulator strategy.py:1684-1780 entry filters.
 
     - slope_max / slope_min: unconditional bounds on slope_60 at entry.
     - free_fall_slope + free_fall_near_delta: compound AND filter (skip
       when both deeply negative — toxic free-fall cell).
     - slope_dead_zone_min / slope_dead_zone_max: skip INSIDE band
       (mid-rally noise, not regime transition).
+    - v_filter_threshold: keep ONLY when above_pv crosses DOWN through
+      the threshold within one bar (T-1 > threshold AND T < threshold).
     Returns True when the candidate survives all filters."""
     if slope_60 is not None:
         if (
@@ -757,6 +767,14 @@ def passes_per_bucket_entry_filters(
         <= bucket_def.slope_dead_zone_max
     ):
         return False
+    if bucket_def.v_filter_threshold is not None:
+        if (
+            above_pv is None
+            or above_pv_previous is None
+            or above_pv_previous <= bucket_def.v_filter_threshold
+            or above_pv >= bucket_def.v_filter_threshold
+        ):
+            return False
     return True
 
 
@@ -1064,8 +1082,16 @@ def compute_today_signals(
                 debug_values = {}
             slope_60_value = debug_values.get("slope_60")
             near_delta_value = debug_values.get("near_delta")
+            above_pv_value = debug_values.get("above_price_volume_ratio")
+            above_pv_previous_value = debug_values.get(
+                "above_price_volume_ratio_previous"
+            )
             if not passes_per_bucket_entry_filters(
-                bucket_def, slope_60_value, near_delta_value
+                bucket_def,
+                slope_60_value,
+                near_delta_value,
+                above_pv=above_pv_value,
+                above_pv_previous=above_pv_previous_value,
             ):
                 continue
             tp_pct, sl_pct, rolling_mp = strategy.compute_frozen_tp_sl_for_bucket(

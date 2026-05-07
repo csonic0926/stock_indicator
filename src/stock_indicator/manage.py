@@ -1611,6 +1611,12 @@ class StockShell(cmd.Cmd):
                     and raw_bucket["slope_dead_zone_max"] is not None
                     else None
                 ),
+                v_filter_threshold=(
+                    float(raw_bucket["v_filter_threshold"])
+                    if "v_filter_threshold" in raw_bucket
+                    and raw_bucket["v_filter_threshold"] is not None
+                    else None
+                ),
                 tp_slope_amplify=bool(
                     raw_bucket.get("tp_slope_amplify", False)
                 ),

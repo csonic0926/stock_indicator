@@ -530,6 +530,11 @@ class TradeDetail:
     # negative slope (post-vacuum), fish_tail on extreme positive (post-rally),
     # fish_body across the middle. Useful for slope-based regime filtering.
     slope_60: float | None = None
+    # Previous-bar (T-1) above_price_volume_ratio. Used by the V filter
+    # (project_v_bottom_third_bucket_hypothesis_2026_05_08) to detect a
+    # one-bar cross-down through a threshold — captures rapid V-bottom
+    # dislocations that fish_head's static above_pv >= 0.973 misses.
+    above_price_volume_ratio_previous: float | None = None
     # B-layer confirmation-day (T+1) sma_angle value. Recorded alongside the
     # signal-date (T) ``sma_angle`` so you can inspect what the confirmation
     # gate actually saw for each trade.
@@ -658,6 +663,14 @@ class ComplexStrategySetDefinition:
     # slope_max which skip OUTSIDE the band.
     slope_dead_zone_min: float | None = None
     slope_dead_zone_max: float | None = None
+    # V filter (project_v_bottom_third_bucket_hypothesis_2026_05_08): keep
+    # the candidate ONLY when above_price_volume_ratio crosses DOWN
+    # through the threshold within one bar — i.e. at signal date T,
+    # above_pv[T-1] > threshold AND above_pv[T] < threshold. Captures
+    # rapid V-bottom dislocations that fish_head's static
+    # above_pv >= 0.973 misses (e.g. AAPL 2018-12-26: 1.0 → 0.924). When
+    # None, filter is inactive.
+    v_filter_threshold: float | None = None
     # Per-bucket TP slope-amplifier: when enabled and slope_60 > 0 at
     # signal date, multiply TP target by (1 + slope_60). Zero effect for
     # slope <= 0 (e.g. fish_tail's Stage 3 horizontal distribution stays
@@ -1711,7 +1724,7 @@ def run_complex_simulation(
                     trade, "",
                 )
                 # Per-bucket entry filters reading from trade detail
-                # (slope_60 / near_delta computed upstream).
+                # (slope_60 / near_delta / above_pv_previous computed upstream).
                 _bucket_def_slope = set_definitions[label]
                 _need_detail = (
                     _bucket_def_slope.slope_max is not None
@@ -1724,6 +1737,7 @@ def run_complex_simulation(
                         _bucket_def_slope.slope_dead_zone_min is not None
                         and _bucket_def_slope.slope_dead_zone_max is not None
                     )
+                    or _bucket_def_slope.v_filter_threshold is not None
                 )
                 if _need_detail:
                     _detail_pair = artifacts_by_set[label].trade_detail_pairs.get(
@@ -1732,6 +1746,10 @@ def run_complex_simulation(
                     if _detail_pair is not None:
                         _entry_slope = _detail_pair[0].slope_60
                         _entry_near_delta = _detail_pair[0].near_delta
+                        _entry_above_pv = _detail_pair[0].above_price_volume_ratio
+                        _entry_above_pv_prev = (
+                            _detail_pair[0].above_price_volume_ratio_previous
+                        )
                         # Independent slope bounds (unconditional).
                         if _entry_slope is not None:
                             if (
@@ -1765,6 +1783,17 @@ def run_complex_simulation(
                             <= _bucket_def_slope.slope_dead_zone_max
                         ):
                             continue
+                        # V filter: keep ONLY when above_pv crosses DOWN
+                        # through the threshold within one bar
+                        # (T-1 > threshold AND T < threshold).
+                        if _bucket_def_slope.v_filter_threshold is not None:
+                            if (
+                                _entry_above_pv is None
+                                or _entry_above_pv_prev is None
+                                or _entry_above_pv_prev <= _bucket_def_slope.v_filter_threshold
+                                or _entry_above_pv >= _bucket_def_slope.v_filter_threshold
+                            ):
+                                continue
                 if use_evict_oldest and trade_sym:
                     refreshed_trade_identifier: int | None = None
                     for open_identifier, open_symbol in open_trade_symbols.items():
@@ -4485,6 +4514,9 @@ def _generate_strategy_evaluation_artifacts(
             ema_angle_for_signal = _lookup_signal_value("ema_angle")
             d_ema_angle_for_signal = _lookup_signal_value("d_ema_angle")
             slope_60_for_signal = _lookup_signal_value("slope_60")
+            above_pv_previous_for_signal = _lookup_signal_value(
+                "above_price_volume_ratio_previous"
+            )
             sma_angle_confirmation_value = _lookup_confirmation_value("sma_angle")
             entry_detail = TradeDetail(
                 date=completed_trade.entry_date,
@@ -4508,6 +4540,7 @@ def _generate_strategy_evaluation_artifacts(
                 ema_angle=ema_angle_for_signal,
                 d_ema_angle=d_ema_angle_for_signal,
                 slope_60=slope_60_for_signal,
+                above_price_volume_ratio_previous=above_pv_previous_for_signal,
                 sma_angle_confirmation=sma_angle_confirmation_value,
                 signal_bar_open=completed_trade.signal_bar_open,
             )
