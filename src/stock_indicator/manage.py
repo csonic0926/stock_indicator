@@ -10,6 +10,7 @@ import gc  # TODO: review
 import json
 import logging
 import re
+import shlex
 import sys  # TODO: review
 import time  # TODO: review
 from pathlib import Path
@@ -1189,16 +1190,53 @@ class StockShell(cmd.Cmd):
         )
 
     def do_multi_bucket_simulation(self, argument_line: str) -> None:  # noqa: D401
-        """multi_bucket_simulation CONFIG_PATH
-        Run a simulation over N parallel strategy buckets defined in a JSON file."""
+        """multi_bucket_simulation CONFIG_PATH [--export-state-on-date YYYY-MM-DD --export-state-out PATH]
+        Run a simulation over N parallel strategy buckets defined in a JSON file.
 
-        config_path_text = argument_line.strip()
-        if not config_path_text:
+        --export-state-on-date / --export-state-out: cold-start helper for
+        the production multi_bucket_today command. Snapshots the rolling
+        winners/losers/pending state at the boundary of the given date and
+        writes it to PATH (default: data/adaptive_state_export.json)."""
+
+        try:
+            tokens = shlex.split(argument_line.strip())
+        except ValueError as parse_error:
+            self.stdout.write(f"failed to parse arguments: {parse_error}\n")
+            return
+        if not tokens:
             self.stdout.write(
-                "usage: multi_bucket_simulation CONFIG_PATH\n"
+                "usage: multi_bucket_simulation CONFIG_PATH "
+                "[--export-state-on-date YYYY-MM-DD --export-state-out PATH]\n"
                 "See help multi_bucket_simulation for the JSON format.\n"
             )
             return
+
+        config_path_text = tokens[0]
+        export_state_on_date_str: str | None = None
+        export_state_out_path_text: str | None = None
+        index_position = 1
+        while index_position < len(tokens):
+            current_token = tokens[index_position]
+            if current_token == "--export-state-on-date" and index_position + 1 < len(tokens):
+                export_state_on_date_str = tokens[index_position + 1]
+                index_position += 2
+            elif current_token == "--export-state-out" and index_position + 1 < len(tokens):
+                export_state_out_path_text = tokens[index_position + 1]
+                index_position += 2
+            else:
+                self.stdout.write(f"unknown argument: {current_token}\n")
+                return
+
+        if export_state_on_date_str is not None:
+            try:
+                datetime.date.fromisoformat(export_state_on_date_str)
+            except ValueError:
+                self.stdout.write(
+                    f"--export-state-on-date must be YYYY-MM-DD, got "
+                    f"{export_state_on_date_str}\n"
+                )
+                return
+
         config_path = Path(config_path_text).expanduser()
         if not config_path.exists():
             self.stdout.write(f"config file not found: {config_path}\n")
@@ -1701,6 +1739,12 @@ class StockShell(cmd.Cmd):
                 f"{sl_desc}\n"
             )
 
+        export_state_at_date_ts: pandas.Timestamp | None = None
+        exported_state_holder: Dict[str, Any] | None = None
+        if export_state_on_date_str is not None:
+            export_state_at_date_ts = pandas.Timestamp(export_state_on_date_str)
+            exported_state_holder = {}
+
         try:
             simulation_metrics = strategy.run_complex_simulation(
                 data_directory,
@@ -1719,10 +1763,31 @@ class StockShell(cmd.Cmd):
                 adaptive_tp_sl=adaptive_tp_sl_config,
                 max_same_symbol=int(config_document.get("max_same_symbol", 1)),
                 allowed_symbols=allowed_symbols,
+                export_state_at_date=export_state_at_date_ts,
+                exported_state=exported_state_holder,
             )
         except ValueError as error:
             self.stdout.write(f"{error}\n")
             return
+
+        if exported_state_holder is not None:
+            exported_state_holder.pop("_captured", None)
+            export_state_out_path = Path(
+                export_state_out_path_text
+                if export_state_out_path_text is not None
+                else "data/adaptive_state_export.json"
+            ).expanduser()
+            try:
+                with export_state_out_path.open("w", encoding="utf-8") as export_fp:
+                    json.dump(exported_state_holder, export_fp, indent=2)
+                self.stdout.write(
+                    f"Exported rolling state at {export_state_on_date_str} "
+                    f"to {export_state_out_path}\n"
+                )
+            except OSError as write_error:
+                self.stdout.write(
+                    f"failed to write exported state: {write_error}\n"
+                )
 
         self.stdout.write(
             f"Simulation start date: {start_date_string}\n"

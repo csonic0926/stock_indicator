@@ -11,7 +11,7 @@ import math
 from math import ceil
 from pathlib import Path
 from statistics import mean, median, stdev
-from typing import Callable, Dict, Iterable, List, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Tuple
 import re
 
 import numpy
@@ -955,6 +955,96 @@ def _replay_trade_with_adaptive_tp_sl(
     return trade
 
 
+def compute_frozen_tp_sl_for_bucket(
+    bucket_def: "ComplexStrategySetDefinition",
+    adaptive_tp_sl: "AdaptiveTakeProfitStopLossConfig",
+    closed_winners: Iterable[float],
+    closed_losers: Iterable[float],
+    entry_slope_60: float | None = None,
+) -> tuple[float, float, float]:
+    """Compute (tp_pct, sl_pct, rolling_mp) frozen at entry for one bucket.
+
+    Single source of truth for the TP/SL formula used by the simulator's
+    inline replay loop and the production multi_bucket_today command.
+    Mirrors the logic that was inlined in run_complex_simulation; any
+    behavior change here must keep the two call sites identical.
+    """
+    effective_min_sl = (
+        bucket_def.min_sl
+        if bucket_def.min_sl is not None
+        else adaptive_tp_sl.min_sl
+    )
+    effective_fixed_sl = (
+        bucket_def.fixed_sl
+        if bucket_def.fixed_sl is not None
+        else adaptive_tp_sl.fixed_sl
+    )
+    effective_fixed_tp = (
+        bucket_def.fixed_tp
+        if bucket_def.fixed_tp is not None
+        else adaptive_tp_sl.fixed_tp
+    )
+    effective_tp_regime_adjust = (
+        bucket_def.tp_regime_adjust
+        if bucket_def.tp_regime_adjust is not None
+        else adaptive_tp_sl.tp_regime_adjust
+    )
+
+    winners_list = list(closed_winners)
+    losers_list = list(closed_losers)
+
+    tp_pct = adaptive_tp_sl.min_tp
+    sl_pct = effective_min_sl
+    rolling_mp = 0.0
+
+    if len(winners_list) + len(losers_list) >= adaptive_tp_sl.min_samples:
+        if len(winners_list) >= 3:
+            mean_profit_percentage = sum(winners_list) / len(winners_list)
+            rolling_mp = mean_profit_percentage
+            if len(winners_list) >= 2:
+                profit_standard_deviation = stdev(winners_list)
+            else:
+                profit_standard_deviation = 0.0
+            tp_pct = max(
+                adaptive_tp_sl.min_tp,
+                mean_profit_percentage
+                + adaptive_tp_sl.sigma_multiplier
+                * profit_standard_deviation,
+            )
+
+        losses = [abs(loss_percentage) for loss_percentage in losers_list]
+        if len(losses) >= 3:
+            sl_pct = max(effective_min_sl, median(losses))
+
+    if effective_fixed_sl is not None:
+        sl_pct = min(sl_pct, effective_fixed_sl)
+
+    if (
+        effective_tp_regime_adjust
+        and sl_pct > 0
+        and effective_fixed_tp is None
+    ):
+        raw_ratio = tp_pct / sl_pct
+        capped_ratio = max(
+            adaptive_tp_sl.tp_regime_ratio_min,
+            min(adaptive_tp_sl.tp_regime_ratio_max, raw_ratio),
+        )
+        tp_pct = max(adaptive_tp_sl.min_tp, tp_pct * capped_ratio)
+
+    if (
+        bucket_def.tp_slope_amplify
+        and effective_fixed_tp is None
+        and entry_slope_60 is not None
+        and entry_slope_60 > 0
+    ):
+        tp_pct = max(adaptive_tp_sl.min_tp, tp_pct * (1 + entry_slope_60))
+
+    if effective_fixed_tp is not None:
+        tp_pct = effective_fixed_tp
+
+    return tp_pct, sl_pct, rolling_mp
+
+
 def run_complex_simulation(
     data_directory: Path,
     set_definitions: Dict[str, ComplexStrategySetDefinition],
@@ -973,6 +1063,8 @@ def run_complex_simulation(
     adaptive_tp_sl: AdaptiveTPSLConfig | None = None,
     max_same_symbol: int = 1,
     allowed_symbols: set[str] | None = None,
+    export_state_at_date: pandas.Timestamp | None = None,
+    exported_state: Dict[str, Any] | None = None,
 ) -> ComplexSimulationMetrics:
     """Evaluate multiple strategy sets under a shared configuration.
 
@@ -1099,7 +1191,7 @@ def run_complex_simulation(
         for trade in artifacts.trades:
             entry_priority = 0.0
             trade_detail_pair = artifacts.trade_detail_pairs.get(trade)
-            if trade_detail_pair is not None and priority_mode is not None:
+            if trade_detail_pair is not None:
                 entry_detail = trade_detail_pair[0]
                 if priority_mode == "s4":
                     ratio_value = (
@@ -1115,6 +1207,10 @@ def run_complex_simulation(
                         else float("inf")
                     )
                     entry_priority = ratio_value
+                else:
+                    dollar_volume = entry_detail.simple_moving_average_dollar_volume
+                    if dollar_volume is not None and not pandas.isna(dollar_volume):
+                        entry_priority = -float(dollar_volume)
             events.append(
                 (
                     trade.entry_date,
@@ -1414,6 +1510,43 @@ def run_complex_simulation(
             # Determine next event: either from entry_events or close_heap.
             next_entry = entry_events[0] if entry_events else None
             next_close = adaptive_close_heap[0] if adaptive_close_heap else None
+
+            # Cold-start snapshot for production multi_bucket_today: capture
+            # rolling state at the boundary into export_state_at_date so
+            # production resumes with the same winners/losers/pending the
+            # simulator would have seen on that day's first event.
+            if (
+                export_state_at_date is not None
+                and exported_state is not None
+                and not exported_state.get("_captured")
+            ):
+                next_event_date_for_snapshot: pandas.Timestamp | None = None
+                if next_entry is not None:
+                    next_event_date_for_snapshot = next_entry[0]
+                if next_close is not None:
+                    if (
+                        next_event_date_for_snapshot is None
+                        or next_close[0] < next_event_date_for_snapshot
+                    ):
+                        next_event_date_for_snapshot = next_close[0]
+                if (
+                    next_event_date_for_snapshot is not None
+                    and next_event_date_for_snapshot >= export_state_at_date
+                ):
+                    exported_state["schema_version"] = 2
+                    exported_state["captured_at_date"] = (
+                        export_state_at_date.strftime("%Y-%m-%d")
+                    )
+                    exported_state["winners"] = list(adaptive_closed_winners)
+                    exported_state["losers"] = list(adaptive_closed_losers)
+                    exported_state["pending_rolling"] = [
+                        {
+                            "closed_date": closed_date.strftime("%Y-%m-%d"),
+                            "pct": float(closed_pct),
+                        }
+                        for closed_date, closed_pct in pending_rolling_updates
+                    ]
+                    exported_state["_captured"] = True
 
             process_close = False
             if next_entry is None and next_close is not None:
@@ -1767,113 +1900,23 @@ def run_complex_simulation(
                     if open_symbol_counts.get(trade_sym, 0) >= max_same_symbol:
                         continue
 
-                # Resolve per-bucket overrides up front. min_sl is needed
-                # before rolling computation since it is the SL floor; the
-                # rest are applied after rolling stats are computed.
                 bucket_def = set_definitions[label]
-                effective_min_sl = (
-                    bucket_def.min_sl
-                    if bucket_def.min_sl is not None
-                    else adaptive_tp_sl.min_sl
+                _detail_pair_for_amplify = artifacts_by_set[label].trade_detail_pairs.get(
+                    trade
                 )
-                effective_fixed_sl = (
-                    bucket_def.fixed_sl
-                    if bucket_def.fixed_sl is not None
-                    else adaptive_tp_sl.fixed_sl
+                _entry_slope_60_for_amplify = (
+                    _detail_pair_for_amplify[0].slope_60
+                    if _detail_pair_for_amplify is not None
+                    else None
                 )
-                effective_fixed_tp = (
-                    bucket_def.fixed_tp
-                    if bucket_def.fixed_tp is not None
-                    else adaptive_tp_sl.fixed_tp
+                tp_pct, sl_pct, rolling_mp = compute_frozen_tp_sl_for_bucket(
+                    bucket_def=bucket_def,
+                    adaptive_tp_sl=adaptive_tp_sl,
+                    closed_winners=adaptive_closed_winners,
+                    closed_losers=adaptive_closed_losers,
+                    entry_slope_60=_entry_slope_60_for_amplify,
                 )
-                effective_tp_regime_adjust = (
-                    bucket_def.tp_regime_adjust
-                    if bucket_def.tp_regime_adjust is not None
-                    else adaptive_tp_sl.tp_regime_adjust
-                )
-
-                # Compute adaptive TP/SL from rolling stats.
-                tp_pct = adaptive_tp_sl.min_tp
-                sl_pct = effective_min_sl
-                rolling_mp = 0.0
-
                 _tp_pct_late: float | None = None
-
-                if (
-                    len(adaptive_closed_winners) + len(adaptive_closed_losers)
-                    >= adaptive_tp_sl.min_samples
-                ):
-                    profits = list(adaptive_closed_winners)
-                    if len(profits) >= 3:
-                        mean_profit_percentage = sum(profits) / len(profits)
-                        rolling_mp = mean_profit_percentage
-                        if len(profits) >= 2:
-                            profit_standard_deviation = stdev(profits)
-                        else:
-                            profit_standard_deviation = 0.0
-                        tp_pct = max(
-                            adaptive_tp_sl.min_tp,
-                            mean_profit_percentage
-                            + adaptive_tp_sl.sigma_multiplier
-                            * profit_standard_deviation,
-                        )
-
-                    losses = [
-                        abs(loss_percentage)
-                        for loss_percentage in adaptive_closed_losers
-                    ]
-                    if len(losses) >= 3:
-                        sl_pct = max(
-                            effective_min_sl,
-                            median(losses),
-                        )
-
-                # Apply fixed_sl as ceiling (cap): SL never exceeds this.
-                if effective_fixed_sl is not None:
-                    sl_pct = min(sl_pct, effective_fixed_sl)
-
-                # Regime-adaptive TP: multiply TP target by capped tp/sl ratio.
-                # Skipped when fixed_tp is in effect (fixed value below wins).
-                if (
-                    effective_tp_regime_adjust
-                    and sl_pct > 0
-                    and effective_fixed_tp is None
-                ):
-                    raw_ratio = tp_pct / sl_pct
-                    capped_ratio = max(
-                        adaptive_tp_sl.tp_regime_ratio_min,
-                        min(adaptive_tp_sl.tp_regime_ratio_max, raw_ratio),
-                    )
-                    tp_pct = max(
-                        adaptive_tp_sl.min_tp,
-                        tp_pct * capped_ratio,
-                    )
-
-                # Slope-amplify TP: for positive slope (A-top FOMO surge),
-                # scale TP proportionally with slope_60 — bigger rally →
-                # stronger retail FOMO → larger blow-off surge target.
-                # Slope <= 0 (Stage 3 horizontal distribution) gets no
-                # scaling. Stacks on top of tp_regime_adjust. Skipped when
-                # fixed_tp is in effect.
-                if (
-                    bucket_def.tp_slope_amplify
-                    and effective_fixed_tp is None
-                ):
-                    _detail_pair_for_tp = artifacts_by_set[label].trade_detail_pairs.get(
-                        trade
-                    )
-                    if _detail_pair_for_tp is not None:
-                        _slope_for_tp = _detail_pair_for_tp[0].slope_60
-                        if _slope_for_tp is not None and _slope_for_tp > 0:
-                            tp_pct = max(
-                                adaptive_tp_sl.min_tp,
-                                tp_pct * (1 + _slope_for_tp),
-                            )
-
-                # Apply fixed_tp as override: forces TP to this exact value,
-                # bypassing rolling stats and regime adjustment. Last word.
-                if effective_fixed_tp is not None:
-                    tp_pct = effective_fixed_tp
 
                 # Break-even trigger: rolling MP (before sigma adjustment).
                 be_trigger = rolling_mp if adaptive_tp_sl.breakeven_at_mp else 0.0
@@ -1992,6 +2035,30 @@ def run_complex_simulation(
                         trade_identifier,
                     ),
                 )
+
+        # Post-loop snapshot fallback: when export_state_at_date is past
+        # the last simulated event the in-loop check never fires, so
+        # capture state at end-of-simulation here. Caller is responsible
+        # for validating that this is the intended cold-start date.
+        if (
+            export_state_at_date is not None
+            and exported_state is not None
+            and not exported_state.get("_captured")
+        ):
+            exported_state["schema_version"] = 2
+            exported_state["captured_at_date"] = (
+                export_state_at_date.strftime("%Y-%m-%d")
+            )
+            exported_state["winners"] = list(adaptive_closed_winners)
+            exported_state["losers"] = list(adaptive_closed_losers)
+            exported_state["pending_rolling"] = [
+                {
+                    "closed_date": closed_date.strftime("%Y-%m-%d"),
+                    "pct": float(closed_pct),
+                }
+                for closed_date, closed_pct in pending_rolling_updates
+            ]
+            exported_state["_captured"] = True
     else:
         # Original non-adaptive event processing.
         for (

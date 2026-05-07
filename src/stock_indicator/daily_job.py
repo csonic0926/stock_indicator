@@ -529,6 +529,8 @@ def filter_debug_values(
             "near_price_volume_ratio_previous": None,
             "above_price_volume_ratio": None,
             "above_price_volume_ratio_previous": None,
+            "near_delta": None,
+            "slope_60": None,
             "entry": False,
             "exit": False,
         }
@@ -542,6 +544,8 @@ def filter_debug_values(
             "near_price_volume_ratio_previous": None,
             "above_price_volume_ratio": None,
             "above_price_volume_ratio_previous": None,
+            "near_delta": None,
+            "slope_60": None,
             "entry": False,
             "exit": False,
         }
@@ -561,6 +565,8 @@ def filter_debug_values(
                 "near_price_volume_ratio_previous": None,
                 "above_price_volume_ratio": None,
                 "above_price_volume_ratio_previous": None,
+                "near_delta": None,
+                "slope_60": None,
                 "entry": False,
                 "exit": False,
             }
@@ -577,6 +583,8 @@ def filter_debug_values(
             "near_price_volume_ratio_previous": None,
             "above_price_volume_ratio": None,
             "above_price_volume_ratio_previous": None,
+            "near_delta": None,
+            "slope_60": None,
             "entry": False,
             "exit": False,
         }
@@ -651,6 +659,16 @@ def filter_debug_values(
                 sell_price_history_frame["sma_angle"].shift(1)
             )
 
+    # slope_60 = (close[T] - close[T-59]) / close[T-59]; mirrors the
+    # simulator's per-trade enrichment in strategy.py:4414-4418 so the
+    # production today-slice can apply slope_max / slope_min /
+    # free_fall / slope_dead_zone filters and tp_slope_amplify.
+    if "close" in buy_price_history_frame.columns:
+        close_60_bars_ago = buy_price_history_frame["close"].shift(59)
+        buy_price_history_frame["slope_60"] = (
+            buy_price_history_frame["close"] - close_60_bars_ago
+        ) / close_60_bars_ago
+
     # TODO: review
     debug_column_names = [
         "sma_angle",
@@ -659,6 +677,8 @@ def filter_debug_values(
         "near_price_volume_ratio_previous",
         "above_price_volume_ratio",
         "above_price_volume_ratio_previous",
+        "near_delta",
+        "slope_60",
     ]
     buy_debug_column_names = [
         column_name
@@ -739,6 +759,8 @@ def filter_debug_values(
                 "near_price_volume_ratio_previous": None,
                 "above_price_volume_ratio": None,
                 "above_price_volume_ratio_previous": None,
+                "near_delta": None,
+                "slope_60": None,
                 "entry": False,
                 "exit": False,
             }
@@ -777,6 +799,8 @@ def filter_debug_values(
         "above_price_volume_ratio_previous": normalize_debug_value(
             row.get("above_price_volume_ratio_previous")
         ),
+        "near_delta": normalize_debug_value(row.get("near_delta")),
+        "slope_60": normalize_debug_value(row.get("slope_60")),
         "entry": entry_value,
         "exit": exit_value,
     }
