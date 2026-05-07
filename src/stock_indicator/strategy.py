@@ -658,6 +658,13 @@ class ComplexStrategySetDefinition:
     # slope_max which skip OUTSIDE the band.
     slope_dead_zone_min: float | None = None
     slope_dead_zone_max: float | None = None
+    # Per-bucket TP slope-amplifier: when enabled and slope_60 > 0 at
+    # signal date, multiply TP target by (1 + slope_60). Zero effect for
+    # slope <= 0 (e.g. fish_tail's Stage 3 horizontal distribution stays
+    # at base rolling TP). Stacks on top of tp_regime_adjust when both
+    # enabled. fixed_tp overrides (last word). Mechanism: bigger rally
+    # before entry → stronger retail FOMO → bigger blow-off surge target.
+    tp_slope_amplify: bool = False
     # Per-bucket override for min_hold gates on TP and SL. None = inherit
     # top-level. Needed because different bucket narratives demand opposite
     # SL gate behavior — buy3 V-bottom needs SL to wait for min_hold (give
@@ -1841,6 +1848,27 @@ def run_complex_simulation(
                         adaptive_tp_sl.min_tp,
                         tp_pct * capped_ratio,
                     )
+
+                # Slope-amplify TP: for positive slope (A-top FOMO surge),
+                # scale TP proportionally with slope_60 — bigger rally →
+                # stronger retail FOMO → larger blow-off surge target.
+                # Slope <= 0 (Stage 3 horizontal distribution) gets no
+                # scaling. Stacks on top of tp_regime_adjust. Skipped when
+                # fixed_tp is in effect.
+                if (
+                    bucket_def.tp_slope_amplify
+                    and effective_fixed_tp is None
+                ):
+                    _detail_pair_for_tp = artifacts_by_set[label].trade_detail_pairs.get(
+                        trade
+                    )
+                    if _detail_pair_for_tp is not None:
+                        _slope_for_tp = _detail_pair_for_tp[0].slope_60
+                        if _slope_for_tp is not None and _slope_for_tp > 0:
+                            tp_pct = max(
+                                adaptive_tp_sl.min_tp,
+                                tp_pct * (1 + _slope_for_tp),
+                            )
 
                 # Apply fixed_tp as override: forces TP to this exact value,
                 # bypassing rolling stats and regime adjustment. Last word.

@@ -53,13 +53,12 @@
       "min_sl": 0.01,
       "fixed_sl": null,
       "fixed_tp": null,
-      "slope_dead_zone_min": 0.10,
-      "slope_dead_zone_max": 0.25,
       "override_min_hold_tp_only": true,
       "min_hold_tp": 1,
       "override_min_hold_sl_only": true,
       "min_hold_sl": 1,
-      "tp_regime_adjust": true
+      "tp_regime_adjust": true,
+      "tp_slope_amplify": true
     }
   ]
 }

@@ -1573,6 +1573,9 @@ class StockShell(cmd.Cmd):
                     and raw_bucket["slope_dead_zone_max"] is not None
                     else None
                 ),
+                tp_slope_amplify=bool(
+                    raw_bucket.get("tp_slope_amplify", False)
+                ),
                 override_min_hold_tp_only=(
                     bool(raw_bucket["override_min_hold_tp_only"])
                     if "override_min_hold_tp_only" in raw_bucket
