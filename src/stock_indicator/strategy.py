@@ -2127,10 +2127,18 @@ def run_complex_simulation(
         simulation_start_date = artifacts.simulation_start_date
         if simulation_start_date is None:
             simulation_start_date = pandas.Timestamp.now()
+        # Per-bucket sim uses the GLOBAL maximum_position_count (not the
+        # bucket's per-bucket cap) so position sizing matches actual
+        # portfolio allocation. Previously this used the per-bucket cap
+        # (e.g., 6 of 9), which produced oversized positions (1.5x in
+        # 6/9 setup) and overstated CAGR/MDD relative to actual portfolio
+        # contribution. With the global cap, per-bucket numbers reflect
+        # "this bucket's contribution if it ran alone with the same
+        # per-trade capital allocation as the portfolio".
         annual_returns = calculate_annual_returns(
             slot_trades_for_set,
             starting_cash,
-            position_limits_by_set[label],
+            maximum_position_count,
             simulation_start_date,
             withdraw_amount,
             margin_multiplier=margin_multiplier,
@@ -2143,7 +2151,7 @@ def run_complex_simulation(
         final_balance = simulate_portfolio_balance(
             slot_trades_for_set,
             starting_cash,
-            position_limits_by_set[label],
+            maximum_position_count,
             withdraw_amount,
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
@@ -2163,7 +2171,7 @@ def run_complex_simulation(
         maximum_drawdown = calculate_max_drawdown(
             slot_trades_for_set,
             starting_cash,
-            position_limits_by_set[label],
+            maximum_position_count,
             filtered_slot_trade_symbol_lookup,
             artifacts.closing_price_series_by_symbol,
             withdraw_amount,
