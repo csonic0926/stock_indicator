@@ -1850,11 +1850,8 @@ def run_complex_simulation(
                     )
 
                 # Slope-amplify TP: for positive slope (A-top FOMO surge),
-                # scale TP by (1 + sqrt(slope_60)) — sqrt encodes emotion
-                # saturation (200% rally doesn't bring 4x more FOMO than
-                # 50% rally; saturation curve compresses extremes).
-                # Crossover with linear at slope=1.0; below that sqrt
-                # amplifies more, above that sqrt amplifies less.
+                # scale TP proportionally with slope_60 — bigger rally →
+                # stronger retail FOMO → larger blow-off surge target.
                 # Slope <= 0 (Stage 3 horizontal distribution) gets no
                 # scaling. Stacks on top of tp_regime_adjust. Skipped when
                 # fixed_tp is in effect.
@@ -1870,7 +1867,7 @@ def run_complex_simulation(
                         if _slope_for_tp is not None and _slope_for_tp > 0:
                             tp_pct = max(
                                 adaptive_tp_sl.min_tp,
-                                tp_pct * (1 + _slope_for_tp ** 0.5),
+                                tp_pct * (1 + _slope_for_tp),
                             )
 
                 # Apply fixed_tp as override: forces TP to this exact value,
