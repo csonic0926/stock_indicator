@@ -21,7 +21,7 @@ import pandas
 import yfinance  # TODO: review
 from pandas import DataFrame
 
-from . import data_loader, symbols, strategy, daily_job
+from . import data_loader, symbols, strategy, daily_job, multi_bucket_today
 from .simulator import calc_commission
 from .strategy_sets import load_strategy_set_mapping, load_strategy_entry_filters
 from .daily_job import determine_start_date
@@ -3612,6 +3612,146 @@ class StockShell(cmd.Cmd):
             "find_history_signal [DATE] DOLLAR_VOLUME_FILTER (BUY SELL STOP_LOSS | STOP_LOSS strategy=ID) [group=1,2,...]\n"
             "Display entry and exit signals for DATE or the latest trading day when DATE is omitted using the provided strategies or a strategy id from data/strategy_sets.csv.\n"
             "Signal calculation uses the same group dynamic ratio and Top-N rule as start_simulate.\n"
+        )
+
+    def do_multi_bucket_daily_signal(self, argument_line: str) -> None:  # noqa: D401
+        """multi_bucket_daily_signal CONFIG_PATH [DATE] [--shadow]
+        Production today-slice signal generator that reproduces the
+        simulator's multi-bucket decision in one cron run. See
+        help multi_bucket_daily_signal for details."""
+        try:
+            tokens = shlex.split(argument_line.strip())
+        except ValueError as parse_error:
+            self.stdout.write(f"failed to parse arguments: {parse_error}\n")
+            return
+        if not tokens:
+            self.stdout.write(
+                "usage: multi_bucket_daily_signal CONFIG_PATH [DATE] [--shadow]\n"
+            )
+            return
+
+        config_path_text = tokens[0]
+        date_string: str | None = None
+        shadow_mode = False
+        for token in tokens[1:]:
+            if token == "--shadow":
+                shadow_mode = True
+            elif date_string is None:
+                date_string = token
+            else:
+                self.stdout.write(f"unexpected argument: {token}\n")
+                return
+
+        config_path = Path(config_path_text).expanduser()
+        try:
+            config = multi_bucket_today.load_multi_bucket_config(config_path)
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as parse_error:
+            self.stdout.write(f"{parse_error}\n")
+            return
+
+        if config.adaptive_tp_sl is None:
+            self.stdout.write("config must define adaptive_tp_sl\n")
+            return
+
+        try:
+            data_directory = resolve_data_source(config.data_source_name)
+        except ValueError as source_error:
+            self.stdout.write(f"{source_error}\n")
+            return
+        if not data_directory.exists():
+            self.stdout.write(
+                f"data source directory not found: {data_directory}\n"
+            )
+            return
+        try:
+            allowed_symbols = load_symbol_list(config.symbol_list_name)
+        except ValueError as symbol_list_error:
+            self.stdout.write(f"{symbol_list_error}\n")
+            return
+
+        if date_string is None:
+            eval_date_string = daily_job.determine_latest_trading_date().isoformat()
+        else:
+            try:
+                datetime.date.fromisoformat(date_string)
+            except ValueError:
+                self.stdout.write(
+                    f"invalid date: {date_string} (expected YYYY-MM-DD)\n"
+                )
+                return
+            eval_date_string = date_string
+        eval_date_timestamp = pandas.Timestamp(eval_date_string)
+
+        suffix = "_shadow" if shadow_mode else ""
+        state_path = DATA_DIRECTORY / f"adaptive_state{suffix}.json"
+        signal_trades_path = DATA_DIRECTORY / f"signal_trades{suffix}.json"
+
+        state = multi_bucket_today.load_state(state_path)
+        held_positions: Dict[str, List[Dict[str, str]]] = {}
+        if signal_trades_path.exists():
+            try:
+                with signal_trades_path.open("r", encoding="utf-8") as state_file:
+                    raw_held = json.load(state_file)
+            except (json.JSONDecodeError, OSError):
+                raw_held = {}
+            if isinstance(raw_held, dict):
+                for strategy_identifier, position_list in raw_held.items():
+                    if not isinstance(position_list, list):
+                        continue
+                    normalized_list: List[Dict[str, str]] = []
+                    for position_entry in position_list:
+                        if isinstance(position_entry, str):
+                            normalized_list.append(
+                                {"symbol": position_entry, "entry_date": ""}
+                            )
+                        elif isinstance(position_entry, dict):
+                            normalized_list.append(position_entry)
+                    held_positions[strategy_identifier] = normalized_list
+
+        try:
+            result = multi_bucket_today.compute_today_signals(
+                config=config,
+                eval_date=eval_date_timestamp,
+                held_positions=held_positions,
+                state=state,
+                data_directory=data_directory,
+                allowed_symbols=allowed_symbols,
+            )
+        except ValueError as run_error:
+            self.stdout.write(f"compute_today_signals failed: {run_error}\n")
+            return
+
+        multi_bucket_today.save_state_atomically(state_path, state)
+        try:
+            with signal_trades_path.open("w", encoding="utf-8") as signal_file:
+                json.dump(result.accepted_per_strategy, signal_file, indent=2)
+        except OSError as write_error:
+            self.stdout.write(
+                f"failed to write {signal_trades_path}: {write_error}\n"
+            )
+
+        self.stdout.write(
+            f"[multi_bucket_daily_signal mode="
+            f"{'shadow' if shadow_mode else 'live'} "
+            f"state={state_path.name} signal_trades={signal_trades_path.name}]\n"
+        )
+        for log_line in result.log_lines:
+            self.stdout.write(f"{log_line}\n")
+
+    def help_multi_bucket_daily_signal(self) -> None:
+        """Display help for the multi_bucket_daily_signal command."""
+        self.stdout.write(
+            "multi_bucket_daily_signal CONFIG_PATH [DATE] [--shadow]\n"
+            "Today-slice multi-bucket signal generator. Reproduces the\n"
+            "simulator's single-day decision in production:\n"
+            "  - per-bucket signal generation via compute_signals_for_date\n"
+            "  - shared frozen TP/SL via compute_frozen_tp_sl_for_bucket\n"
+            "  - cross-bucket slot competition (priority + dollar_volume)\n"
+            "Reads/writes data/adaptive_state.json (schema_version=2) and\n"
+            "data/signal_trades.json. With --shadow, all I/O is suffixed\n"
+            "_shadow so the live cron path is untouched. Emits\n"
+            "[FROZEN_TP_SL] log lines that System B parses to place\n"
+            "per-position TP orders the next morning.\n"
         )
 
     def do_compute_adaptive_tp_sl(self, argument_line: str) -> None:  # noqa: D401

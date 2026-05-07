@@ -36,3 +36,16 @@ START_DATE="$("$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -c 'from datetime impo
   "$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage compute_adaptive_tp_sl
   "$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage show_positions
 } | tee -a "$LOG_DIRECTORY/cron_stdout.log" >> "$DATE_LOG_DIRECTORY/$LATEST_DATE.log"
+
+# Stage 2.1 shadow mode: run the new multi-bucket today-slice generator
+# alongside the live single-strategy block above. Writes to *_shadow.json
+# files only — System B does NOT consume these. Failures here MUST NOT
+# break the live cron run, hence `|| true` and a separate log file.
+SHADOW_LOG="$LOG_DIRECTORY/shadow.log"
+{
+  echo ""
+  echo "=== shadow run $LATEST_DATE ==="
+  "$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage \
+      multi_bucket_daily_signal data/multi_bucket_production.json \
+      "$LATEST_DATE" --shadow
+} >> "$SHADOW_LOG" 2>&1 || true
