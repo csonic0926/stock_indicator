@@ -3971,6 +3971,62 @@ def calculate_metrics(
     )
 
 
+def _resolve_trade_decision_dates(
+    run_frame_index: pandas.DatetimeIndex,
+    entry_date: pandas.Timestamp,
+    use_confirmation_angle: bool,
+) -> tuple[pandas.Timestamp, pandas.Timestamp]:
+    """Resolve (signal_date, confirmation_date) for a trade.
+
+    Pending entry mode (``use_confirmation_angle=True``) — used by
+    ``confirmation_mode=="market"`` and ``confirmation_mode=="limit"``:
+
+        T   = signal fires (cross detected at T close; chip metrics
+              and other A-layer values are recorded at this bar)
+        T+1 = confirmation bar (B-layer angle gate)
+        T+2 = market/limit fill (entry_date)
+
+        Returns: ``signal_date = entry_date - 2 trading bars``,
+                 ``confirmation_date = entry_date - 1 trading bar``.
+
+    Non-pending entry mode (``use_confirmation_angle=False``) — the
+    default for production cron and the multi-bucket exploration
+    backtests:
+
+        T   = signal fires (cross detected at T close)
+        T+1 = fill (entry_date) at next bar's open
+
+        Returns: ``signal_date = entry_date - 1 trading bar``,
+                 ``confirmation_date = signal_date``. There is no
+                 separate B-layer bar; using the same bar for both
+                 keeps the lookup chain consistent without leaking
+                 the fill bar (entry_date) into A-layer reads.
+
+    Edge cases at the start of the run frame degrade gracefully: when
+    we cannot go back the full distance, fall back to the earliest
+    available bar (in the worst case, the entry_date itself). This
+    only fires on the first one or two bars of the simulation window.
+    """
+    confirmation_date = entry_date
+    signal_date = entry_date
+    indexer = run_frame_index.get_indexer_for([entry_date])
+    if indexer.size != 1:
+        return signal_date, confirmation_date
+    entry_index_position = int(indexer[0])
+    if not (0 <= entry_index_position < len(run_frame_index)):
+        return signal_date, confirmation_date
+    if entry_index_position > 0:
+        confirmation_date = run_frame_index[entry_index_position - 1]
+    if use_confirmation_angle:
+        if entry_index_position > 1:
+            signal_date = run_frame_index[entry_index_position - 2]
+        else:
+            signal_date = confirmation_date
+    else:
+        signal_date = confirmation_date
+    return signal_date, confirmation_date
+
+
 def _generate_strategy_evaluation_artifacts(
     data_directory: Path,
     buy_strategy_name: str,
@@ -4419,31 +4475,23 @@ def _generate_strategy_evaluation_artifacts(
                 else:
                     group_entry_ratio = float(entry_dollar_volume) / group_entry_total
 
-            entry_index_position = run_frame.index.get_indexer_for(
-                [completed_trade.entry_date]
+            # Decision-bar timeline depends on entry mode (see
+            # _resolve_trade_decision_dates for the full contract):
+            #   - pending entry  (use_confirmation_angle=True):
+            #       T fires signal, T+1 confirms, T+2 fills.
+            #       signal_date = entry_date - 2 trading bars,
+            #       confirmation_date = entry_date - 1.
+            #   - non-pending    (use_confirmation_angle=False):
+            #       T fires signal, T+1 fills (entry_date).
+            #       signal_date = entry_date - 1 = confirmation_date.
+            # The non-pending branch must NOT reach back to entry_date
+            # for A-layer reads — that would record the fill bar as if
+            # it drove the entry decision.
+            signal_date, confirmation_date = _resolve_trade_decision_dates(
+                run_frame.index,
+                completed_trade.entry_date,
+                use_confirmation_angle,
             )
-            # In pending market entry mode the timeline is:
-            #   T   = signal fires (chip metrics should reflect this bar)
-            #   T+1 = confirmation bar (angle values checked here)
-            #   T+2 = market fill (entry_date)
-            # Without pending entry, entry_date = T+1 and signal_date = T.
-            confirmation_date = completed_trade.entry_date
-            signal_date = completed_trade.entry_date
-            if entry_index_position.size == 1:
-                entry_index_position = int(entry_index_position[0])
-                if (
-                    entry_index_position >= 0
-                    and entry_index_position < len(run_frame.index)
-                    and entry_index_position > 0
-                ):
-                    confirmation_date = run_frame.index[entry_index_position - 1]
-                    if entry_index_position > 1:
-                        signal_date = run_frame.index[entry_index_position - 2]
-                    else:
-                        signal_date = confirmation_date
-                else:
-                    confirmation_date = completed_trade.entry_date
-                    signal_date = completed_trade.entry_date
             chip_metrics = calculate_chip_concentration_metrics(
                 price_data_frame.loc[: signal_date],
                 lookback_window_size=60,
@@ -4463,17 +4511,14 @@ def _generate_strategy_evaluation_artifacts(
                 bucket analysis matches what the live filter sees.
 
                 Lookup order: signal_date (T) first, then confirmation_date
-                (T+1), then the trade's entry_date (T+2) as a final
-                fallback. The fallbacks only take effect when T is not in
-                the frame's index (edge cases at the very start of data).
+                (T+1 in pending mode; identical to signal_date in non-pending
+                mode). entry_date is intentionally NOT a fallback — it's the
+                fill bar AFTER the decision, and reading it would record
+                post-decision values as if they drove entry selection.
                 """
                 if column_name not in price_data_frame.columns:
                     return None
-                for candidate_date in (
-                    signal_date,
-                    confirmation_date,
-                    completed_trade.entry_date,
-                ):
+                for candidate_date in (signal_date, confirmation_date):
                     if candidate_date in price_data_frame.index:
                         val = price_data_frame.at[candidate_date, column_name]
                         if pandas.notna(val):

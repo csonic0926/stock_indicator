@@ -140,6 +140,129 @@ def _stub_metrics_functions(
     return call_records
 
 
+def test_resolve_trade_decision_dates_non_pending() -> None:
+    """Non-pending mode: signal_date is one trading bar before fill,
+    confirmation_date coincides with signal_date (no separate B-layer
+    bar). Regression for the off-by-one bug where signal_date was
+    pulled to entry_date - 2 regardless of mode."""
+
+    run_index = pandas.bdate_range("2024-01-02", periods=10)
+    entry_date = run_index[5]
+    signal_date, confirmation_date = strategy._resolve_trade_decision_dates(
+        run_index, entry_date, use_confirmation_angle=False
+    )
+    assert signal_date == run_index[4]
+    assert confirmation_date == run_index[4]
+
+
+def test_resolve_trade_decision_dates_pending() -> None:
+    """Pending mode: signal_date is two trading bars before fill (T),
+    confirmation_date is one bar before fill (T+1)."""
+
+    run_index = pandas.bdate_range("2024-01-02", periods=10)
+    entry_date = run_index[5]
+    signal_date, confirmation_date = strategy._resolve_trade_decision_dates(
+        run_index, entry_date, use_confirmation_angle=True
+    )
+    assert signal_date == run_index[3]
+    assert confirmation_date == run_index[4]
+
+
+def test_resolve_trade_decision_dates_edge_at_start() -> None:
+    """At the start of the run frame both modes degrade gracefully:
+    fall back to whatever earlier bar exists, never overshoot
+    backwards. entry_date itself is the worst-case fallback."""
+
+    run_index = pandas.bdate_range("2024-01-02", periods=10)
+    # Position 0 — no prior bar in either mode.
+    signal_date, confirmation_date = strategy._resolve_trade_decision_dates(
+        run_index, run_index[0], use_confirmation_angle=False
+    )
+    assert signal_date == run_index[0]
+    assert confirmation_date == run_index[0]
+    # Position 1 in pending mode — only one bar back available.
+    signal_date, confirmation_date = strategy._resolve_trade_decision_dates(
+        run_index, run_index[1], use_confirmation_angle=True
+    )
+    assert signal_date == run_index[0]
+    assert confirmation_date == run_index[0]
+    # Position 1 in non-pending mode — entry_date - 1 is well-defined.
+    signal_date, confirmation_date = strategy._resolve_trade_decision_dates(
+        run_index, run_index[1], use_confirmation_angle=False
+    )
+    assert signal_date == run_index[0]
+    assert confirmation_date == run_index[0]
+
+
+def test_resolve_trade_decision_dates_aapl_2018_12_27_non_pending() -> None:
+    """For the V-cross trade entering AAPL 2018-12-27 in non-pending
+    mode (cross detected at 2018-12-26), signal_date must be 2018-12-26
+    (one trading bar before fill), not 2018-12-24 (two bars back as
+    the buggy implementation produced).
+
+    End-to-end check: the chip metric the artifact generator records
+    on TradeDetail.above_price_volume_ratio is computed from
+    ``calculate_chip_concentration_metrics(frame.loc[: signal_date], ...)``
+    which means a correct signal_date routes the read to the cross
+    day. Verify the chip value at 12-26 lands BELOW the V threshold
+    (0.973), while the value the buggy 12-24 path would have read is
+    ABOVE the threshold — the same disparity that caused V trades to
+    silently disappear from the multi-bucket backtest."""
+
+    aapl_csv = (
+        Path(__file__).resolve().parents[1]
+        / "data"
+        / "stock_data_2010_yf_clean"
+        / "AAPL.csv"
+    )
+    if not aapl_csv.exists():
+        pytest.skip("AAPL fixture not available in this checkout")
+    from stock_indicator.chip_filter import calculate_chip_concentration_metrics
+
+    frame = strategy.load_price_data(aapl_csv)
+    run_index = frame.index
+    entry_date = pandas.Timestamp("2018-12-27")
+    signal_date, confirmation_date = strategy._resolve_trade_decision_dates(
+        run_index, entry_date, use_confirmation_angle=False
+    )
+    assert signal_date == pandas.Timestamp("2018-12-26"), (
+        f"non-pending signal_date should be 12-26 (cross day), "
+        f"got {signal_date.date()}"
+    )
+    assert confirmation_date == pandas.Timestamp("2018-12-26")
+
+    fixed_above_pv = calculate_chip_concentration_metrics(
+        frame.loc[:signal_date],
+        lookback_window_size=60,
+        include_volume_profile=False,
+    )["above_price_volume_ratio"]
+    assert fixed_above_pv == pytest.approx(0.924, abs=0.01)
+    assert fixed_above_pv < 0.973, (
+        "12-26 above_pv must be below the V threshold post-fix"
+    )
+
+    # Pending mode on the same trade pulls signal back two bars (T+2 fill).
+    pending_signal, pending_confirmation = strategy._resolve_trade_decision_dates(
+        run_index, entry_date, use_confirmation_angle=True
+    )
+    assert pending_signal == pandas.Timestamp("2018-12-24")
+    assert pending_confirmation == pandas.Timestamp("2018-12-26")
+    buggy_above_pv = calculate_chip_concentration_metrics(
+        frame.loc[:pending_signal],
+        lookback_window_size=60,
+        include_volume_profile=False,
+    )["above_price_volume_ratio"]
+    assert buggy_above_pv == pytest.approx(1.0, abs=1e-6), (
+        "12-24 above_pv must be ~1.0 — this is the value the buggy "
+        "non-pending code path was reading"
+    )
+    assert buggy_above_pv > 0.973, (
+        "the buggy date's above_pv was above V threshold, which is "
+        "why V trades silently disappeared on Boxing Day in the "
+        "multi-bucket backtest"
+    )
+
+
 def test_adaptive_rolling_update_waits_for_raw_exit_date(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
