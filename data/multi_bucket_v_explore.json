@@ -1,0 +1,47 @@
+{
+  "max_position_count": 6,
+  "starting_cash": 60000,
+  "margin": 1.5,
+  "withdraw": 0,
+  "start_date": "2010-01-01",
+  "data_source": "2010",
+  "symbol_list": "2010_safe",
+  "min_hold": 5,
+  "show_trade_details": false,
+  "adaptive_tp_sl": {
+    "window": 20,
+    "sigma": 0.5,
+    "sl_sigma": 1.0,
+    "min_sl": 0.05,
+    "fixed_sl": 0.05,
+    "override_min_hold_tp_only": true,
+    "min_hold_tp": 1,
+    "override_min_hold_sl_only": true,
+    "min_hold_sl": 1,
+    "disable_sl_trigger": false,
+    "delayed_rolling_update": true,
+    "tp_regime_adjust": false,
+    "tp_regime_ratio_min": 0.5,
+    "tp_regime_ratio_max": 2.0
+  },
+  "buckets": [
+    {
+      "label": "v_bottom_explore",
+      "strategy_id": "v_bottom_dislocation",
+      "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+      "priority": 1,
+      "max_positions": 6,
+      "exit_alpha_factor": 3,
+      "min_sl": 0.01,
+      "fixed_sl": null,
+      "fixed_tp": null,
+      "v_filter_threshold": 0.973,
+      "override_min_hold_tp_only": true,
+      "min_hold_tp": 1,
+      "override_min_hold_sl_only": true,
+      "min_hold_sl": 1,
+      "tp_regime_adjust": false,
+      "tp_slope_amplify": false
+    }
+  ]
+}
