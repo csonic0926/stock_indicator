@@ -940,7 +940,6 @@ def compute_today_signals(
     state: Dict[str, Any],
     data_directory: Path,
     allowed_symbols: set[str] | None,
-    live_held_symbols: set[str] | None = None,
 ) -> TodaySignalsResult:
     """Reproduce the simulator's single-day decision in production.
 
@@ -1081,23 +1080,19 @@ def compute_today_signals(
             )
             if symbol_name not in entry_signal_set:
                 continue
-            # Entry held filter:
-            # - When live_held_symbols is provided (live cron path), use
-            #   the broker's real portfolio so a *recorded-but-not-filled*
-            #   entry from a previous cron does not silently suppress
-            #   today's signal. signal_trades.json is a signal-emission
-            #   log, not a fill record — using it as held filter created
-            #   a stale-state bug where the same symbol fired once,
-            #   wrote itself to signal_trades, and never re-fired.
-            # - When None (sim/backtest), fall back to signal_trades-
-            #   derived per-strategy held set. Sim assumes immediate
-            #   fill so this is structurally accurate there.
-            if live_held_symbols is not None:
-                if symbol_name in live_held_symbols:
-                    continue
-            else:
-                if symbol_name in held_symbols_in_strategy:
-                    continue
+            # Signal layer is intentionally pure: no held filter here.
+            # signal_trades.json is a signal-emission log, not a fill
+            # record. Filtering today's signals by yesterday's record
+            # created a stale-state bug where a symbol fired once,
+            # wrote itself to signal_trades, and never re-fired even
+            # though the broker order may never have filled.
+            #
+            # Dedup against actual holdings is the order layer's job
+            # (dashboard's api_preview_orders already filters by Futu
+            # positions when building order preview).
+            #
+            # `held_symbols_in_strategy` above is retained for Step C
+            # exit detection / bucket mapping only.
             # Per-bucket pre-cross lookback shifts the A-layer read back
             # one trading bar (mirrors strategy.py:_resolve_trade_decision_dates).
             # Required by fish_head_vacuum_turn so slope_60 / near_delta
@@ -1188,7 +1183,14 @@ def compute_today_signals(
                 held_symbol_counts_after.get(symbol_name, 0) + 1
             )
 
-    global_remaining = config.maximum_position_count - held_total_before_today
+    # Slot cap intentionally does NOT subtract signal_trades-tracked
+    # held positions. signal_trades is a signal-emission log, not a
+    # fill ledger; subtracting it would let yesterday's emissions
+    # silently steal today's slots even when the broker order never
+    # filled. Cron emits up to max_position_count candidates per day;
+    # the order layer (dashboard) reconciles against the real broker
+    # portfolio when building actual orders.
+    global_remaining = config.maximum_position_count
     bucket_remaining: Dict[str, int] = {}
     for bucket_label, bucket_def in config.bucket_definitions.items():
         cap = (
@@ -1196,7 +1198,7 @@ def compute_today_signals(
             if bucket_def.maximum_positions is not None
             else config.maximum_position_count
         )
-        bucket_remaining[bucket_label] = cap - bucket_held_before[bucket_label]
+        bucket_remaining[bucket_label] = cap
 
     accepted_records: List[AcceptedEntry] = []
     rejected_records: List[Tuple[AcceptedEntry, str]] = []
