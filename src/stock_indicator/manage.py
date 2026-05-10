@@ -3700,29 +3700,29 @@ class StockShell(cmd.Cmd):
 
         suffix = "_shadow" if shadow_mode else ""
         state_path = DATA_DIRECTORY / f"adaptive_state{suffix}.json"
-        signal_trades_path = DATA_DIRECTORY / f"signal_trades{suffix}.json"
 
         state = multi_bucket_today.load_state(state_path)
+
+        # Held positions come from cron's own virtual ledger
+        # (state.accepted_entries), NOT from signal_trades.json.
+        # signal_trades.json belongs to the order layer (dashboard) and
+        # tracks real Futu fills — a separate concern from the rolling
+        # pool's virtual-trade simulation. Coupling them caused two
+        # bugs:
+        #   1. Recorded-but-unfilled signals suppressed re-emission.
+        #   2. Real positions Cal manually opens would never appear in
+        #      the virtual ledger, and vice versa, leaking into either
+        #      side.
+        # After this split, cron only reads/writes adaptive_state.
         held_positions: Dict[str, List[Dict[str, str]]] = {}
-        if signal_trades_path.exists():
-            try:
-                with signal_trades_path.open("r", encoding="utf-8") as state_file:
-                    raw_held = json.load(state_file)
-            except (json.JSONDecodeError, OSError):
-                raw_held = {}
-            if isinstance(raw_held, dict):
-                for strategy_identifier, position_list in raw_held.items():
-                    if not isinstance(position_list, list):
-                        continue
-                    normalized_list: List[Dict[str, str]] = []
-                    for position_entry in position_list:
-                        if isinstance(position_entry, str):
-                            normalized_list.append(
-                                {"symbol": position_entry, "entry_date": ""}
-                            )
-                        elif isinstance(position_entry, dict):
-                            normalized_list.append(position_entry)
-                    held_positions[strategy_identifier] = normalized_list
+        for accepted_entry in state.get("accepted_entries", []):
+            strategy_identifier = accepted_entry.get("strategy_id", "")
+            if not strategy_identifier:
+                continue
+            held_positions.setdefault(strategy_identifier, []).append({
+                "symbol": accepted_entry.get("symbol", ""),
+                "entry_date": accepted_entry.get("entry_date", ""),
+            })
 
         try:
             result = multi_bucket_today.compute_today_signals(
@@ -3738,18 +3738,11 @@ class StockShell(cmd.Cmd):
             return
 
         multi_bucket_today.save_state_atomically(state_path, state)
-        try:
-            with signal_trades_path.open("w", encoding="utf-8") as signal_file:
-                json.dump(result.accepted_per_strategy, signal_file, indent=2)
-        except OSError as write_error:
-            self.stdout.write(
-                f"failed to write {signal_trades_path}: {write_error}\n"
-            )
 
         self.stdout.write(
             f"[multi_bucket_daily_signal mode="
             f"{'shadow' if shadow_mode else 'live'} "
-            f"state={state_path.name} signal_trades={signal_trades_path.name}]\n"
+            f"state={state_path.name}]\n"
         )
         for log_line in result.log_lines:
             self.stdout.write(f"{log_line}\n")
@@ -3763,9 +3756,10 @@ class StockShell(cmd.Cmd):
             "  - per-bucket signal generation via compute_signals_for_date\n"
             "  - shared frozen TP/SL via compute_frozen_tp_sl_for_bucket\n"
             "  - cross-bucket slot competition (priority + dollar_volume)\n"
-            "Reads/writes data/adaptive_state.json (schema_version=2) and\n"
-            "data/signal_trades.json. With --shadow, all I/O is suffixed\n"
-            "_shadow so the live cron path is untouched. Emits\n"
+            "Reads/writes data/adaptive_state.json (schema_version=2);\n"
+            "signal_trades.json is owned by the order layer (dashboard)\n"
+            "and is no longer touched by cron. With --shadow, all I/O\n"
+            "is suffixed _shadow so the live cron path is untouched. Emits\n"
             "[FROZEN_TP_SL] log lines that System B parses to place\n"
             "per-position TP orders the next morning.\n"
         )
