@@ -46,7 +46,7 @@ def _parse_log(log_path: Path) -> dict[str, Any]:
             try:
                 if key in {"tp_pct", "sl_pct", "rolling_mp", "slope_60", "near_delta"}:
                     fields[key] = float(raw_value)
-                elif key == "min_hold_tp":
+                elif key in {"min_hold_tp", "dollar_volume_rank"}:
                     fields[key] = int(raw_value)
                 elif key == "disable_sl_trigger":
                     fields[key] = raw_value.lower() == "true"
@@ -372,6 +372,7 @@ def api_preview_orders():
             "bucket": meta.get("bucket"),
             "tp_pct": meta.get("tp_pct"),
             "sl_pct": meta.get("sl_pct"),
+            "dollar_volume_rank": meta.get("dollar_volume_rank"),
         })
 
     # SELL orders (exit signals for held positions).
@@ -579,7 +580,7 @@ HTML_PAGE = """<!DOCTYPE html>
   .btn-confirm { background: var(--green); color: var(--bg); }
   .btn-cancel { background: var(--border); color: var(--text2); margin-left: 8px; }
   .btn-preview { background: var(--blue); color: var(--bg); }
-  .order-row { display: grid; grid-template-columns: 60px 80px 110px 60px 90px 80px 80px; gap: 8px; align-items: center;
+  .order-row { display: grid; grid-template-columns: 60px 80px 110px 50px 60px 90px 80px 80px; gap: 8px; align-items: center;
     padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.9em; }
   .order-row:last-child { border-bottom: none; }
   .order-header { color: var(--text2); font-size: 0.8em; }
@@ -905,7 +906,7 @@ async function previewOrders() {
     html += ' | Signal: ' + (data.signal_date||'—');
     html += '</div>';
 
-    html += '<div class="order-row order-header"><span>Side</span><span>Symbol</span><span>Bucket</span><span>Qty</span><span>Ref Price</span><span>TP%</span><span>SL%</span></div>';
+    html += '<div class="order-row order-header"><span>Side</span><span>Symbol</span><span>Bucket</span><span>Rank</span><span>Qty</span><span>Ref Price</span><span>TP%</span><span>SL%</span></div>';
     for (const o of data.orders) {
       const sideClass = o.side === 'BUY' ? 'positive' : 'negative';
       const bucketShort = (o.bucket || '').replace('_production', '').replace('_explore', '') || '—';
@@ -913,10 +914,12 @@ async function previewOrders() {
       const slDisplay = o.sl_pct != null ? '-' + (o.sl_pct * 100).toFixed(2) + '%' : '—';
       const refDisplay = (o.ref_price != null) ? '$' + o.ref_price.toFixed(2)
                        : (o.price != null) ? '$' + o.price.toFixed(2) : '—';
+      const rankDisplay = (o.dollar_volume_rank != null) ? '#' + o.dollar_volume_rank : '—';
       html += `<div class="order-row">
         <span class="${sideClass}"><strong>${o.side}</strong></span>
         <span><strong>${o.symbol}</strong></span>
         <span style="color:var(--text2)">${bucketShort}</span>
+        <span style="color:var(--text2)">${rankDisplay}</span>
         <span>${o.qty}</span>
         <span style="color:var(--text2)">${refDisplay}</span>
         <span class="positive">${tpDisplay}</span>

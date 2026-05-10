@@ -3724,6 +3724,55 @@ class StockShell(cmd.Cmd):
                             normalized_list.append(position_entry)
                     held_positions[strategy_identifier] = normalized_list
 
+        # Held filter for entry-signal generation: use the broker's real
+        # portfolio (Futu OpenD) instead of signal_trades.json. This breaks
+        # the stale-state loop where a signal got recorded as held the
+        # moment it fired, then suppressed itself on every subsequent
+        # cron run regardless of whether the live order ever filled.
+        # When OpenD is unreachable, fall back to signal_trades semantics
+        # (the previous behavior) and log a warning so the operator knows.
+        live_held_symbols: set[str] | None = None
+        try:
+            from futu import (
+                OpenSecTradeContext,
+                SecurityFirm,
+                TrdEnv,
+                TrdMarket,
+            )
+
+            futu_ctx = OpenSecTradeContext(
+                host="127.0.0.1",
+                port=11111,
+                filter_trdmarket=TrdMarket.US,
+                security_firm=SecurityFirm.FUTUSECURITIES,
+            )
+            ret_pos, pos_data = futu_ctx.position_list_query(
+                trd_env=TrdEnv.REAL
+            )
+            futu_ctx.close()
+            if ret_pos == 0 and len(pos_data) > 0:
+                live_held_symbols = {
+                    str(row.get("code", "")).replace("US.", "")
+                    for _, row in pos_data.iterrows()
+                    if int(row.get("qty", 0)) > 0
+                }
+                self.stdout.write(
+                    f"[FUTU] live held: {sorted(live_held_symbols)}\n"
+                )
+            elif ret_pos == 0:
+                live_held_symbols = set()
+                self.stdout.write("[FUTU] live held: (none)\n")
+            else:
+                self.stdout.write(
+                    f"[FUTU] position_list_query failed: {pos_data}; "
+                    "falling back to signal_trades for held filter\n"
+                )
+        except Exception as futu_error:  # noqa: BLE001
+            self.stdout.write(
+                f"[FUTU] could not query positions ({futu_error}); "
+                "falling back to signal_trades for held filter\n"
+            )
+
         try:
             result = multi_bucket_today.compute_today_signals(
                 config=config,
@@ -3732,6 +3781,7 @@ class StockShell(cmd.Cmd):
                 state=state,
                 data_directory=data_directory,
                 allowed_symbols=allowed_symbols,
+                live_held_symbols=live_held_symbols,
             )
         except ValueError as run_error:
             self.stdout.write(f"compute_today_signals failed: {run_error}\n")

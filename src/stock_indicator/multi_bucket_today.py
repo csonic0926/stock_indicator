@@ -940,6 +940,7 @@ def compute_today_signals(
     state: Dict[str, Any],
     data_directory: Path,
     allowed_symbols: set[str] | None,
+    live_held_symbols: set[str] | None = None,
 ) -> TodaySignalsResult:
     """Reproduce the simulator's single-day decision in production.
 
@@ -1080,8 +1081,23 @@ def compute_today_signals(
             )
             if symbol_name not in entry_signal_set:
                 continue
-            if symbol_name in held_symbols_in_strategy:
-                continue
+            # Entry held filter:
+            # - When live_held_symbols is provided (live cron path), use
+            #   the broker's real portfolio so a *recorded-but-not-filled*
+            #   entry from a previous cron does not silently suppress
+            #   today's signal. signal_trades.json is a signal-emission
+            #   log, not a fill record — using it as held filter created
+            #   a stale-state bug where the same symbol fired once,
+            #   wrote itself to signal_trades, and never re-fired.
+            # - When None (sim/backtest), fall back to signal_trades-
+            #   derived per-strategy held set. Sim assumes immediate
+            #   fill so this is structurally accurate there.
+            if live_held_symbols is not None:
+                if symbol_name in live_held_symbols:
+                    continue
+            else:
+                if symbol_name in held_symbols_in_strategy:
+                    continue
             # Per-bucket pre-cross lookback shifts the A-layer read back
             # one trading bar (mirrors strategy.py:_resolve_trade_decision_dates).
             # Required by fish_head_vacuum_turn so slope_60 / near_delta
@@ -1255,6 +1271,7 @@ def compute_today_signals(
             f"[FROZEN_TP_SL] entry_date={record.entry_date} "
             f"bucket={record.bucket_label} strategy_id={record.strategy_id} "
             f"symbol={record.symbol} "
+            f"dollar_volume_rank={record.dollar_volume_rank} "
             f"tp_pct={record.tp_pct:.6f} sl_pct={record.sl_pct:.6f} "
             f"rolling_mp={record.rolling_mp:.6f} "
             f"slope_60={slope_text} near_delta={near_delta_text} "
@@ -1309,6 +1326,7 @@ def compute_today_signals(
                     "bucket": new_record.bucket_label,
                     "strategy_id": new_record.strategy_id,
                     "symbol": new_record.symbol,
+                    "dollar_volume_rank": int(new_record.dollar_volume_rank),
                     "tp_pct": round(new_record.tp_pct, 6),
                     "sl_pct": round(new_record.sl_pct, 6),
                     "rolling_mp": round(new_record.rolling_mp, 6),
