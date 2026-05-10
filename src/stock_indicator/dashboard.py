@@ -312,6 +312,74 @@ def _log_order(order_data: dict) -> None:
     log_path.write_text(json.dumps(orders, indent=2), encoding="utf-8")
 
 
+SIGNAL_TRADES_PATH = DATA_DIRECTORY / "signal_trades.json"
+
+
+def _load_signal_trades() -> dict:
+    """Read signal_trades.json. Returns empty dict on miss/parse error."""
+    if not SIGNAL_TRADES_PATH.exists():
+        return {}
+    try:
+        data = json.loads(SIGNAL_TRADES_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except (json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
+def _save_signal_trades(data: dict) -> None:
+    """Atomic write of signal_trades.json (real position ledger)."""
+    tmp_path = SIGNAL_TRADES_PATH.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    import os as _os
+    _os.replace(tmp_path, SIGNAL_TRADES_PATH)
+
+
+def _record_buy_in_signal_trades(
+    symbol: str, strategy_id: str, entry_date: str
+) -> None:
+    """Append a real BUY fill to signal_trades.json under its strategy_id.
+
+    signal_trades.json is the real position ledger (cron does not touch
+    it anymore). Adding here means 'Cal has actually executed this BUY
+    via Futu'.
+    """
+    if not strategy_id:
+        # No strategy_id (manual BUY outside cron signal) — fall back
+        # to a synthetic key so the entry is still recorded.
+        strategy_id = "manual"
+    trades = _load_signal_trades()
+    bucket_list = trades.setdefault(strategy_id, [])
+    # Dedup: if symbol already present, refresh entry_date.
+    for existing in bucket_list:
+        if existing.get("symbol") == symbol:
+            existing["entry_date"] = entry_date
+            _save_signal_trades(trades)
+            return
+    bucket_list.append({"symbol": symbol, "entry_date": entry_date})
+    _save_signal_trades(trades)
+
+
+def _remove_sell_from_signal_trades(symbol: str) -> None:
+    """Remove a symbol from signal_trades.json on confirmed SELL fill.
+
+    Looks across all strategy buckets — the order layer does not
+    require us to know which bucket originally entered.
+    """
+    trades = _load_signal_trades()
+    changed = False
+    for strategy_id, bucket_list in list(trades.items()):
+        before = len(bucket_list)
+        trades[strategy_id] = [
+            entry for entry in bucket_list if entry.get("symbol") != symbol
+        ]
+        if len(trades[strategy_id]) != before:
+            changed = True
+    if changed:
+        _save_signal_trades(trades)
+
+
 @app.get("/api/preview_orders")
 def api_preview_orders():
     """Build order preview from latest signal + account data."""
@@ -370,6 +438,7 @@ def api_preview_orders():
             "ref_price": ref_price,
             "order_type": "MARKET",
             "bucket": meta.get("bucket"),
+            "strategy_id": meta.get("strategy_id"),
             "tp_pct": meta.get("tp_pct"),
             "sl_pct": meta.get("sl_pct"),
             "dollar_volume_rank": meta.get("dollar_volume_rank"),
@@ -478,6 +547,17 @@ def api_execute_orders(req: ExecuteRequest):
                 }
                 results.append(result)
                 _log_order(result)
+                # Real position ledger update — dashboard owns
+                # signal_trades.json entirely now that cron has stopped
+                # writing it.
+                if order["side"] == "BUY":
+                    _record_buy_in_signal_trades(
+                        symbol=symbol,
+                        strategy_id=order.get("strategy_id", "") or "",
+                        entry_date=date.today().isoformat(),
+                    )
+                else:
+                    _remove_sell_from_signal_trades(symbol)
             else:
                 results.append({
                     "symbol": symbol,
