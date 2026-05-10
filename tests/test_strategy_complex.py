@@ -194,6 +194,67 @@ def test_resolve_trade_decision_dates_edge_at_start() -> None:
     assert confirmation_date == run_index[0]
 
 
+def test_resolve_trade_decision_dates_pre_cross_lookback_non_pending() -> None:
+    """``pre_cross_signal_lookback`` shifts non-pending signal_date back
+    one ADDITIONAL bar (lands on the bar BEFORE the cross detection bar).
+    confirmation_date stays put — only the A-layer read shifts.
+
+    This is the deliberate knob fish_head_vacuum_turn uses: the cross
+    bar already includes the first reaction-up tick, so its slope_60 /
+    near_delta no longer reflect the extreme-low context the narrative
+    depends on. Reading the pre-cross bar restores that context."""
+
+    run_index = pandas.bdate_range("2024-01-02", periods=10)
+    entry_date = run_index[5]
+    signal_date, confirmation_date = strategy._resolve_trade_decision_dates(
+        run_index,
+        entry_date,
+        use_confirmation_angle=False,
+        pre_cross_signal_lookback=True,
+    )
+    # Non-pending baseline puts signal at run_index[4] (= entry_date - 1
+    # = the cross bar). The pre-cross flag pulls it back another bar to
+    # run_index[3].
+    assert signal_date == run_index[3]
+    assert confirmation_date == run_index[4]
+
+
+def test_resolve_trade_decision_dates_pre_cross_lookback_pending() -> None:
+    """In pending mode ``pre_cross_signal_lookback`` also shifts signal
+    back one bar (entry_date - 3 trading bars total). Same semantic:
+    capture the bar before the cross, regardless of fill-mode timeline."""
+
+    run_index = pandas.bdate_range("2024-01-02", periods=10)
+    entry_date = run_index[5]
+    signal_date, confirmation_date = strategy._resolve_trade_decision_dates(
+        run_index,
+        entry_date,
+        use_confirmation_angle=True,
+        pre_cross_signal_lookback=True,
+    )
+    # Pending baseline: signal=run_index[3] (entry-2). Flag pulls back
+    # to run_index[2] (entry-3). confirmation_date unchanged.
+    assert signal_date == run_index[2]
+    assert confirmation_date == run_index[4]
+
+
+def test_resolve_trade_decision_dates_pre_cross_lookback_edge_at_start() -> None:
+    """At the start of the run frame ``pre_cross_signal_lookback`` cannot
+    pull signal_date back further; degrade gracefully to whatever
+    earlier bar is available."""
+
+    run_index = pandas.bdate_range("2024-01-02", periods=10)
+    # Non-pending at pos=1: baseline signal=run_index[0]; flag has
+    # nowhere to pull back, must stay at run_index[0].
+    signal_date, _ = strategy._resolve_trade_decision_dates(
+        run_index,
+        run_index[1],
+        use_confirmation_angle=False,
+        pre_cross_signal_lookback=True,
+    )
+    assert signal_date == run_index[0]
+
+
 def test_resolve_trade_decision_dates_aapl_2018_12_27_non_pending() -> None:
     """For the V-cross trade entering AAPL 2018-12-27 in non-pending
     mode (cross detected at 2018-12-26), signal_date must be 2018-12-26

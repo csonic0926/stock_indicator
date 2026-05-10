@@ -1,14 +1,18 @@
-"""System B: Place TP/SL orders based on Futu live positions.
+"""System B: Place per-position TP/SL orders against Futu live positions.
 
-Source of truth: Futu API (positions, orders, history).
-TP/SL percentages come from adaptive_state.json (System A output).
+Source of truth:
+- Futu API for positions, orders, history.
+- adaptive_state.json:accepted_entries for per-position frozen TP/SL.
 
-Logic:
-1. Query Futu positions → code, qty, cost_price
-2. Query open sell orders → which positions already have TP / SL
-3. Query history filled BUY → earliest fill date per code = entry date
-4. Missing TP → GTC limit sell at cost_price * (1 + tp%)
-5. Missing SL + bars_held >= sl_min_hold → GTC stop at cost_price * (1 - sl%)
+Contract:
+- Each open position MUST have a matching record in
+  state["accepted_entries"]. Without one we mark it [ORPHAN_POSITION] and
+  skip — never fall back to a global TP/SL value, since that would silently
+  re-introduce the per-bucket asymmetry breakage we built this script to
+  fix.
+- TP price = cost_price * (1 + entry.tp_pct), GTC limit sell.
+- SL price = cost_price * (1 - entry.sl_pct), GTC stop, only after
+  sl_min_hold trading bars.
 
 Usage:
     venv/bin/python -m stock_indicator.place_tp_sl [--dry-run]
@@ -21,41 +25,54 @@ import logging
 import sys
 from datetime import date
 from pathlib import Path
+from typing import Any, Dict
 
 import pandas
 
 LOGGER = logging.getLogger(__name__)
 
 LOGS_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "logs"
-
-TRADING_ENV = "REAL"
-# SL-specific min_hold (decoupled from signal-exit min_hold). SL is risk
-# control, not STATE confirmation, so it should not inherit signal latency.
-# Mirrors AdaptiveTPSLConfig.min_hold_sl in strategy.py.
-SL_MIN_HOLD_BARS = 1
-# Skip SL order placement entirely. Matches new design where SL is computed
-# as rolling regime indicator (drives dynamic min_hold throttle in backtest)
-# but never fires as an actual exit. Live trades exit only via TP or signal.
-SL_PLACEMENT_DISABLED = True
-
-
 DATA_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "data"
 
+TRADING_ENV = "REAL"
+# Default SL min_hold (used when entry record does not specify). SL is
+# risk control, not STATE confirmation, so it does not inherit signal
+# latency. Mirrors AdaptiveTPSLConfig.min_hold_sl in strategy.py.
+DEFAULT_SL_MIN_HOLD_BARS = 1
 
-def _get_tp_sl_from_adaptive_state() -> tuple[float | None, float | None]:
-    """Read TP/SL percentages from adaptive_state.json (System A output)."""
+
+def _load_accepted_entries() -> Dict[str, Dict[str, Any]]:
+    """Return map of US.<symbol> -> entry record from adaptive_state.json.
+
+    Returns empty mapping when the state file is absent or unreadable.
+    Any read failure is logged at ERROR — a silent empty mapping would
+    make every live position look like an [ORPHAN_POSITION], skipping all
+    TP/SL placement. Real money: visible failure beats silent skip.
+    """
     state_path = DATA_DIRECTORY / "adaptive_state.json"
     if not state_path.exists():
-        return None, None
+        LOGGER.error(
+            "adaptive_state.json not found at %s — no entries loaded",
+            state_path,
+        )
+        return {}
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
-        tp = state.get("tp_pct")
-        sl = state.get("sl_pct")
-        if tp is not None:
-            return float(tp), float(sl) if sl is not None else None
-    except (json.JSONDecodeError, OSError, TypeError):
-        pass
-    return None, None
+    except (json.JSONDecodeError, OSError) as load_error:
+        LOGGER.error(
+            "Failed to parse adaptive_state.json: %s. "
+            "All open Futu positions will be flagged [ORPHAN_POSITION] "
+            "until the state file is repaired.",
+            load_error,
+        )
+        return {}
+    result: Dict[str, Dict[str, Any]] = {}
+    for entry in state.get("accepted_entries", []):
+        symbol_value = entry.get("symbol")
+        if not symbol_value:
+            continue
+        result[f"US.{symbol_value}"] = entry
+    return result
 
 
 def _log_order(order_data: dict) -> None:
@@ -93,12 +110,13 @@ def main() -> None:
         format="%(asctime)s %(message)s",
     )
 
-    # --- Adaptive TP/SL from adaptive_state.json (System A output) ---
-    tp_pct, sl_pct = _get_tp_sl_from_adaptive_state()
-    if tp_pct is None:
-        LOGGER.error("No TP/SL found in logs")
-        return
-    LOGGER.info("Adaptive TP: %.2f%%, SL: %.2f%%", tp_pct * 100, sl_pct * 100)
+    # --- Load per-position frozen TP/SL from System A state ---
+    accepted_entries = _load_accepted_entries()
+    if not accepted_entries:
+        LOGGER.warning(
+            "No accepted_entries in adaptive_state.json — nothing to manage. "
+            "Either no positions accepted yet, or migration not run."
+        )
 
     # --- Connect to Futu ---
     trd_ctx = OpenSecTradeContext(
@@ -115,7 +133,7 @@ def main() -> None:
         trd_ctx.close()
         return
 
-    positions: dict[str, dict] = {}
+    positions: Dict[str, Dict[str, Any]] = {}
     if len(pos_data) > 0:
         for _, row in pos_data.iterrows():
             qty = int(row.get("qty", 0))
@@ -137,10 +155,10 @@ def main() -> None:
         for c, p in positions.items()
     ))
 
-    # --- 2. Query existing open sell orders ---
+    # --- 2. Query existing open sell orders (TP / SL by order_type) ---
     ret_ord, ord_data = trd_ctx.order_list_query(trd_env=trd_env)
-    existing_tp_codes: set[str] = set()  # NORMAL limit sell
-    existing_sl_codes: set[str] = set()  # STOP sell
+    existing_tp_codes: set[str] = set()
+    existing_sl_codes: set[str] = set()
     if ret_ord == 0 and len(ord_data) > 0:
         for _, row in ord_data.iterrows():
             if str(row.get("trd_side", "")) != "SELL":
@@ -150,72 +168,41 @@ def main() -> None:
             ):
                 continue
             code = str(row.get("code", ""))
-            order_type = str(row.get("order_type", ""))
-            if order_type == "STOP":
+            order_type_value = str(row.get("order_type", ""))
+            if order_type_value == "STOP":
                 existing_sl_codes.add(code)
-            elif order_type == "NORMAL":
+            elif order_type_value == "NORMAL":
                 existing_tp_codes.add(code)
 
-    # --- 3. Query history filled BUY → entry date per code ---
-    entry_dates: dict[str, str] = {}
-    ret_hist, hist_data = trd_ctx.history_order_list_query(
-        trd_env=trd_env,
-    )
-    if ret_hist == 0 and len(hist_data) > 0:
-        for _, row in hist_data.iterrows():
-            if str(row.get("trd_side", "")) != "BUY":
-                continue
-            if str(row.get("order_status", "")) not in (
-                "FILLED_ALL", "FILLED_PART",
-            ):
-                continue
-            code = str(row.get("code", ""))
-            if code not in positions:
-                continue
-            # create_time format: "2026-04-22 21:34:27.949"
-            create_time = str(row.get("create_time", ""))
-            if not create_time:
-                continue
-            fill_date = create_time[:10]  # "2026-04-22"
-            # Keep latest date per code — current position corresponds to
-            # the most recent BUY, not the earliest (which may be a
-            # previously closed trade).
-            if code not in entry_dates or fill_date > entry_dates[code]:
-                entry_dates[code] = fill_date
-
-    # Also check active orders for today's fills not yet in history
-    if ret_ord == 0 and len(ord_data) > 0:
-        for _, row in ord_data.iterrows():
-            if str(row.get("trd_side", "")) != "BUY":
-                continue
-            if str(row.get("order_status", "")) not in (
-                "FILLED_ALL", "FILLED_PART",
-            ):
-                continue
-            code = str(row.get("code", ""))
-            if code not in positions:
-                continue
-            create_time = str(row.get("create_time", ""))
-            if not create_time:
-                continue
-            fill_date = create_time[:10]
-            if code not in entry_dates or fill_date > entry_dates[code]:
-                entry_dates[code] = fill_date
-
-    today_str = date.today().isoformat()
-
-    # --- 4. Place TP for positions missing it ---
+    # --- 3. Place TP for positions missing it ---
     LOGGER.info("--- TP check ---")
     for code, pos in positions.items():
         symbol = code.replace("US.", "")
+
+        entry = accepted_entries.get(code)
+        if entry is None:
+            LOGGER.warning(
+                "[ORPHAN_POSITION] code=%s qty=%d cost=$%.2f — "
+                "no accepted_entries match, skipping TP/SL",
+                code, pos["qty"], pos["cost_price"],
+            )
+            continue
+
         if code in existing_tp_codes:
             LOGGER.info("%s: TP already exists, skip", symbol)
             continue
 
+        tp_pct = float(entry.get("tp_pct", 0))
+        if tp_pct <= 0:
+            LOGGER.info("%s: tp_pct <= 0 (entry=%s), skip TP", symbol, tp_pct)
+            continue
+
         tp_price = round(pos["cost_price"] * (1 + tp_pct), 2)
+        bucket = entry.get("bucket", "?")
         LOGGER.info(
-            "%s: cost=$%.2f qty=%d → TP=$%.2f (+%.2f%%) [GTC limit sell]",
-            symbol, pos["cost_price"], pos["qty"], tp_price, tp_pct * 100,
+            "%s [%s]: cost=$%.2f qty=%d -> TP=$%.2f (+%.2f%%) [GTC limit sell]",
+            symbol, bucket, pos["cost_price"], pos["qty"],
+            tp_price, tp_pct * 100,
         )
 
         if dry_run:
@@ -233,11 +220,12 @@ def main() -> None:
         )
         tp_result = {
             "symbol": symbol,
+            "bucket": bucket,
             "side": "TP_SELL",
             "qty": pos["qty"],
             "entry_price": pos["cost_price"],
             "price": tp_price,
-            "tp_pct": round(tp_pct * 100, 2),
+            "tp_pct": round(tp_pct * 100, 4),
             "status": "sent" if ret_tp == 0 else "failed",
             "order_id": (
                 str(data_tp.iloc[0].get("order_id", ""))
@@ -250,26 +238,31 @@ def main() -> None:
         LOGGER.info("  TP: %s", tp_result["status"])
         _log_order(tp_result)
 
-    # --- 5. Place SL for positions past sl_min_hold and missing SL ---
-    if SL_PLACEMENT_DISABLED:
-        LOGGER.info(
-            "--- SL placement DISABLED — design uses rolling SL as regime "
-            "indicator only, no actual SL orders placed ---"
-        )
-        trd_ctx.close()
-        LOGGER.info("Done")
-        return
-    LOGGER.info("--- SL check (sl_min_hold=%d) ---", SL_MIN_HOLD_BARS)
+    # --- 4. Place SL for positions past sl_min_hold and missing SL ---
+    LOGGER.info("--- SL check ---")
+    today_str = date.today().isoformat()
     for code, pos in positions.items():
         symbol = code.replace("US.", "")
+
+        entry = accepted_entries.get(code)
+        if entry is None:
+            # Already warned in TP loop; skip silently here.
+            continue
 
         if code in existing_sl_codes:
             LOGGER.info("%s: SL already exists, skip", symbol)
             continue
 
-        entry_date_str = entry_dates.get(code)
+        sl_pct = float(entry.get("sl_pct", 0))
+        if sl_pct <= 0:
+            LOGGER.info("%s: sl_pct <= 0 (entry=%s), skip SL", symbol, sl_pct)
+            continue
+
+        entry_date_str = entry.get("entry_date") or ""
         if not entry_date_str:
-            LOGGER.info("%s: no entry date found in order history, skip SL", symbol)
+            LOGGER.info(
+                "%s: no entry_date in accepted_entries, skip SL", symbol,
+            )
             continue
 
         try:
@@ -277,20 +270,24 @@ def main() -> None:
             today_ts = pandas.Timestamp(today_str)
             trading_days = pandas.bdate_range(entry_ts, today_ts)
             bars_held = max(0, len(trading_days) - 1)
-        except Exception:
+        except Exception:  # noqa: BLE001
             bars_held = 0
 
-        if bars_held < SL_MIN_HOLD_BARS:
+        sl_min_hold = int(
+            entry.get("min_hold_sl", DEFAULT_SL_MIN_HOLD_BARS) or DEFAULT_SL_MIN_HOLD_BARS
+        )
+        if bars_held < sl_min_hold:
             LOGGER.info(
-                "%s: bars_held=%d < sl_min_hold=%d, SL deferred",
-                symbol, bars_held, SL_MIN_HOLD_BARS,
+                "%s: bars_held=%d < min_hold_sl=%d, SL deferred",
+                symbol, bars_held, sl_min_hold,
             )
             continue
 
         sl_price = round(pos["cost_price"] * (1 - sl_pct), 2)
+        bucket = entry.get("bucket", "?")
         LOGGER.info(
-            "%s: bars_held=%d >= sl_min_hold=%d → SL=$%.2f (-%.2f%%) [GTC stop]",
-            symbol, bars_held, SL_MIN_HOLD_BARS, sl_price, sl_pct * 100,
+            "%s [%s]: bars_held=%d -> SL=$%.2f (-%.2f%%) [GTC stop]",
+            symbol, bucket, bars_held, sl_price, sl_pct * 100,
         )
 
         if dry_run:
@@ -309,11 +306,12 @@ def main() -> None:
         )
         sl_result = {
             "symbol": symbol,
+            "bucket": bucket,
             "side": "SL_SELL",
             "qty": pos["qty"],
             "entry_price": pos["cost_price"],
             "price": sl_price,
-            "sl_pct": round(sl_pct * 100, 2),
+            "sl_pct": round(sl_pct * 100, 4),
             "bars_held": bars_held,
             "status": "sent" if ret_sl == 0 else "failed",
             "order_id": (

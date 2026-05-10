@@ -23,33 +23,70 @@ app = FastAPI(title="Stock Indicator Dashboard")
 
 
 def _parse_log(log_path: Path) -> dict[str, Any]:
-    """Parse a daily text log into structured data."""
+    """Parse a daily multi-bucket log into structured data."""
     text = log_path.read_text(encoding="utf-8")
     result: dict[str, Any] = {"raw": text, "date": log_path.stem}
 
-    # Entry signals
-    m = re.search(r"entry signals:\s*\[([^\]]*)\]", text)
-    if m and m.group(1).strip():
-        result["entry_signals"] = re.findall(r"'(\w+)'", m.group(1))
-    else:
-        result["entry_signals"] = []
+    # Bucket-aware per-entry frozen TP/SL (multi-bucket schema).
+    # Format: [FROZEN_TP_SL] entry_date=... bucket=... strategy_id=...
+    #         symbol=... tp_pct=... sl_pct=... rolling_mp=...
+    #         slope_60=... near_delta=... min_hold_tp=... disable_sl_trigger=...
+    frozen_entries: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        if not line.startswith("[FROZEN_TP_SL]"):
+            continue
+        fields: dict[str, Any] = {}
+        for token in line[len("[FROZEN_TP_SL]"):].strip().split():
+            if "=" not in token:
+                continue
+            key, _, raw_value = token.partition("=")
+            if raw_value == "None":
+                fields[key] = None
+                continue
+            try:
+                if key in {"tp_pct", "sl_pct", "rolling_mp", "slope_60", "near_delta"}:
+                    fields[key] = float(raw_value)
+                elif key == "min_hold_tp":
+                    fields[key] = int(raw_value)
+                elif key == "disable_sl_trigger":
+                    fields[key] = raw_value.lower() == "true"
+                else:
+                    fields[key] = raw_value
+            except ValueError:
+                fields[key] = raw_value
+        frozen_entries.append(fields)
+    result["frozen_entries"] = frozen_entries
+    # Convenience: lists of new BUY symbols today (from frozen entries
+    # whose entry_date matches today's log date).
+    todays_buy_symbols = [
+        e.get("symbol") for e in frozen_entries
+        if e.get("entry_date") == log_path.stem and e.get("symbol")
+    ]
+    result["buy_actions"] = todays_buy_symbols
 
-    # Exit signals
-    m = re.search(r"exit signals:\s*\[([^\]]*)\]", text)
-    if m and m.group(1).strip():
-        result["exit_signals"] = re.findall(r"'(\w+)'", m.group(1))
-    else:
-        result["exit_signals"] = []
+    # Exit signals (machine-readable per-symbol lines).
+    # Format: [EXIT_SIGNAL] symbol=X
+    exit_symbols: list[str] = []
+    for line in text.splitlines():
+        if not line.startswith("[EXIT_SIGNAL]"):
+            continue
+        for token in line[len("[EXIT_SIGNAL]"):].strip().split():
+            if token.startswith("symbol="):
+                exit_symbols.append(token.partition("=")[2])
+    result["exit_signals"] = exit_symbols
+    result["sell_actions"] = exit_symbols
 
-    # Actions
-    buy_m = re.search(r"BUY\s+(.+)", text)
-    result["buy_actions"] = re.findall(r"'(\w+)'", buy_m.group(1)) if buy_m else []
-    sell_m = re.search(r"SELL\s+(.+)", text)
-    result["sell_actions"] = re.findall(r"'(\w+)'", sell_m.group(1)) if sell_m else []
+    # Hold (min_hold) — kept for back-compat with single-strategy
+    # find_history_signal log emitter; multi_bucket log doesn't emit
+    # this currently.
     hold_m = re.search(r"HOLD\s+\(min_hold\)\s+(.+)", text)
-    result["hold_blocked"] = re.findall(r"'(\w+)'", hold_m.group(1)) if hold_m else []
+    result["hold_blocked"] = (
+        re.findall(r"'(\w+)'", hold_m.group(1)) if hold_m else []
+    )
 
-    # Adaptive TP/SL
+    # Global rolling stats from compute_adaptive_tp_sl (legacy bridge,
+    # still emitted by run_daily_job.sh for diagnostic display only —
+    # NOT used for order TP/SL prices, those come from frozen_entries).
     tp_m = re.search(r"TP:\s*([\d.]+)%", text)
     sl_m = re.search(r"SL:\s*([\d.]+)%", text)
     result["tp_pct"] = float(tp_m.group(1)) if tp_m else None
@@ -183,10 +220,33 @@ def api_futu_positions():
 # ---------------------------------------------------------------------------
 
 MARGIN_MULTIPLIER = 1.5
-MAX_POSITIONS = 6
 # Use paper trading by default. Set to "REAL" to trade with real money.
 TRADING_ENV = "REAL"
 ORDER_LOG_DIR = LOGS_DIRECTORY
+
+PRODUCTION_CONFIG_PATH = (
+    Path(__file__).resolve().parent.parent.parent
+    / "data"
+    / "multi_bucket_production.json"
+)
+
+
+def _load_max_positions() -> int:
+    """Read max_position_count from the production multi-bucket config.
+
+    Falls back to 6 (legacy single-bucket sizing) if the config is missing
+    or unreadable. Live cron uses this same JSON to drive multi_bucket_daily_signal,
+    so dashboard sizing stays aligned without a hardcoded constant.
+    """
+    try:
+        with PRODUCTION_CONFIG_PATH.open("r", encoding="utf-8") as fp:
+            return int(json.load(fp).get("max_position_count", 6))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return 6
+
+
+# NOTE: do NOT cache this at module load — re-read per request so config
+# edits take effect without restarting the server.
 
 
 def _get_futu_trd_ctx():
@@ -224,12 +284,14 @@ def _get_last_price(symbol: str) -> float | None:
     return None
 
 
-def _compute_order_size(total_assets_hkd: float, price_usd: float) -> int:
+def _compute_order_size(
+    total_assets_hkd: float, price_usd: float, max_positions: int
+) -> int:
     """Compute qty: floor(total_assets * margin / max_pos / price).
 
     total_assets is in HKD, price is in USD.  Uses ~7.8 HKD/USD.
     """
-    hkd_per_position = total_assets_hkd * MARGIN_MULTIPLIER / MAX_POSITIONS
+    hkd_per_position = total_assets_hkd * MARGIN_MULTIPLIER / max_positions
     usd_per_position = hkd_per_position / 7.8
     if price_usd <= 0:
         return 0
@@ -253,6 +315,7 @@ def _log_order(order_data: dict) -> None:
 @app.get("/api/preview_orders")
 def api_preview_orders():
     """Build order preview from latest signal + account data."""
+    max_positions = _load_max_positions()
     try:
         from futu import TrdEnv
 
@@ -280,36 +343,41 @@ def api_preview_orders():
         return {"error": "No log files found"}
     log = _parse_log(LOGS_DIRECTORY / f"{dates[0]}.log")
 
-    # Read adaptive TP/SL from adaptive_state.json (System A output)
-    adaptive = _load_json(DATA_DIRECTORY / "adaptive_state.json")
-    tp_pct = adaptive.get("tp_pct")
-    sl_pct = adaptive.get("sl_pct")
-    if tp_pct is not None:
-        tp_pct = tp_pct * 100  # match log format (percentage)
-    if sl_pct is not None:
-        sl_pct = sl_pct * 100
+    # Build per-symbol metadata from today's [FROZEN_TP_SL] lines so the
+    # preview can show bucket / tp_pct / sl_pct alongside each BUY.
+    frozen_today: dict[str, dict[str, Any]] = {
+        e.get("symbol"): e
+        for e in log.get("frozen_entries", [])
+        if e.get("entry_date") == log.get("date") and e.get("symbol")
+    }
 
     orders = []
 
-    # BUY orders
+    # BUY orders (today's accepted entries from [FROZEN_TP_SL] lines).
     for symbol in log.get("buy_actions", []):
         if symbol in held_symbols:
             continue
         ref_price = _get_last_price(symbol)
-        qty = _compute_order_size(total_assets, ref_price) if ref_price else 0
+        qty = (
+            _compute_order_size(total_assets, ref_price, max_positions)
+            if ref_price else 0
+        )
+        meta = frozen_today.get(symbol, {})
         orders.append({
             "side": "BUY",
             "symbol": symbol,
             "qty": qty,
             "ref_price": ref_price,
             "order_type": "MARKET",
+            "bucket": meta.get("bucket"),
+            "tp_pct": meta.get("tp_pct"),
+            "sl_pct": meta.get("sl_pct"),
         })
 
-    # SELL orders (exit signals for held positions)
+    # SELL orders (exit signals for held positions).
     for symbol in log.get("sell_actions", []):
         if symbol not in held_symbols:
             continue
-        # Find qty from positions
         qty = 0
         if ret_pos == 0 and len(pos_data) > 0:
             match = pos_data[pos_data["code"] == f"US.{symbol}"]
@@ -328,7 +396,7 @@ def api_preview_orders():
         "orders": orders,
         "total_assets_hkd": total_assets,
         "margin": MARGIN_MULTIPLIER,
-        "max_positions": MAX_POSITIONS,
+        "max_positions": max_positions,
         "held_count": len(held_symbols),
         "trading_env": TRADING_ENV,
         "signal_date": log.get("date"),
@@ -511,7 +579,7 @@ HTML_PAGE = """<!DOCTYPE html>
   .btn-confirm { background: var(--green); color: var(--bg); }
   .btn-cancel { background: var(--border); color: var(--text2); margin-left: 8px; }
   .btn-preview { background: var(--blue); color: var(--bg); }
-  .order-row { display: grid; grid-template-columns: 60px 80px 60px 90px 90px 90px; gap: 8px; align-items: center;
+  .order-row { display: grid; grid-template-columns: 60px 80px 110px 60px 90px 80px 80px; gap: 8px; align-items: center;
     padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.9em; }
   .order-row:last-child { border-bottom: none; }
   .order-header { color: var(--text2); font-size: 0.8em; }
@@ -594,6 +662,28 @@ function tag(text, type) {
   return `<span class="tag ${type}">${text}</span>`;
 }
 
+// Build symbol -> bucket short-name map from frozen_entries (today's
+// accepts) + adaptive_state.accepted_entries (held positions). The
+// short name strips _production / _explore suffix so the tag is
+// readable inline.
+function buildBucketMap(log, adaptive) {
+  const m = {};
+  const shorten = (b) => (b || '').replace('_production', '').replace('_explore', '');
+  for (const e of (log.frozen_entries || [])) {
+    if (e.symbol && e.bucket) m[e.symbol] = shorten(e.bucket);
+  }
+  for (const e of (adaptive.accepted_entries || [])) {
+    if (e.symbol && e.bucket && !(e.symbol in m)) m[e.symbol] = shorten(e.bucket);
+  }
+  return m;
+}
+
+function tagWithBucket(symbol, type, bucketMap) {
+  const b = bucketMap[symbol];
+  const suffix = b ? ` <span style="opacity:0.7; font-size:0.8em">[${b}]</span>` : '';
+  return `<span class="tag ${type}">${symbol}${suffix}</span>`;
+}
+
 async function load() {
   try {
     const [stateRes, futuRes] = await Promise.all([
@@ -623,6 +713,27 @@ function render(state, futu) {
   if (log.rolling_mp != null) html += stat('Rolling MP', '+' + pct(log.rolling_mp) + ' (n=' + log.rolling_mp_n + ')', 'positive');
   if (log.rolling_ml != null) html += stat('Rolling ML', '-' + pct(log.rolling_ml) + ' (n=' + log.rolling_ml_n + ')', 'negative');
   html += stat('Window', '20 trades');
+
+  // Full rolling distribution — winners + losers, sorted by magnitude.
+  // The frozen TP/SL formula reads these directly; surfacing them lets
+  // Cal eyeball regime drift without crawling JSON.
+  const winners = (adaptive.winners || []).slice();
+  const losers = (adaptive.losers || []).slice();
+  if (winners.length > 0 || losers.length > 0) {
+    html += '<div style="margin-top:12px; padding-top:8px; border-top:1px solid var(--border); font-size:0.8em; color:var(--text2)">Rolling pool (last 20 each, signed)</div>';
+    if (winners.length > 0) {
+      winners.sort((a, b) => b - a);
+      html += '<div style="margin-top:4px"><span style="color:var(--text2); font-size:0.85em">Winners (n=' + winners.length + '): </span>';
+      html += winners.map(w => '<span class="positive" style="margin-right:6px; font-size:0.85em">+' + (w*100).toFixed(2) + '%</span>').join('');
+      html += '</div>';
+    }
+    if (losers.length > 0) {
+      losers.sort((a, b) => a - b);  // most negative first
+      html += '<div style="margin-top:4px"><span style="color:var(--text2); font-size:0.85em">Losers (n=' + losers.length + '): </span>';
+      html += losers.map(l => '<span class="negative" style="margin-right:6px; font-size:0.85em">' + (l*100).toFixed(2) + '%</span>').join('');
+      html += '</div>';
+    }
+  }
   $('#adaptive-stats').innerHTML = html;
 
   // Account
@@ -646,20 +757,21 @@ function render(state, futu) {
   // Signals
   $('#signal-date').textContent = log.date || '—';
   html = '';
+  const bucketMap = buildBucketMap(log, adaptive);
   html += '<div class="signal-row"><strong style="color:var(--text2)">BUY:</strong> ';
-  html += (log.buy_actions && log.buy_actions.length) ? log.buy_actions.map(s => tag(s, 'buy')).join('') : '<span style="color:var(--text2)">—</span>';
+  html += (log.buy_actions && log.buy_actions.length) ? log.buy_actions.map(s => tagWithBucket(s, 'buy', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">SELL:</strong> ';
-  html += (log.sell_actions && log.sell_actions.length) ? log.sell_actions.map(s => tag(s, 'sell')).join('') : '<span style="color:var(--text2)">—</span>';
+  html += (log.sell_actions && log.sell_actions.length) ? log.sell_actions.map(s => tagWithBucket(s, 'sell', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">HOLD (min_hold):</strong> ';
-  html += (log.hold_blocked && log.hold_blocked.length) ? log.hold_blocked.map(s => tag(s, 'hold')).join('') : '<span style="color:var(--text2)">—</span>';
+  html += (log.hold_blocked && log.hold_blocked.length) ? log.hold_blocked.map(s => tagWithBucket(s, 'hold', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   // Entry/exit signal count
   html += '<div style="margin-top:8px; font-size:0.85em; color:var(--text2)">';
-  html += 'Entry signals: ' + (log.entry_signals||[]).length + ' | ';
+  html += 'Entry signals: ' + (log.frozen_entries||[]).length + ' | ';
   html += 'Exit signals: ' + (log.exit_signals||[]).length + ' | ';
-  html += 'Positions: ' + (log.position_count||0) + '/6';
+  html += 'Positions: ' + (log.position_count||0);
   html += '</div>';
   $('#signals-content').innerHTML = html;
 
@@ -730,19 +842,22 @@ async function loadDate(d) {
   // Update signals card only
   $('#signal-date').textContent = log.date || d;
   let html = '';
+  // For historical dates, bucket map comes only from that day's
+  // [FROZEN_TP_SL] lines (no current accepted_entries lookup).
+  const bucketMap = buildBucketMap(log, {});
   html += '<div class="signal-row"><strong style="color:var(--text2)">BUY:</strong> ';
-  html += (log.buy_actions && log.buy_actions.length) ? log.buy_actions.map(s => tag(s, 'buy')).join('') : '<span style="color:var(--text2)">—</span>';
+  html += (log.buy_actions && log.buy_actions.length) ? log.buy_actions.map(s => tagWithBucket(s, 'buy', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">SELL:</strong> ';
-  html += (log.sell_actions && log.sell_actions.length) ? log.sell_actions.map(s => tag(s, 'sell')).join('') : '<span style="color:var(--text2)">—</span>';
+  html += (log.sell_actions && log.sell_actions.length) ? log.sell_actions.map(s => tagWithBucket(s, 'sell', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">HOLD (min_hold):</strong> ';
-  html += (log.hold_blocked && log.hold_blocked.length) ? log.hold_blocked.map(s => tag(s, 'hold')).join('') : '<span style="color:var(--text2)">—</span>';
+  html += (log.hold_blocked && log.hold_blocked.length) ? log.hold_blocked.map(s => tagWithBucket(s, 'hold', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div style="margin-top:8px; font-size:0.85em; color:var(--text2)">';
-  html += 'Entry signals: ' + (log.entry_signals||[]).length + ' | ';
+  html += 'Entry signals: ' + (log.frozen_entries||[]).length + ' | ';
   html += 'Exit signals: ' + (log.exit_signals||[]).length + ' | ';
-  html += 'Positions: ' + (log.position_count||0) + '/6';
+  html += 'Positions: ' + (log.position_count||0);
   html += '</div>';
   if (log.tp_pct != null) {
     let ahtml = '';
@@ -790,16 +905,22 @@ async function previewOrders() {
     html += ' | Signal: ' + (data.signal_date||'—');
     html += '</div>';
 
-    html += '<div class="order-row order-header"><span>Side</span><span>Symbol</span><span>Qty</span><span>Type</span><span>Ref Price</span><span></span></div>';
+    html += '<div class="order-row order-header"><span>Side</span><span>Symbol</span><span>Bucket</span><span>Qty</span><span>Ref Price</span><span>TP%</span><span>SL%</span></div>';
     for (const o of data.orders) {
       const sideClass = o.side === 'BUY' ? 'positive' : 'negative';
+      const bucketShort = (o.bucket || '').replace('_production', '').replace('_explore', '') || '—';
+      const tpDisplay = o.tp_pct != null ? '+' + (o.tp_pct * 100).toFixed(2) + '%' : '—';
+      const slDisplay = o.sl_pct != null ? '-' + (o.sl_pct * 100).toFixed(2) + '%' : '—';
+      const refDisplay = (o.ref_price != null) ? '$' + o.ref_price.toFixed(2)
+                       : (o.price != null) ? '$' + o.price.toFixed(2) : '—';
       html += `<div class="order-row">
         <span class="${sideClass}"><strong>${o.side}</strong></span>
         <span><strong>${o.symbol}</strong></span>
+        <span style="color:var(--text2)">${bucketShort}</span>
         <span>${o.qty}</span>
-        <span>MARKET</span>
-        <span style="color:var(--text2)">${o.ref_price ? '$'+o.ref_price.toFixed(2) : '—'}</span>
-        <span></span>
+        <span style="color:var(--text2)">${refDisplay}</span>
+        <span class="positive">${tpDisplay}</span>
+        <span class="negative">${slDisplay}</span>
       </div>`;
     }
     $('#orders-content').innerHTML = html;

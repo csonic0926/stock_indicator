@@ -671,6 +671,23 @@ class ComplexStrategySetDefinition:
     # above_pv >= 0.973 misses (e.g. AAPL 2018-12-26: 1.0 → 0.924). When
     # None, filter is inactive.
     v_filter_threshold: float | None = None
+    # Pull the A-layer signal-date read back by one trading bar — i.e.
+    # read filter values from the bar BEFORE the cross detection bar
+    # instead of at the cross bar. NOT lookahead: the earlier bar is
+    # strictly in the past relative to fill (T+1 in non-pending mode).
+    #
+    # Required by fish_head_vacuum_turn: the cross bar already includes
+    # the first reaction-up tick, so its slope_60 / near_delta have
+    # partially recovered from the extreme-low state that fish_head's
+    # narrative depends on. The free_fall combo filter and the trade
+    # detail's regime fields read from one bar earlier — where the
+    # decline-into-vacuum context is sharpest — to discriminate
+    # "institutional vacuum bottom" from "still-cascading free fall".
+    #
+    # Leave False for buckets whose narrative DEPENDS on values at the
+    # cross bar itself (e.g. V filter, fish_tail's tp_slope_amplify
+    # captures FOMO at the blow-off bar, not the bar before).
+    pre_cross_signal_lookback: bool = False
     # Per-bucket TP slope-amplifier: when enabled and slope_60 > 0 at
     # signal date, multiply TP target by (1 + slope_60). Zero effect for
     # slope <= 0 (e.g. fish_tail's Stage 3 horizontal distribution stays
@@ -678,6 +695,13 @@ class ComplexStrategySetDefinition:
     # enabled. fixed_tp overrides (last word). Mechanism: bigger rally
     # before entry → stronger retail FOMO → bigger blow-off surge target.
     tp_slope_amplify: bool = False
+    # Per-bucket override for adaptive_tp_sl.sigma_multiplier. When set, this
+    # bucket uses its own σ multiplier in the rolling TP formula
+    # (TP = MP + sigma * σ_winners). Different bucket narratives have
+    # different winner-distribution shapes — fish_head's catalyst-driven
+    # gap-up vs fish_tail's A-peak FOMO — and may want different right-tail
+    # truncation distances.
+    sigma: float | None = None
     # Per-bucket override for min_hold gates on TP and SL. None = inherit
     # top-level. Needed because different bucket narratives demand opposite
     # SL gate behavior — buy3 V-bottom needs SL to wait for min_hold (give
@@ -974,8 +998,19 @@ def compute_frozen_tp_sl_for_bucket(
     closed_winners: Iterable[float],
     closed_losers: Iterable[float],
     entry_slope_60: float | None = None,
-) -> tuple[float, float, float]:
-    """Compute (tp_pct, sl_pct, rolling_mp) frozen at entry for one bucket.
+) -> tuple[float, float, float, float]:
+    """Compute (tp_pct, sl_pct, rolling_mp, rolling_ml) frozen at entry.
+
+    Returns FOUR values:
+      * tp_pct, sl_pct: trade-applied TP/SL (with sigma override, min_sl/
+        fixed_sl floor/cap, fixed_tp override). These drive the actual
+        SL fire trigger and the TP limit price.
+      * rolling_mp, rolling_ml: rolling regime sensors — pure mean-of-
+        winners and median-of-losses with NO floor/cap/override applied.
+        These reflect the market regime and are used by downstream
+        regime-aware logic (dynamic_min_hold throttle) so that user-set
+        SL exploration overrides on min_sl/fixed_sl do not contaminate
+        regime indicators.
 
     Single source of truth for the TP/SL formula used by the simulator's
     inline replay loop and the production multi_bucket_today command.
@@ -1002,6 +1037,11 @@ def compute_frozen_tp_sl_for_bucket(
         if bucket_def.tp_regime_adjust is not None
         else adaptive_tp_sl.tp_regime_adjust
     )
+    effective_sigma = (
+        bucket_def.sigma
+        if bucket_def.sigma is not None
+        else adaptive_tp_sl.sigma_multiplier
+    )
 
     winners_list = list(closed_winners)
     losers_list = list(closed_losers)
@@ -1009,6 +1049,7 @@ def compute_frozen_tp_sl_for_bucket(
     tp_pct = adaptive_tp_sl.min_tp
     sl_pct = effective_min_sl
     rolling_mp = 0.0
+    rolling_ml = 0.0
 
     if len(winners_list) + len(losers_list) >= adaptive_tp_sl.min_samples:
         if len(winners_list) >= 3:
@@ -1021,23 +1062,37 @@ def compute_frozen_tp_sl_for_bucket(
             tp_pct = max(
                 adaptive_tp_sl.min_tp,
                 mean_profit_percentage
-                + adaptive_tp_sl.sigma_multiplier
+                + effective_sigma
                 * profit_standard_deviation,
             )
 
         losses = [abs(loss_percentage) for loss_percentage in losers_list]
         if len(losses) >= 3:
-            sl_pct = max(effective_min_sl, median(losses))
+            rolling_ml = median(losses)
+            sl_pct = max(effective_min_sl, rolling_ml)
 
     if effective_fixed_sl is not None:
         sl_pct = min(sl_pct, effective_fixed_sl)
 
     if (
         effective_tp_regime_adjust
-        and sl_pct > 0
         and effective_fixed_tp is None
+        and rolling_mp > 0
+        and rolling_ml > 0
     ):
-        raw_ratio = tp_pct / sl_pct
+        # Use rolling regime sensors (rolling_mp / rolling_ml) — pure
+        # market signal with NO min_sl/fixed_sl floor/cap applied. Using
+        # trade-applied sl_pct/tp_pct here was a bug: when SL exploration
+        # sets min_sl=0.45, sl_pct gets floored and the regime ratio
+        # collapses (e.g. 0.04/0.45 = 0.09), tripping the floor clamp
+        # and silently halving TP.
+        #
+        # When rolling stats are not yet populated (early sim, < min_samples
+        # closed trades), we have NO regime signal — skip the adjustment
+        # entirely. Falling back to trade-applied sl_pct/tp_pct here would
+        # re-introduce floor pollution; doing nothing keeps tp_pct at its
+        # base sigma-derived value, matching pre-regime-adjust behavior.
+        raw_ratio = rolling_mp / rolling_ml
         capped_ratio = max(
             adaptive_tp_sl.tp_regime_ratio_min,
             min(adaptive_tp_sl.tp_regime_ratio_max, raw_ratio),
@@ -1055,7 +1110,7 @@ def compute_frozen_tp_sl_for_bucket(
     if effective_fixed_tp is not None:
         tp_pct = effective_fixed_tp
 
-    return tp_pct, sl_pct, rolling_mp
+    return tp_pct, sl_pct, rolling_mp, rolling_ml
 
 
 def run_complex_simulation(
@@ -1175,6 +1230,7 @@ def run_complex_simulation(
             reentry_on_signal=(
                 adaptive_tp_sl.evict_oldest if adaptive_tp_sl is not None else False
             ),
+            pre_cross_signal_lookback=definition.pre_cross_signal_lookback,
         )
 
     accepted_trades_by_set: Dict[str, List[Trade]] = {
@@ -1938,7 +1994,12 @@ def run_complex_simulation(
                     if _detail_pair_for_amplify is not None
                     else None
                 )
-                tp_pct, sl_pct, rolling_mp = compute_frozen_tp_sl_for_bucket(
+                (
+                    tp_pct,
+                    sl_pct,
+                    rolling_mp,
+                    rolling_ml,
+                ) = compute_frozen_tp_sl_for_bucket(
                     bucket_def=bucket_def,
                     adaptive_tp_sl=adaptive_tp_sl,
                     closed_winners=adaptive_closed_winners,
@@ -1991,13 +2052,28 @@ def run_complex_simulation(
                     sl_only=use_evict_oldest,
                     disable_sl_trigger=adaptive_tp_sl.disable_sl_trigger,
                 )
-                # Dynamic min_hold throttle based on R-multiple (rolling SL/TP).
-                # TP exits release immediately.  Non-TP exits keep the slot
-                # locked until max(min_hold, round(min_hold * SL / TP)).
-                if tp_pct > 0 and effective_min_hold > 0:
+                # Dynamic min_hold throttle based on rolling regime sensors
+                # (rolling_ml / rolling_mp) — pure market signal with NO
+                # min_sl/fixed_sl override applied. Using trade-applied
+                # sl_pct/tp_pct here was a bug: when SL exploration sets
+                # min_sl=0.45, sl_pct gets floored to 0.45 and the throttle
+                # treats the floor as a regime indicator, locking slots
+                # for ~45 bars instead of ~5.
+                #
+                # When rolling stats are not yet populated (early sim,
+                # < min_samples closed trades), there is NO regime signal
+                # — skip the throttle. Falling back to trade-applied
+                # sl_pct/tp_pct here would re-introduce floor pollution
+                # (e.g. ratio 0.45/0.02 = 22.5 → 113-bar lockup) and kill
+                # all early-sim trades. No regime info → no throttle.
+                if (
+                    rolling_ml > 0
+                    and rolling_mp > 0
+                    and effective_min_hold > 0
+                ):
                     dynamic_min_hold = max(
                         effective_min_hold,
-                        round(effective_min_hold * sl_pct / tp_pct),
+                        round(effective_min_hold * rolling_ml / rolling_mp),
                     )
                 else:
                     dynamic_min_hold = effective_min_hold
@@ -3975,6 +4051,8 @@ def _resolve_trade_decision_dates(
     run_frame_index: pandas.DatetimeIndex,
     entry_date: pandas.Timestamp,
     use_confirmation_angle: bool,
+    *,
+    pre_cross_signal_lookback: bool = False,
 ) -> tuple[pandas.Timestamp, pandas.Timestamp]:
     """Resolve (signal_date, confirmation_date) for a trade.
 
@@ -4002,6 +4080,15 @@ def _resolve_trade_decision_dates(
                  keeps the lookup chain consistent without leaking
                  the fill bar (entry_date) into A-layer reads.
 
+    ``pre_cross_signal_lookback`` (per-bucket override): when True,
+    pulls signal_date back one ADDITIONAL trading bar — the read lands
+    on the bar BEFORE the cross detection bar. Used by buckets whose
+    narrative depends on the pre-bounce regime context (fish_head
+    vacuum bottom: slope_60 / near_delta at the bar before the cross
+    are at their deepest-decline values; the cross bar already shows
+    the initial reaction-up). NOT lookahead — earlier bar is strictly
+    in the past relative to fill.
+
     Edge cases at the start of the run frame degrade gracefully: when
     we cannot go back the full distance, fall back to the earliest
     available bar (in the worst case, the entry_date itself). This
@@ -4024,6 +4111,12 @@ def _resolve_trade_decision_dates(
             signal_date = confirmation_date
     else:
         signal_date = confirmation_date
+    if pre_cross_signal_lookback:
+        signal_position = run_frame_index.get_indexer_for([signal_date])
+        if signal_position.size == 1:
+            signal_index_int = int(signal_position[0])
+            if signal_index_int > 0:
+                signal_date = run_frame_index[signal_index_int - 1]
     return signal_date, confirmation_date
 
 
@@ -4063,6 +4156,7 @@ def _generate_strategy_evaluation_artifacts(
     shape_dev_50_max: float | None = None,
     shape_bsv_lookback: int | None = None,
     reentry_on_signal: bool = False,
+    pre_cross_signal_lookback: bool = False,
 ) -> StrategyEvaluationArtifacts:
     """Build intermediate artifacts for strategy evaluation.
 
@@ -4491,6 +4585,7 @@ def _generate_strategy_evaluation_artifacts(
                 run_frame.index,
                 completed_trade.entry_date,
                 use_confirmation_angle,
+                pre_cross_signal_lookback=pre_cross_signal_lookback,
             )
             chip_metrics = calculate_chip_concentration_metrics(
                 price_data_frame.loc[: signal_date],

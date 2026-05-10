@@ -482,6 +482,9 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
                 and raw_bucket["v_filter_threshold"] is not None
                 else None
             ),
+            pre_cross_signal_lookback=bool(
+                raw_bucket.get("pre_cross_signal_lookback", False)
+            ),
             tp_slope_amplify=bool(raw_bucket.get("tp_slope_amplify", False)),
             override_min_hold_tp_only=(
                 bool(raw_bucket["override_min_hold_tp_only"])
@@ -917,6 +920,12 @@ def _fill_deferred_pcts(
             "closed_date": exit_date_string,
             "pct": float(pct_value),
         })
+        # Also feed legacy raw_trade_profits so compute_adaptive_tp_sl can
+        # produce a global tp_pct/sl_pct top-level value for System B
+        # (place_tp_sl.py).  compute_adaptive_tp_sl skips closed_trades
+        # whose raw_pct is already filled, so without this dual-write the
+        # legacy rolling pool stays empty under the live multi-bucket cron.
+        state.setdefault("raw_trade_profits", []).append(round(pct_value, 6))
         log_messages.append(
             f"  Filled raw_pct for {symbol} (bucket {closed_trade.get('bucket', '?')}): {pct_value:+.2%}"
         )
@@ -995,6 +1004,7 @@ def compute_today_signals(
     # ------------------------------------------------------------------
     new_held_per_strategy: Dict[str, List[Dict[str, str]]] = {}
     same_day_close_count_global = 0
+    all_exit_symbols_global: List[str] = []
     for bucket_label, bucket_def in config.bucket_definitions.items():
         strategy_identifier = bucket_def.strategy_identifier
         held_for_strategy = held_positions.get(strategy_identifier, [])
@@ -1039,6 +1049,7 @@ def compute_today_signals(
             log_lines.append(
                 f"[exit] bucket={bucket_label} symbols={bucket_exit_messages}"
             )
+            all_exit_symbols_global.extend(bucket_exit_messages)
 
     # ------------------------------------------------------------------
     # Step D. Flush pending_rolling for entries strictly older than today.
@@ -1071,10 +1082,22 @@ def compute_today_signals(
                 continue
             if symbol_name in held_symbols_in_strategy:
                 continue
+            # Per-bucket pre-cross lookback shifts the A-layer read back
+            # one trading bar (mirrors strategy.py:_resolve_trade_decision_dates).
+            # Required by fish_head_vacuum_turn so slope_60 / near_delta
+            # capture the bar BEFORE the cross — the cross bar already
+            # includes the first reaction-up tick. Other buckets read
+            # at eval_date itself.
+            if bucket_def.pre_cross_signal_lookback:
+                signal_lookup_date_string = (
+                    (eval_date - pandas.offsets.BDay(1)).date().isoformat()
+                )
+            else:
+                signal_lookup_date_string = eval_date_string
             try:
                 debug_values = daily_job.filter_debug_values(
                     symbol_name,
-                    eval_date_string,
+                    signal_lookup_date_string,
                     bucket_def.buy_strategy_name,
                     bucket_def.sell_strategy_name,
                 )
@@ -1094,7 +1117,12 @@ def compute_today_signals(
                 above_pv_previous=above_pv_previous_value,
             ):
                 continue
-            tp_pct, sl_pct, rolling_mp = strategy.compute_frozen_tp_sl_for_bucket(
+            (
+                tp_pct,
+                sl_pct,
+                rolling_mp,
+                _rolling_ml,
+            ) = strategy.compute_frozen_tp_sl_for_bucket(
                 bucket_def=bucket_def,
                 adaptive_tp_sl=adaptive,
                 closed_winners=state.get("winners", []),
@@ -1209,6 +1237,13 @@ def compute_today_signals(
     log_lines.append(
         f"rejected: {[(record.symbol, record.bucket_label, reason) for record, reason in rejected_records]}"
     )
+
+    # Machine-readable per-exit log lines (replaces flat BUY/SELL summary).
+    # Each exit emits one line; downstream parsers (dashboard, place_tp_sl)
+    # read [EXIT_SIGNAL] / [FROZEN_TP_SL] prefixes instead of comma lists.
+    for exit_symbol in all_exit_symbols_global:
+        log_lines.append(f"[EXIT_SIGNAL] symbol={exit_symbol}")
+
     for record in accepted_records:
         slope_text = (
             f"{record.slope_60:.4f}" if record.slope_60 is not None else "None"
@@ -1226,6 +1261,97 @@ def compute_today_signals(
             f"min_hold_tp={adaptive.min_hold_tp} "
             f"disable_sl_trigger={adaptive.disable_sl_trigger}"
         )
+
+    # ------------------------------------------------------------------
+    # Step I. Persist accepted_entries to state so place_tp_sl.py can
+    # look up per-position frozen TP/SL. Carryover preserves prior frozen
+    # values for held positions (never re-frozen mid-trade).
+    # ------------------------------------------------------------------
+    def _resolve_min_hold_sl_for_bucket(bucket_label: str) -> int:
+        """Resolve effective min_hold_sl mirroring strategy.py:1999-2014.
+
+        Captured at entry-time so place_tp_sl uses the value that was in
+        force when the trade was opened, not the current (possibly later)
+        config. This keeps live SL gating in lockstep with the simulator.
+        """
+        bucket_def_local = config.bucket_definitions.get(bucket_label)
+        if bucket_def_local is None:
+            return int(config.minimum_holding_bars)
+        effective_override_sl = (
+            bucket_def_local.override_min_hold_sl_only
+            if bucket_def_local.override_min_hold_sl_only is not None
+            else adaptive.override_min_hold_sl_only
+        )
+        if effective_override_sl:
+            return int(
+                bucket_def_local.min_hold_sl
+                if bucket_def_local.min_hold_sl is not None
+                else adaptive.min_hold_sl
+            )
+        return int(config.minimum_holding_bars)
+
+    prior_entries_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {
+        (e.get("strategy_id", ""), e.get("symbol", "")): e
+        for e in state.get("accepted_entries", [])
+    }
+    new_records_by_key: Dict[Tuple[str, str], AcceptedEntry] = {
+        (rec.strategy_id, rec.symbol): rec for rec in accepted_records
+    }
+    persisted_entries: List[Dict[str, Any]] = []
+    for strategy_identifier, position_list in accepted_per_strategy.items():
+        for position_record in position_list:
+            symbol_value = position_record.get("symbol", "")
+            key = (strategy_identifier, symbol_value)
+            new_record = new_records_by_key.get(key)
+            if new_record is not None:
+                persisted_entries.append({
+                    "entry_date": new_record.entry_date,
+                    "bucket": new_record.bucket_label,
+                    "strategy_id": new_record.strategy_id,
+                    "symbol": new_record.symbol,
+                    "tp_pct": round(new_record.tp_pct, 6),
+                    "sl_pct": round(new_record.sl_pct, 6),
+                    "rolling_mp": round(new_record.rolling_mp, 6),
+                    "min_hold_sl": _resolve_min_hold_sl_for_bucket(
+                        new_record.bucket_label
+                    ),
+                    "slope_60": (
+                        round(new_record.slope_60, 6)
+                        if new_record.slope_60 is not None else None
+                    ),
+                    "near_delta": (
+                        round(new_record.near_delta, 6)
+                        if new_record.near_delta is not None else None
+                    ),
+                })
+            else:
+                # Carryover: held position retains its original frozen
+                # tp_pct/sl_pct from when it was first accepted. If no
+                # prior record exists, the position is an orphan from
+                # the live side (will surface as [ORPHAN_POSITION] in
+                # place_tp_sl); we do not synthesize a record here.
+                prior = prior_entries_by_key.get(key)
+                if prior is not None:
+                    # Backfill min_hold_sl on records persisted before
+                    # this field existed. Backfill uses CURRENT config —
+                    # not strictly "frozen-at-entry" semantics for those
+                    # legacy records, but the alternative is None which
+                    # would force place_tp_sl to use its hard-coded
+                    # default. Acceptable transition cost.
+                    if "min_hold_sl" not in prior:
+                        bucket_label_for_prior = prior.get(
+                            "bucket", ""
+                        )
+                        prior = {
+                            **prior,
+                            "min_hold_sl": (
+                                _resolve_min_hold_sl_for_bucket(
+                                    bucket_label_for_prior
+                                )
+                            ),
+                        }
+                    persisted_entries.append(prior)
+    state["accepted_entries"] = persisted_entries
 
     return TodaySignalsResult(
         eval_date_string=eval_date_string,

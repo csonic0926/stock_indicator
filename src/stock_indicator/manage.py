@@ -46,6 +46,7 @@ DATA_SOURCE_PATHS: dict[str, Path] = {
     "2010": DATA_DIRECTORY / "stock_data_2010_yf_clean",
     "2014": DATA_DIRECTORY / "stock_data_2014",
     "1994": DATA_DIRECTORY / "stock_data_1994",
+    "1994_clean": DATA_DIRECTORY / "stock_data_1994_clean",
 }
 
 SYMBOL_LIST_PATHS: dict[str, Path] = {
@@ -1575,6 +1576,12 @@ class StockShell(cmd.Cmd):
                     and raw_bucket["min_sl"] is not None
                     else None
                 ),
+                sigma=(
+                    float(raw_bucket["sigma"])
+                    if "sigma" in raw_bucket
+                    and raw_bucket["sigma"] is not None
+                    else None
+                ),
                 slope_max=(
                     float(raw_bucket["slope_max"])
                     if "slope_max" in raw_bucket
@@ -1616,6 +1623,9 @@ class StockShell(cmd.Cmd):
                     if "v_filter_threshold" in raw_bucket
                     and raw_bucket["v_filter_threshold"] is not None
                     else None
+                ),
+                pre_cross_signal_lookback=bool(
+                    raw_bucket.get("pre_cross_signal_lookback", False)
                 ),
                 tp_slope_amplify=bool(
                     raw_bucket.get("tp_slope_amplify", False)
@@ -3893,18 +3903,25 @@ class StockShell(cmd.Cmd):
                 sl_pct = min(sl_pct, fixed_sl_cap)
 
         # Always write back: rolling history, closed trades, and TP/SL %.
+        # Merge into existing state rather than overwriting so multi_bucket
+        # schema_version=2 fields (winners/losers/pending_rolling) survive
+        # this call when multi_bucket_daily_signal runs in the same cron.
+        merged_state: dict = {}
+        if state_path.exists():
+            try:
+                with state_path.open("r", encoding="utf-8") as fp_read:
+                    merged_state = json.load(fp_read)
+                if not isinstance(merged_state, dict):
+                    merged_state = {}
+            except (json.JSONDecodeError, OSError):
+                merged_state = {}
+        merged_state["raw_trade_profits"] = [round(p, 8) for p in raw_profits]
+        merged_state["closed_trades"] = updated_closed
+        merged_state["tp_pct"] = round(tp_pct, 6)
+        merged_state["sl_pct"] = round(sl_pct, 6)
         try:
             with state_path.open("w", encoding="utf-8") as fp:
-                json.dump(
-                    {
-                        "raw_trade_profits": [round(p, 8) for p in raw_profits],
-                        "closed_trades": updated_closed,
-                        "tp_pct": round(tp_pct, 6),
-                        "sl_pct": round(sl_pct, 6),
-                    },
-                    fp,
-                    indent=2,
-                )
+                json.dump(merged_state, fp, indent=2)
         except OSError:
             pass
 
