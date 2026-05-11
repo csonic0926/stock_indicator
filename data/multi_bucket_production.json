@@ -5,7 +5,7 @@
   "withdraw": 0,
   "start_date": "2010-01-01",
   "data_source": "daily",
-  "symbol_list": null,
+  "symbol_list": "2010_safe",
   "min_hold": 5,
   "show_trade_details": false,
   "adaptive_tp_sl": {
