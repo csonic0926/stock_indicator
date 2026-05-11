@@ -421,9 +421,19 @@ def api_preview_orders():
 
     orders = []
 
+    # Slot cap based on REAL Futu portfolio (this is the order layer's
+    # job — cron's signal layer emits Top N candidates regardless of
+    # holdings). slots_remaining counts down as each BUY is queued.
+    slots_remaining = max(0, max_positions - len(held_symbols))
+
     # BUY orders (today's accepted entries from [FROZEN_TP_SL] lines).
+    # Iteration order follows log emission, which mirrors cron's
+    # priority + dollar_volume sort — so the first to consume slots
+    # are the highest-priority candidates.
     for symbol in log.get("buy_actions", []):
         if symbol in held_symbols:
+            # Already long; cron emitted the signal but the order
+            # layer skips dupes.
             continue
         ref_price = _get_last_price(symbol)
         qty = (
@@ -431,7 +441,7 @@ def api_preview_orders():
             if ref_price else 0
         )
         meta = frozen_today.get(symbol, {})
-        orders.append({
+        order_dict = {
             "side": "BUY",
             "symbol": symbol,
             "qty": qty,
@@ -442,7 +452,16 @@ def api_preview_orders():
             "tp_pct": meta.get("tp_pct"),
             "sl_pct": meta.get("sl_pct"),
             "dollar_volume_rank": meta.get("dollar_volume_rank"),
-        })
+        }
+        if slots_remaining <= 0:
+            order_dict["status"] = "slot_full"
+            order_dict["skip_reason"] = (
+                f"max_positions={max_positions} already filled "
+                f"(Futu held: {len(held_symbols)})"
+            )
+        else:
+            slots_remaining -= 1
+        orders.append(order_dict)
 
     # SELL orders (exit signals for held positions).
     for symbol in log.get("sell_actions", []):
@@ -491,6 +510,17 @@ def api_execute_orders(req: ExecuteRequest):
         side = TrdSide.BUY if order["side"] == "BUY" else TrdSide.SELL
         qty = order["qty"]
         code = f"US.{symbol}"
+
+        # Preview marked this BUY as slot_full (Futu portfolio already
+        # at max_positions). Skip without sending so we never exceed
+        # the cap when the user clicks Confirm.
+        if order.get("status") == "slot_full":
+            results.append({
+                "symbol": symbol,
+                "status": "skipped",
+                "reason": order.get("skip_reason") or "slot_full",
+            })
+            continue
 
         if qty <= 0:
             results.append({"symbol": symbol, "status": "skipped", "reason": "qty=0"})
@@ -998,10 +1028,12 @@ async function previewOrders() {
       return;
     }
 
+    const slotsFree = Math.max(0, (data.max_positions||0) - (data.held_count||0));
     let html = '<div style="font-size:0.8em; color:var(--text2); margin-bottom:8px">';
     html += 'Assets: HK$' + (data.total_assets_hkd||0).toLocaleString(undefined,{minimumFractionDigits:0});
     html += ' | Margin: ' + data.margin + 'x';
-    html += ' | Held: ' + data.held_count + '/' + data.max_positions;
+    html += ' | Futu held: ' + data.held_count + '/' + data.max_positions;
+    html += ' | Slots free: <strong' + (slotsFree===0 ? ' style="color:var(--red)"' : '') + '>' + slotsFree + '</strong>';
     html += ' | Signal: ' + (data.signal_date||'—');
     html += '</div>';
 
@@ -1014,8 +1046,13 @@ async function previewOrders() {
       const refDisplay = (o.ref_price != null) ? '$' + o.ref_price.toFixed(2)
                        : (o.price != null) ? '$' + o.price.toFixed(2) : '—';
       const rankDisplay = (o.dollar_volume_rank != null) ? '#' + o.dollar_volume_rank : '—';
-      html += `<div class="order-row">
-        <span class="${sideClass}"><strong>${o.side}</strong></span>
+      const slotFull = o.status === 'slot_full';
+      const rowStyle = slotFull ? ' style="opacity:0.45"' : '';
+      const sideLabel = slotFull
+        ? `${o.side} <span style="font-size:0.75em; opacity:0.8">(slot_full)</span>`
+        : o.side;
+      html += `<div class="order-row"${rowStyle}>
+        <span class="${sideClass}"><strong>${sideLabel}</strong></span>
         <span><strong>${o.symbol}</strong></span>
         <span style="color:var(--text2)">${bucketShort}</span>
         <span style="color:var(--text2)">${rankDisplay}</span>
