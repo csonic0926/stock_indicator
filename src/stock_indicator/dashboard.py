@@ -785,15 +785,34 @@ function render(state, futu) {
   const adaptive = state.adaptive_state || {};
   const positions = state.signal_trades || {};
 
-  // Adaptive stats — from adaptive_state.json (System A), not log
+  // Per-bucket TP / SL derived from the most recent [FROZEN_TP_SL]
+  // emission per bucket. The legacy global tp_pct / sl_pct on
+  // adaptive_state ignored per-bucket sigma (fish_head 0.75 vs
+  // fish_tail 0.0) and per-bucket SL floors, so displaying it was
+  // misleading. cron no longer writes those globals.
   let html = '';
-  const a_tp = adaptive.tp_pct != null ? (adaptive.tp_pct * 100).toFixed(2) + '%' : '—';
-  const a_sl = adaptive.sl_pct != null ? (adaptive.sl_pct * 100).toFixed(2) + '%' : '—';
-  html += stat('TP', a_tp, 'positive');
-  html += stat('SL', a_sl, 'negative');
-  if (log.rolling_mp != null) html += stat('Rolling MP', '+' + pct(log.rolling_mp) + ' (n=' + log.rolling_mp_n + ')', 'positive');
-  if (log.rolling_ml != null) html += stat('Rolling ML', '-' + pct(log.rolling_ml) + ' (n=' + log.rolling_ml_n + ')', 'negative');
-  html += stat('Window', '20 trades');
+  const latestByBucket = {};
+  for (const e of (log.frozen_entries || [])) {
+    const b = e.bucket;
+    if (!b) continue;
+    if (!latestByBucket[b] || (e.entry_date || '') > (latestByBucket[b].entry_date || '')) {
+      latestByBucket[b] = e;
+    }
+  }
+  const bucketKeys = Object.keys(latestByBucket).sort();
+  if (bucketKeys.length === 0) {
+    html += stat('TP / SL', 'no frozen entries yet', '');
+  } else {
+    for (const b of bucketKeys) {
+      const e = latestByBucket[b];
+      const short = b.replace('_production', '').replace('_explore', '');
+      const tp_v = e.tp_pct != null ? '+' + (e.tp_pct * 100).toFixed(2) + '%' : '—';
+      const sl_v = e.sl_pct != null ? '-' + (e.sl_pct * 100).toFixed(2) + '%' : '—';
+      html += stat(short + ' TP', tp_v, 'positive');
+      html += stat(short + ' SL', sl_v, 'negative');
+    }
+  }
+  html += stat('Window', '20 winners + 20 losers');
 
   // Full rolling distribution — winners + losers, sorted by magnitude.
   // The frozen TP/SL formula reads these directly; surfacing them lets

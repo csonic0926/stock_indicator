@@ -990,6 +990,15 @@ def compute_today_signals(
             maximum_symbols_per_group=bucket_def.maximum_symbols_per_group,
             minimum_average_dollar_volume_ratio=bucket_def.minimum_average_dollar_volume_ratio,
             allowed_symbols=allowed_symbols,
+            # Live cron uses signal-day convention (entry_date == the
+            # bar the strategy fired on). _fill_deferred_pcts later
+            # adds BDay(1) to fetch the actual T+1 open as the fill
+            # price, so the rolling pool gets the right raw_pct. Sim's
+            # shifted (fill-day) convention applies inside
+            # run_complex_simulation; compute_today_signals is the
+            # live emitter and matches Cal's "today the signal fired"
+            # mental model + the legacy find_history_signal output.
+            use_unshifted_signals=True,
         )
         per_bucket_signals[bucket_label] = signals
         log_lines.append(f"--- {bucket_def.strategy_identifier} ---")

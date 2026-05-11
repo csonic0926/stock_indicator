@@ -11,10 +11,8 @@ SOURCE_DIRECTORY="${SRC:-$REPOSITORY_ROOT/src}"
 VIRTUAL_ENVIRONMENT_DIRECTORY="${VENV:-$REPOSITORY_ROOT/venv}"
 
 # Production multi-bucket config (live).  fish_head_vacuum_turn +
-# fish_tail_blow_off_top sharing max_position_count=9 / starting 90k /
-# margin 1.5.  See data/multi_bucket_production.json for per-bucket
-# narrative-correct flags (pre_cross_signal_lookback / tp_regime_adjust /
-# tp_slope_amplify).
+# fish_tail_blow_off_top with per-bucket sigma + edge SL settings.
+# data_source = "daily" -> data/stock_data/ (yfinance daily cache).
 PRODUCTION_CONFIG="$REPOSITORY_ROOT/data/multi_bucket_production.json"
 
 # Set up logging directories
@@ -32,10 +30,14 @@ START_DATE="$("$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -c 'from datetime impo
 # Update historical data and record signals
 "$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage update_all_data_from_yf "$START_DATE" "$LATEST_DATE" >> "$LOG_DIRECTORY/cron_stdout.log" 2>&1
 
-{
-  "$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage \
-      multi_bucket_daily_signal "$PRODUCTION_CONFIG" "$LATEST_DATE"
-  echo ""
-  "$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage compute_adaptive_tp_sl
-  "$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage show_positions
-} | tee -a "$LOG_DIRECTORY/cron_stdout.log" >> "$DATE_LOG_DIRECTORY/$LATEST_DATE.log"
+# Multi-bucket signal generation. compute_today_signals emits one
+# [FROZEN_TP_SL] line per accepted entry — that line carries the
+# bucket-specific tp_pct / sl_pct that place_tp_sl reads next morning.
+# compute_adaptive_tp_sl + show_positions were the legacy single-bucket
+# display path; per-bucket frozen values made them misleading (the
+# global TP/SL ignored per-bucket sigma / fixed_sl), so they are no
+# longer invoked.
+"$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage \
+    multi_bucket_daily_signal "$PRODUCTION_CONFIG" "$LATEST_DATE" \
+    2>&1 | tee -a "$LOG_DIRECTORY/cron_stdout.log" \
+    >> "$DATE_LOG_DIRECTORY/$LATEST_DATE.log"
