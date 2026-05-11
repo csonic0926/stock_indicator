@@ -675,6 +675,10 @@ HTML_PAGE = """<!DOCTYPE html>
   .bar.win { background: var(--green); }
   .bar.loss { background: var(--red); }
   .date-nav { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .tab-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text2); padding: 2px 10px;
+    border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 0.85em; margin-right: 4px; }
+  .tab-btn:hover { border-color: var(--blue); color: var(--blue); }
+  .tab-btn.active { border-color: var(--blue); color: var(--blue); background: rgba(88, 166, 255, 0.1); }
   .date-btn { background: var(--surface); border: 1px solid var(--border); color: var(--text2); padding: 4px 10px;
     border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 0.85em; }
   .date-btn:hover { border-color: var(--blue); color: var(--blue); }
@@ -749,7 +753,13 @@ HTML_PAGE = """<!DOCTYPE html>
 
   <!-- Rolling Trade History -->
   <div class="card full" id="trades-card">
-    <h2>Rolling Trade History (last 20)</h2>
+    <h2>Rolling Trade History
+      <span style="font-size:0.7em; font-weight:normal; margin-left:8px">
+        <button class="tab-btn active" data-tab="all" onclick="setTradeTab('all')">All</button>
+        <button class="tab-btn" data-tab="winners" onclick="setTradeTab('winners')">Winners</button>
+        <button class="tab-btn" data-tab="losers" onclick="setTradeTab('losers')">Losers</button>
+      </span>
+    </h2>
     <div id="trades-content"></div>
   </div>
 </div>
@@ -771,6 +781,46 @@ function stat(label, value, cls='') {
 
 function tag(text, type) {
   return `<span class="tag ${type}">${text}</span>`;
+}
+
+// Rolling Trade History — cached trade list + tab filter.
+let __all_trades_cache = [];
+let __trade_tab = 'all';
+function setTradeTab(tab) {
+  __trade_tab = tab;
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
+  renderTrades();
+}
+function renderTrades() {
+  let trades = (__all_trades_cache || []).slice();
+  if (__trade_tab === 'winners') {
+    trades = trades.filter(t => t.raw_pct != null && t.raw_pct > 0);
+  } else if (__trade_tab === 'losers') {
+    trades = trades.filter(t => t.raw_pct != null && t.raw_pct < 0);
+  }
+  if (trades.length === 0) {
+    $('#trades-content').innerHTML = '<div style="color:var(--text2)">No trade history</div>';
+    return;
+  }
+  let html = '<table><tr><th>Symbol</th><th>Bucket</th><th>Entry</th><th>Exit</th><th>P/L %</th><th></th></tr>';
+  for (const t of [...trades].reverse()) {
+    const rawPct = t.raw_pct != null ? (t.raw_pct * 100) : null;
+    const barWidth = rawPct != null ? Math.min(Math.abs(rawPct) * 8, 120) : 0;
+    const barType = rawPct != null && rawPct >= 0 ? 'win' : 'loss';
+    const bucketShort = (t.bucket || '').replace('_production', '').replace('_explore', '') || '—';
+    html += `<tr>
+      <td><strong>${t.symbol}</strong></td>
+      <td style="color:var(--text2)">${bucketShort}</td>
+      <td>${t.entry_date||'—'}</td>
+      <td>${t.exit_date||'—'}</td>
+      <td class="${plClass(rawPct)}">${rawPct != null ? (rawPct >= 0 ? '+' : '') + rawPct.toFixed(2) + '%' : '—'}</td>
+      <td><div class="bar-container"><div class="bar ${barType}" style="width:${barWidth}px"></div></div></td>
+    </tr>`;
+  }
+  html += '</table>';
+  $('#trades-content').innerHTML = html;
 }
 
 // Build symbol -> bucket short-name map from frozen_entries (today's
@@ -842,28 +892,12 @@ function render(state, futu) {
       html += stat(short + ' SL', sl_v, 'negative');
     }
   }
-  html += stat('Window', '20 winners + 20 losers');
-
-  // Full rolling distribution — winners + losers, sorted by magnitude.
-  // The frozen TP/SL formula reads these directly; surfacing them lets
-  // Cal eyeball regime drift without crawling JSON.
-  const winners = (adaptive.winners || []).slice();
-  const losers = (adaptive.losers || []).slice();
-  if (winners.length > 0 || losers.length > 0) {
-    html += '<div style="margin-top:12px; padding-top:8px; border-top:1px solid var(--border); font-size:0.8em; color:var(--text2)">Rolling pool (last 20 each, signed)</div>';
-    if (winners.length > 0) {
-      winners.sort((a, b) => b - a);
-      html += '<div style="margin-top:4px"><span style="color:var(--text2); font-size:0.85em">Winners (n=' + winners.length + '): </span>';
-      html += winners.map(w => '<span class="positive" style="margin-right:6px; font-size:0.85em">+' + (w*100).toFixed(2) + '%</span>').join('');
-      html += '</div>';
-    }
-    if (losers.length > 0) {
-      losers.sort((a, b) => a - b);  // most negative first
-      html += '<div style="margin-top:4px"><span style="color:var(--text2); font-size:0.85em">Losers (n=' + losers.length + '): </span>';
-      html += losers.map(l => '<span class="negative" style="margin-right:6px; font-size:0.85em">' + (l*100).toFixed(2) + '%</span>').join('');
-      html += '</div>';
-    }
-  }
+  // Pool size: winners + losers deque length (these feed the frozen
+  // TP/SL formula). closed_trades carries the full symbol/date/pct
+  // records and drives the table view below.
+  const winners = (adaptive.winners || []);
+  const losers = (adaptive.losers || []);
+  html += stat('Pool', `${winners.length} winners + ${losers.length} losers`);
   $('#adaptive-stats').innerHTML = html;
 
   // Account
@@ -935,27 +969,9 @@ function render(state, futu) {
   }
   $('#positions-content').innerHTML = html;
 
-  // Trade history
-  const trades = adaptive.closed_trades || [];
-  if (trades.length > 0) {
-    html = '<table><tr><th>Symbol</th><th>Entry</th><th>Exit</th><th>P/L %</th><th></th></tr>';
-    for (const t of [...trades].reverse()) {
-      const rawPct = t.raw_pct != null ? (t.raw_pct * 100) : null;
-      const barWidth = rawPct != null ? Math.min(Math.abs(rawPct) * 8, 120) : 0;
-      const barType = rawPct != null && rawPct >= 0 ? 'win' : 'loss';
-      html += `<tr>
-        <td><strong>${t.symbol}</strong></td>
-        <td>${t.entry_date||'—'}</td>
-        <td>${t.exit_date||'—'}</td>
-        <td class="${plClass(rawPct)}">${rawPct != null ? (rawPct >= 0 ? '+' : '') + rawPct.toFixed(2) + '%' : '—'}</td>
-        <td><div class="bar-container"><div class="bar ${barType}" style="width:${barWidth}px"></div></div></td>
-      </tr>`;
-    }
-    html += '</table>';
-  } else {
-    html = '<div style="color:var(--text2)">No trade history</div>';
-  }
-  $('#trades-content').innerHTML = html;
+  // Trade history — cache full list, render via setTradeTab.
+  __all_trades_cache = adaptive.closed_trades || [];
+  renderTrades();
 
   // Date nav
   html = '';
