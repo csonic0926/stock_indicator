@@ -18,7 +18,7 @@
     "min_hold_tp": 1,
     "override_min_hold_sl_only": true,
     "min_hold_sl": 1,
-    "disable_sl_trigger": false,
+    "disable_sl_trigger": true,
     "delayed_rolling_update": true,
     "tp_regime_adjust": false,
     "tp_regime_ratio_min": 0.5,
