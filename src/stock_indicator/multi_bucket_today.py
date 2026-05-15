@@ -949,10 +949,11 @@ def compute_today_signals(
         {schema_version, winners, losers, pending_rolling, closed_trades}
     Both are mutated in place; caller is responsible for atomic writes.
 
-    Returns a `TodaySignalsResult` with the post-day signal_trades shape,
+    Returns a `TodaySignalsResult` with the post-day virtual signal ledger,
     accepted/rejected entry records, and log lines that the caller writes
-    to the cron log so System B can grep `[FROZEN_TP_SL]` markers for
-    per-position TP lookup.
+    to the cron log.  The log is the dashboard contract: it must contain all
+    strategy entry/exit signals plus the frozen TP/SL data needed for order
+    previews.  Broker/Futu position reconciliation happens outside cron.
     """
     if config.adaptive_tp_sl is None:
         raise ValueError("adaptive_tp_sl is required for today-slice signal generation")
@@ -979,6 +980,9 @@ def compute_today_signals(
     # Step B. Per-bucket signal generation via compute_signals_for_date.
     # ------------------------------------------------------------------
     per_bucket_signals: Dict[str, Dict[str, Any]] = {}
+    dashboard_exit_symbols: List[str] = []
+    dashboard_exit_metadata_by_symbol: Dict[str, List[Tuple[str, str]]] = {}
+    dashboard_entry_signal_lines: List[str] = []
     for bucket_label, bucket_def in config.bucket_definitions.items():
         signals = strategy.compute_signals_for_date(
             data_directory=data_directory,
@@ -999,12 +1003,29 @@ def compute_today_signals(
             # live emitter and matches Cal's "today the signal fired"
             # mental model + the legacy find_history_signal output.
             use_unshifted_signals=True,
+            exit_alpha_factor=bucket_def.exit_alpha_factor,
         )
         per_bucket_signals[bucket_label] = signals
         log_lines.append(f"--- {bucket_def.strategy_identifier} ---")
         log_lines.append(f"filtered symbols: {signals.get('filtered_symbols', [])}")
         log_lines.append(f"entry signals: {signals.get('entry_signals', [])}")
         log_lines.append(f"exit signals: {signals.get('exit_signals', [])}")
+        for entry_symbol in signals.get("entry_signals", []):
+            dashboard_entry_signal_lines.append(
+                f"[ENTRY_SIGNAL] bucket={bucket_label} "
+                f"strategy_id={bucket_def.strategy_identifier} "
+                f"symbol={entry_symbol}"
+            )
+        for exit_symbol in signals.get("exit_signals", []):
+            if exit_symbol not in dashboard_exit_metadata_by_symbol:
+                dashboard_exit_symbols.append(exit_symbol)
+                dashboard_exit_metadata_by_symbol[exit_symbol] = []
+            exit_metadata = (
+                bucket_label,
+                str(bucket_def.strategy_identifier),
+            )
+            if exit_metadata not in dashboard_exit_metadata_by_symbol[exit_symbol]:
+                dashboard_exit_metadata_by_symbol[exit_symbol].append(exit_metadata)
 
     # ------------------------------------------------------------------
     # Step C. Process held-position exits per bucket. Today's signal
@@ -1013,7 +1034,7 @@ def compute_today_signals(
     # ------------------------------------------------------------------
     new_held_per_strategy: Dict[str, List[Dict[str, str]]] = {}
     same_day_close_count_global = 0
-    all_exit_symbols_global: List[str] = []
+    virtual_closed_symbols_global: List[str] = []
     for bucket_label, bucket_def in config.bucket_definitions.items():
         strategy_identifier = bucket_def.strategy_identifier
         held_for_strategy = held_positions.get(strategy_identifier, [])
@@ -1058,7 +1079,7 @@ def compute_today_signals(
             log_lines.append(
                 f"[exit] bucket={bucket_label} symbols={bucket_exit_messages}"
             )
-            all_exit_symbols_global.extend(bucket_exit_messages)
+            virtual_closed_symbols_global.extend(bucket_exit_messages)
 
     # ------------------------------------------------------------------
     # Step D. Flush pending_rolling for entries strictly older than today.
@@ -1265,11 +1286,33 @@ def compute_today_signals(
         f"rejected: {[(record.symbol, record.bucket_label, reason) for record, reason in rejected_records]}"
     )
 
-    # Machine-readable per-exit log lines (replaces flat BUY/SELL summary).
-    # Each exit emits one line; downstream parsers (dashboard, place_tp_sl)
-    # read [EXIT_SIGNAL] / [FROZEN_TP_SL] prefixes instead of comma lists.
-    for exit_symbol in all_exit_symbols_global:
-        log_lines.append(f"[EXIT_SIGNAL] symbol={exit_symbol}")
+    # Machine-readable signal lines for dashboard.  These are pure strategy
+    # signals over the filtered universe, not real-position decisions.  The
+    # dashboard/order layer cross-references these symbols with Futu positions
+    # before presenting or sending any order.
+    log_lines.extend(dashboard_entry_signal_lines)
+    for exit_symbol in dashboard_exit_symbols:
+        metadata_values = dashboard_exit_metadata_by_symbol.get(exit_symbol, [])
+        bucket_text = ",".join(bucket_label for bucket_label, _ in metadata_values)
+        strategy_text = ",".join(
+            strategy_identifier for _, strategy_identifier in metadata_values
+        )
+        log_lines.append(
+            f"[EXIT_SIGNAL] symbol={exit_symbol} "
+            f"buckets={bucket_text} strategies={strategy_text}"
+        )
+
+    if virtual_closed_symbols_global:
+        log_lines.append(
+            f"[VIRTUAL_CLOSED_FOR_ROLLING] symbols={virtual_closed_symbols_global}"
+        )
+
+    log_lines.append(
+        f"[ROLLING_TP_SL_STATE] winners={len(state.get('winners', []))} "
+        f"losers={len(state.get('losers', []))} "
+        f"pending_rolling={len(state.get('pending_rolling', []))} "
+        f"closed_trades={len(state.get('closed_trades', []))}"
+    )
 
     for record in accepted_records:
         slope_text = (

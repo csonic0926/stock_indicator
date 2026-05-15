@@ -1,0 +1,27 @@
+[multi_bucket_daily_signal mode=live state=adaptive_state.json]
+[multi_bucket_daily_signal] eval_date=2026-05-14 max_position_count=6 buckets=['fish_head_production', 'fish_tail_explore']
+--- fish_head_vacuum_turn ---
+filtered symbols: [('NVDA', 6), ('TSLA', 2), ('MU', 6), ('SNDK', 6), ('MSFT', 6), ('AAPL', 6), ('AMZN', 9), ('XOM', 4), ('MSTR', 11), ('JPM', 11), ('LLY', 10), ('UNH', 11), ('ASML', 3), ('LRCX', 3), ('CVX', 4), ('HOOD', 11), ('WMT', 9), ('COIN', 11), ('BE', 3), ('GLW', 3), ('RKLB', 3), ('COST', 9), ('JNJ', 10), ('ABBV', 10), ('PG', 5), ('HD', 9), ('ASTS', 7), ('ABT', 10), ('VZ', 7), ('COP', 4), ('TMUS', 7), ('LIN', 5), ('KO', 1), ('MRK', 10), ('T', 7), ('MCD', 9), ('OXY', 4), ('SPOT', 7), ('PEP', 1), ('CEG', 8), ('VLO', 4), ('LNG', 8), ('NEE', 8), ('PM', 1), ('OKLO', 8), ('VST', 8), ('MO', 1), ('CF', 5), ('F', 2), ('LYB', 5), ('DOW', 5), ('MDLZ', 1), ('GM', 2), ('RIVN', 2), ('PCAR', 2)]
+entry signals: ['VST']
+exit signals: ['BA', 'WBD', 'MDLZ', 'MCD', 'PFE', 'SPOT', 'NVO', 'APD', 'MU']
+--- fish_tail_blow_off_top ---
+filtered symbols: [('NVDA', 6), ('TSLA', 2), ('MU', 6), ('SNDK', 6), ('MSFT', 6), ('AAPL', 6), ('AMZN', 9), ('XOM', 4), ('MSTR', 11), ('JPM', 11), ('LLY', 10), ('UNH', 11), ('ASML', 3), ('LRCX', 3), ('CVX', 4), ('HOOD', 11), ('WMT', 9), ('COIN', 11), ('BE', 3), ('GLW', 3), ('RKLB', 3), ('COST', 9), ('JNJ', 10), ('ABBV', 10), ('PG', 5), ('HD', 9), ('ASTS', 7), ('ABT', 10), ('VZ', 7), ('COP', 4), ('TMUS', 7), ('LIN', 5), ('KO', 1), ('MRK', 10), ('T', 7), ('MCD', 9), ('OXY', 4), ('SPOT', 7), ('PEP', 1), ('CEG', 8), ('VLO', 4), ('LNG', 8), ('NEE', 8), ('PM', 1), ('OKLO', 8), ('VST', 8), ('MO', 1), ('CF', 5), ('F', 2), ('LYB', 5), ('DOW', 5), ('MDLZ', 1), ('GM', 2), ('RIVN', 2), ('PCAR', 2)]
+entry signals: []
+exit signals: ['BA', 'WBD', 'MDLZ', 'MCD', 'PFE', 'SPOT', 'NVO', 'APD', 'MU']
+--- multi-bucket slot allocation ---
+max_position_count=6 held_before_today=7 same_day_closes=0
+accepted: [('VST', 'fish_head_production')]
+rejected: []
+[ENTRY_SIGNAL] bucket=fish_head_production strategy_id=fish_head_vacuum_turn symbol=VST
+[EXIT_SIGNAL] symbol=BA buckets=fish_head_production,fish_tail_explore strategies=fish_head_vacuum_turn,fish_tail_blow_off_top
+[EXIT_SIGNAL] symbol=WBD buckets=fish_head_production,fish_tail_explore strategies=fish_head_vacuum_turn,fish_tail_blow_off_top
+[EXIT_SIGNAL] symbol=MDLZ buckets=fish_head_production,fish_tail_explore strategies=fish_head_vacuum_turn,fish_tail_blow_off_top
+[EXIT_SIGNAL] symbol=MCD buckets=fish_head_production,fish_tail_explore strategies=fish_head_vacuum_turn,fish_tail_blow_off_top
+[EXIT_SIGNAL] symbol=PFE buckets=fish_head_production,fish_tail_explore strategies=fish_head_vacuum_turn,fish_tail_blow_off_top
+[EXIT_SIGNAL] symbol=SPOT buckets=fish_head_production,fish_tail_explore strategies=fish_head_vacuum_turn,fish_tail_blow_off_top
+[EXIT_SIGNAL] symbol=NVO buckets=fish_head_production,fish_tail_explore strategies=fish_head_vacuum_turn,fish_tail_blow_off_top
+[EXIT_SIGNAL] symbol=APD buckets=fish_head_production,fish_tail_explore strategies=fish_head_vacuum_turn,fish_tail_blow_off_top
+[EXIT_SIGNAL] symbol=MU buckets=fish_head_production,fish_tail_explore strategies=fish_head_vacuum_turn,fish_tail_blow_off_top
+[VIRTUAL_CLOSED_FOR_ROLLING] symbols=['MCD']
+[ROLLING_TP_SL_STATE] winners=20 losers=20 pending_rolling=0 closed_trades=1
+[FROZEN_TP_SL] entry_date=2026-05-14 bucket=fish_head_production strategy_id=fish_head_vacuum_turn symbol=VST dollar_volume_rank=45 tp_pct=0.065831 sl_pct=0.041702 rolling_mp=0.048994 slope_60=-0.1628 near_delta=-0.0104 min_hold_tp=1 disable_sl_trigger=True

@@ -2533,6 +2533,7 @@ def compute_signals_for_date(
     use_unshifted_signals: bool = False,
     near_delta_range: tuple[float, float] | None = None,
     price_tightness_range: tuple[float, float] | None = None,
+    exit_alpha_factor: float | None = None,
 ) -> Dict[str, List[str]]:
     """Compute entry/exit signals on ``evaluation_date`` using simulation filters.
 
@@ -2778,6 +2779,8 @@ def compute_signals_for_date(
                     kwargs["near_delta_range"] = near_delta_range
                 if price_tightness_range is not None:
                     kwargs["price_tightness_range"] = price_tightness_range
+                if exit_alpha_factor is not None:
+                    kwargs["exit_alpha_factor"] = exit_alpha_factor
         table[base_name](frame, include_raw_signals=include_raw_signals, **kwargs)
         if base_name != full_name:
             rename_mapping = {
@@ -3639,6 +3642,7 @@ def attach_ema_sma_cross_testing_signals(
             heavy_cross_down.shift(1, fill_value=False)
         )
     else:
+        heavy_cross_down = None
         price_data_frame["ema_sma_cross_testing_exit_signal"] = price_data_frame[
             "ema_sma_cross_exit_signal"
         ]
@@ -3661,9 +3665,14 @@ def attach_ema_sma_cross_testing_signals(
                 & above_price_ratio_raw_ok.fillna(False)
             )
         )
-        price_data_frame["ema_sma_cross_testing_raw_exit_signal"] = (
-            price_data_frame["ema_sma_cross_raw_exit_signal"]
-        )
+        if heavy_cross_down is not None:
+            price_data_frame["ema_sma_cross_testing_raw_exit_signal"] = (
+                heavy_cross_down
+            )
+        else:
+            price_data_frame["ema_sma_cross_testing_raw_exit_signal"] = (
+                price_data_frame["ema_sma_cross_raw_exit_signal"]
+            )
 
 
 def attach_ema_shift_cross_with_slope_signals(

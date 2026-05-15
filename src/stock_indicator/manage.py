@@ -3760,8 +3760,8 @@ class StockShell(cmd.Cmd):
             "signal_trades.json is owned by the order layer (dashboard)\n"
             "and is no longer touched by cron. With --shadow, all I/O\n"
             "is suffixed _shadow so the live cron path is untouched. Emits\n"
-            "[FROZEN_TP_SL] log lines that System B parses to place\n"
-            "per-position TP orders the next morning.\n"
+            "[ENTRY_SIGNAL], [EXIT_SIGNAL], [FROZEN_TP_SL], and\n"
+            "[ROLLING_TP_SL_STATE] log lines for the dashboard/order layer.\n"
         )
 
     def do_compute_adaptive_tp_sl(self, argument_line: str) -> None:  # noqa: D401
