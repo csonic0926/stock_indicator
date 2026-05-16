@@ -101,6 +101,12 @@ When evaluating a candidate scenario, gather evidence for each axis:
 - Inflation constraint (cutting/QE while inflation > 3-4% is politically explosive — Fed will hesitate)
 - Banking sector health (if banks ARE the patient, Fed has more friction)
 - Fiscal capacity (TARP-style backstop politically feasible?)
+- **Pre-condition: is a shock catalyst already visible?** (Bear Stearns
+  precursor, repo freeze, mark-to-market cliff approaching, FSB
+  active-crisis warning, etc.) — if NO and banking is healthy, the
+  Duration axis collapses to Fast regardless of the other inputs (see
+  Step 3 gate). Fed paralysis is a contingent risk that only matters
+  when paralysis must be tested.
 
 **Breadth axis inputs** (= sectoral refuge availability):
 - Where does the stress originate? Single sector or cross-cutting (banking system)?
@@ -152,7 +158,31 @@ Substitute current year. Use `<>` placeholders for scenario specifics.
 
 ### Step 3 — Score the Duration axis (Fed intervention speed)
 
-Walk the duration-axis inputs. For each, mark from current macro state:
+**The semantic question this axis answers**: *"If an external shock hits
+tomorrow that requires Fed to act as market maker of last resort, can
+Fed deliver that rescue fast enough to keep institutional bid net-absence
+under ~1-2 months?"*
+
+This is NOT "is Fed's policy stance loose or tight". 2022 had 0% rates
+and 6.8% inflation but Fed was the active agent driving an orderly hike
+cycle — no rescue was needed and none failed.
+
+**Gate — apply before counting constraints:**
+
+If BOTH of these hold:
+- Banking system health = "banks rescuing" (no visible mark-down stress,
+  no failures, big banks providing rather than receiving liquidity)
+- No visible external shock catalyst already materialising (no Bear
+  Stearns event, no Lehman-precursor, no repo freeze, no obvious mark-
+  to-market cliff approaching)
+
+→ classify Duration as **Fast (0)** regardless of the constraint table
+below. Fed paralysis only matters when Fed is needed; absent a shock
+plus healthy banks, low-rate-space + high-inflation alone don't trigger
+the failure path.
+
+**Otherwise** (banking already stressed OR shock catalyst visible):
+walk the full constraint table.
 
 | Input | Favorable (Fed fast) | Constrained | Severely constrained |
 |---|---|---|---|
@@ -166,6 +196,14 @@ Tally constraints (excluding rate space if balance sheet still has room and vice
 - 0-1 constraint flagged → **Fast** (axis score 0)
 - 2-3 flagged → **Medium** (axis score 25)
 - 4-5 flagged → **Slow** (axis score 50)
+
+**Gate sanity check examples** (from retrospective backtest):
+- Q4 2021 pre-2022: rate 0% + CPI 6.8% looks Slow, but banking healthy
+  + no shock catalyst → **Fast (0)** by gate. Outcome: fh +24%. ✓
+- Q2 2008 pre-GFC: Bear Stearns failed Q1, banks ARE the patient → gate
+  doesn't apply → walk table → 4 constraints → **Slow (50)**. ✓
+- Q4 2019 pre-COVID: banking healthy + no visible shock → **Fast (0)**.
+  COVID itself was exogenous and unforecastable. Outcome: fh +24%. ✓
 
 ### Step 4 — Score the Breadth axis (sectoral refuge availability)
 
