@@ -170,37 +170,84 @@ The user wants advance warning. List 3-5 specific data points that, if they mate
 
 ## Output format template
 
+This is the canonical output for the monthly automation run. Keep the
+section order and headers identical so downstream parsing stays stable.
+
 ```
-**[scenario name] — Survival Assessment**
+**[scenario name or "Monthly Macro Snapshot YYYY-MM-DD"] — Survival Assessment**
+
+## Risk Score: <0-100>
+Composite scalar derived per the scoring rubric below.
+
+## Survival Probability
+P(survive) = X% — fh bucket year-loss < ~-20%
+
+## Recommendation: <continue | reduce / risk-limit | stop>
+One-line rationale tying recommendation to risk score bracket.
+
+## Key Reasons
+- 3-5 bullets, each pointing to specific macro evidence and what it
+  implies for the system's failure mode (institutional cover-buy
+  durability).
 
 ## Macro state snapshot
-| Dimension | 2008 condition | Current |
-|---|---|---|
-| Leveraged bubble | ... | ... |
-| Banks as patient | ... | ... |
-| ... | ... | ... |
+| Dimension | 2008 condition | Current | Signature ✓/⚠️/✗ |
+|---|---|---|---|
+| Leveraged bubble in core financial sector | ... | ... | ✓ |
+| Banks ARE the patient | ... | ... | ⚠️ |
+| Counterparty opacity | ... | ... | ... |
+| Fed capacity constrained | ... | ... | ... |
+| Slow visible unwind | ... | ... | ... |
+| No sector rotation possible | ... | ... | ... |
 
 ## Fed intervention capacity
 - Rate space: ...
 - Balance sheet space: ...
 - Inflation constraint: ...
-- Verdict: <can act / partially / paralyzed>
+- Banking sector health: ...
+- Verdict: <can act | partially constrained | paralyzed>
 
 ## Path branches
-A. Soft landing — P(~X%): ...
-B. Sector unwind — P(~Y%): ...
-C. 2008-class — P(~Z%): ...
-
-**P(survive) ≈ X+Y% (fh year-loss < ~-20%)**
+A. Soft landing — P(~X%): brief description
+B. Sector unwind — P(~Y%): brief description
+C. 2008-class — P(~Z%): brief description
 
 ## Trigger signals to monitor
-- ...
+- Specific data point + threshold + what shift it implies
 - ...
 
 ## Sources
 - [Title](URL)
+- [Title](URL)
 - ...
 ```
+
+## Scoring rubric (Risk Score 0-100)
+
+Composite score is signature_count_component + fed_paralysis_component:
+
+**Signature component** (0-60): sum of signatures from the macro table
+- Each ✓ signature: 10 points
+- Each ⚠️ partial: 5 points
+- Each ✗ absent: 0 points
+- Max: 6 × 10 = 60
+
+**Fed paralysis component** (0-40):
+- Fed "can act" (rate space + balance sheet + inflation room + healthy banks): 0
+- One constraint flagged: 10
+- Two constraints flagged: 20
+- Three constraints flagged: 30
+- "paralyzed" (all four constrained): 40
+
+**Recommendation thresholds**:
+| Risk Score | Recommendation | Operational implication |
+|---:|---|---|
+| 0-29 | **continue** | normal operation, no changes |
+| 30-59 | **reduce / risk-limit** | consider lowering max_positions, tightening dollar volume filter, or pausing the most stress-exposed bucket (fh) — final call is Cal's |
+| 60-100 | **stop** | the macro state is approaching 2008-class; pause new fh entries until at least one signature/Fed constraint clears — final call is Cal's |
+
+Always include the numeric score, the bracket it falls in, and the
+recommendation — even when the recommendation is "continue".
 
 ## Calibration anchors
 
