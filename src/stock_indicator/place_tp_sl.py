@@ -89,6 +89,12 @@ def _log_order(order_data: dict) -> None:
     log_path.write_text(json.dumps(orders, indent=2), encoding="utf-8")
 
 
+def _entry_disables_stop_loss_trigger(entry: Dict[str, Any]) -> bool:
+    """Return whether live SL placement is disabled for this accepted entry."""
+
+    return bool(entry.get("disable_sl_trigger", False))
+
+
 def main() -> None:
     from datetime import datetime
 
@@ -247,6 +253,13 @@ def main() -> None:
         entry = accepted_entries.get(code)
         if entry is None:
             # Already warned in TP loop; skip silently here.
+            continue
+
+        if _entry_disables_stop_loss_trigger(entry):
+            LOGGER.info(
+                "%s: disable_sl_trigger=True, skip SL placement",
+                symbol,
+            )
             continue
 
         if code in existing_sl_codes:

@@ -1406,6 +1406,7 @@ def compute_today_signals(
                     "min_hold_sl": _resolve_min_hold_sl_for_bucket(
                         new_record.bucket_label
                     ),
+                    "disable_sl_trigger": bool(adaptive.disable_sl_trigger),
                     "slope_60": (
                         round(new_record.slope_60, 6)
                         if new_record.slope_60 is not None else None
@@ -1441,6 +1442,13 @@ def compute_today_signals(
                                 )
                             ),
                         }
+                    if "disable_sl_trigger" not in prior:
+                        prior = {
+                            **prior,
+                            "disable_sl_trigger": bool(
+                                adaptive.disable_sl_trigger
+                            ),
+                        }
                     persisted_entries.append(prior)
     state["accepted_entries"] = persisted_entries
 
@@ -1451,4 +1459,3 @@ def compute_today_signals(
         rejected_records=rejected_records,
         log_lines=log_lines,
     )
-

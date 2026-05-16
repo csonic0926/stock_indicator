@@ -185,6 +185,10 @@ def test_compute_today_signals_emits_all_dashboard_exit_signals(
         log_line.startswith("[FROZEN_TP_SL]")
         for log_line in result.log_lines
     ) == 2
+    assert [
+        entry["disable_sl_trigger"]
+        for entry in state["accepted_entries"]
+    ] == [True, True]
 
 
 def test_exit_alpha_factor_uses_recursive_simulation_formula() -> None:
