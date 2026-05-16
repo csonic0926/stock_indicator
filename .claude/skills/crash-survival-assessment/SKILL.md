@@ -52,60 +52,80 @@ System runs 3 buckets concurrently:
 
 ### The structural failure mode (concentrate here)
 
-System fails when **institutional bid is absent for sustained period (>>weeks, into months)** because:
+System fails when **institutional cover-buy behaviour is net-absent
+across fh's detection universe for sustained period (~1-2 months+)**
+because:
+
 1. vacuum_turn pattern keeps visually matching (CTA forced sell ✓, retail panic ✓)
 2. But 第二層假設 (institutional cover-buy materializes) **doesn't fire**
 3. Position enters → no rebound → slides into max_hold cut → typically -25% to -50% per trade
 4. fh entries fire at 0.5/day rate during stress → universe-wide concurrent damage
 5. Signal exit is **trend-reversal cross-down detector**, NOT falling-knife exit. Cannot save losing position in sustained downtrend (single-bar event, gets swallowed by min_hold gate).
 
-**Therefore the question collapses to**: "Will institutional bid be absent for how long?"
+Note on "net-absent": institutions never literally disappear (defensives, treasuries, money markets still see flows). The clinical meaning is: **net institutional buying of vacuum-pattern dislocations is gone across the broad set of names fh would target**. For fh's purposes that is effectively "the market". Use this clinical reading, not literal "all institutions gone".
 
-### The key macro variable: Fed intervention capacity
+### Two-axis survival framework (primary reasoning tool)
 
-機構 absence duration is driven by **how fast Fed acts as market maker of last resort**.
-- Fast Fed → 機構 quickly return → V-shape → fh survives (often profits on rebound capture)
-- Slow Fed → 機構 stay sidelined → sustained deleveraging → fh dies
+Map each crash candidate onto two axes:
 
-Fed's speed is constrained by:
-- **Rate space**: how much room to cut
-- **Balance sheet space**: how much QE room before market loses faith in dollar
-- **Inflation constraint**: cutting/QE while inflation >3-4% is politically explosive
-- **Counterparty / banking sector health**: if banks themselves are the patient, Fed has more friction
+**Axis 1 — Duration**: how long is institutional bid net-absent from fh's universe?
+- **Fast** (< 1 month): Fed has rate space + balance sheet room + low inflation + healthy banks → can act as market maker of last resort within days/weeks. Examples: 2018, 2020, 2015, 1987.
+- **Medium** (1-3 months): one or two Fed constraints flagged. Partial rescue, partial pain. Examples: 2011 partial, 2022 partial.
+- **Slow** (3+ months): Fed paralyzed by inflation/banking health/exhausted tools. Examples: 2008.
 
-## Historical crash database
+**Axis 2 — Breadth**: does the stress span the full universe, or is there a sectoral refuge?
+- **Contained**: stress lives in one sector; defensives, other sectors keep institutional bid; rotation possible. Examples: 2011 (Eurozone banks), 2018 Q4, 2022 (growth-vs-value).
+- **Mixed**: spreading but with partial refuges. Examples: 2015 China shock, 2001 dot-com tail.
+- **Universal**: cross-asset / cross-sector contagion, no refuge. Examples: 2008, 2020 COVID (initially).
 
-| Crash | Trigger | Mechanism | Fed response speed | fh result |
+Cross-product grid:
+
+|                | **Fast Fed**          | **Medium Fed**         | **Slow Fed**          |
+|---|---|---|---|
+| **Contained**  | survive (2018, 2011) | survive (2022)        | survive likely (rotation works) |
+| **Mixed**      | survive (2015, 2001) | survive likely        | uncertain — case dependent |
+| **Universal**  | survive (2020, 1987) | uncertain             | **2008-class — DEATH** |
+
+**Only the bottom-right corner (Slow + Universal) is fatal.** Every other cell, at least one survival mechanism applies:
+- Fast Fed → time-based survival (institutions return before fh max_hold cuts)
+- Contained breadth → sector-rotation survival (fh still finds bid in other sectors)
+- Both → safe with margin
+
+### Inputs to the two-axis evaluation
+
+When evaluating a candidate scenario, gather evidence for each axis:
+
+**Duration axis inputs** (= Fed/external intervention speed):
+- Fed rate space (how far from zero?)
+- Fed balance sheet space (QE room without dollar credibility hit?)
+- Inflation constraint (cutting/QE while inflation > 3-4% is politically explosive — Fed will hesitate)
+- Banking sector health (if banks ARE the patient, Fed has more friction)
+- Fiscal capacity (TARP-style backstop politically feasible?)
+
+**Breadth axis inputs** (= sectoral refuge availability):
+- Where does the stress originate? Single sector or cross-cutting (banking system)?
+- Are defensives unaffected? (KO, PG, WMT type — staples should hold if breadth is contained)
+- Is there cross-asset contagion? (Equity + credit + commodities + FX all moving together)
+- Is there a hiding-place sector with institutional bid? (Energy in 2001, defensives in 2022)
+
+## Historical crash database (tagged with two-axis position)
+
+| Crash | Duration axis | Breadth axis | Trigger / mechanism | fh result |
 |---|---|---|---|---|
-| **2008 GFC** | Subprime/Lehman | **Repo market freeze + leveraged institutions FORCED to sell, can't access funding to buy back** | Slow (TARP 10/3, multiple rounds through 2009) | **-37% to -50%** (catastrophic, only failure case) |
-| **2020 COVID** | Pandemic | Dealer inventory crash, institutions briefly withdraw | **Very fast** (PDCF/SMCCF within days, "market maker of last resort") | **+24%** (caught V-shape rebound) |
-| **2018 Q4** | Fed hike scare + trade war | Brief liquidity scare, mechanical | Fast (Powell pivot January) | -0.77% (flat) |
-| **2011 Eurozone** | Greek/PIIGS debt fears | Sector-specific (European banks) | N/A (Fed not needed for US) | **+17.62%** |
-| **2015** | China devaluation | Brief vol spike | Fast | **+20.92%** |
-| **2022** | Inflation/Fed hike | Slow grind, sector rotation | N/A (deliberate hike cycle) | **+23.62%** |
-| **2002 (dot-com tail)** | Bubble unwind | Slow grind, sector rotation (tech→energy/staples) | N/A | **+23.67%** |
-| **2001 (dot-com)** | Bubble peak | Equity bubble pop, no banking crisis | Fed cut aggressively | -10.45% (mild) |
-| **1996** | EM crises | Minor | N/A | -7.57% (mild) |
-| **1994** | Fed hike shock | Bond rout | N/A | -6.47% (mild) |
+| **2008 GFC** | **Slow** (6+ months until Fed/TARP/QE fully ramped) | **Universal** (repo run, all leveraged names hit, banks ARE patient) | Subprime / Lehman / repo freeze / forced deleveraging | **-37% to -50%** (catastrophic — the only failure) |
+| **2020 COVID** | Fast (Fed acted in days: PDCF, SMCCF) | Universal initially (every risk asset sold) | Pandemic / dealer inventory crash | **+24%** (caught V-shape) |
+| **2018 Q4** | Fast (Powell pivot January) | Contained (mechanical de-risking, defensives held) | Fed hike scare + trade war | -0.77% (flat) |
+| **2011 Eurozone** | Fast (Fed not needed for US; ECB acted) | Contained (sectoral — Euro banks; US defensives fine) | Greek/PIIGS sovereign stress | **+17.62%** |
+| **2015** | Fast (rebound within weeks) | Mixed (China shock spilled into EM/commodities, US partial) | China devaluation / oil crash | **+20.92%** |
+| **2022** | Medium (deliberate hike cycle; Fed *causing* the stress) | Contained (rotation: growth → value, energy outperformed) | Inflation / Fed hikes | **+23.62%** |
+| **2002 (dot-com tail)** | Medium (slow grind 2000-02; Fed cut throughout) | Contained (tech destroyed, energy/staples rallied) | Bubble unwind, sector rotation | **+23.67%** |
+| **2001 (dot-com)** | Fast Fed cuts (550bps in 12 months) | Mixed (tech-led but eventually broader) | Equity bubble pop, no banking crisis | -10.45% (mild) |
+| **1996** | Fast | Contained (EM-only) | EM stresses (Mexico aftershock) | -7.57% (mild) |
+| **1994** | Fast | Mixed (bond rout, equity wobble) | Fed hike shock | -6.47% (mild) |
 
-(All numbers: 1994_clean baseline sim, fh bucket only, max_hold=14, exit_alpha_factor=3, no reset_hold_on_reentry. Total portfolio fh+ft+b30_35 numbers will differ — typically fh dominates loss in bad years.)
+All fh-bucket numbers: 1994_clean baseline sim, fh only, max_hold=14, exit_alpha_factor=3, no reset_hold_on_reentry. Total portfolio numbers differ (typically fh dominates the loss in bad years).
 
-**Pattern**: 唯一 catastrophic = 2008. Differentiator = Fed response speed × banking-sector-as-patient.
-
-### What macro signatures predict 2008-class crash
-
-| Signature | 2008 had it | Lookalike scenarios |
-|---|---|---|
-| Leveraged bubble in core financial sector | ✓ (MBS, CDS) | Real estate booms, private credit booms |
-| **Banks ARE the patient** (not just providers) | ✓ | When banks own the bubble assets |
-| Counterparty opacity | ✓ (CDS network) | Shadow banking, private credit opacity |
-| **Fed capacity constrained** | partially (rate cuts effective but slow) | **Inflation-constrained Fed** (stagflation) |
-| Slow visible unwind (months not days) | ✓ | Maturity walls, mark-to-market lags |
-| No sector rotation possible | ✓ (broad) | Bubble spans market vs concentrated |
-
-A crash with ALL 6 signatures = 2008-class = system likely fails.
-A crash with 0-2 signatures = like 2018 / 2011 / 2022 = system thrives.
-A crash with 3-4 signatures = uncertain; depends on speed of escalation.
+**Pattern**: only the cell (Slow Fed × Universal breadth) produces catastrophic failure. The framework predicts the historical record without exception.
 
 ## Evaluation workflow
 
@@ -130,29 +150,52 @@ Query 5: (optional) "<sector> rotation defensive vs cyclical 2026"
 
 Substitute current year. Use `<>` placeholders for scenario specifics.
 
-### Step 3 — Map to historical analog
+### Step 3 — Score the Duration axis (Fed intervention speed)
 
-Walk the 6-signature checklist (table above). For each signature, mark ✓/⚠️/✗ based on web evidence.
+Walk the duration-axis inputs. For each, mark from current macro state:
 
-Examples:
-- AI bubble + oil shock + CRE wave → check signature 1 (✓ AI), 2 (⚠️ banks via private credit), 3 (✓ private credit opacity), 4 (✓ Fed inflation-constrained), 5 (⚠️ CRE maturity wave), 6 (partial; AI rotation possible)
-- VIX spike alone → check signature 1 (depends), 2-6 generally ✗ → mild
+| Input | Favorable (Fed fast) | Constrained | Severely constrained |
+|---|---|---|---|
+| Rate space | > 300 bps above zero | 100-300 bps | < 100 bps |
+| Balance sheet | < 25% of GDP | 25-35% of GDP | > 35% of GDP |
+| Inflation | < 2.5% | 2.5-4% | > 4% |
+| Banking health | banks rescuing | mixed signals | banks ARE the patient |
+| Fiscal capacity | bipartisan TARP-style possible | partisan stalemate likely | gridlocked |
 
-### Step 4 — Estimate Fed intervention capacity
+Tally constraints (excluding rate space if balance sheet still has room and vice versa — they substitute partially). Classify:
+- 0-1 constraint flagged → **Fast** (axis score 0)
+- 2-3 flagged → **Medium** (axis score 25)
+- 4-5 flagged → **Slow** (axis score 50)
 
-Critical sub-step. Score:
-- Rate space: how far from zero?
-- Balance sheet: room to QE without dollar credibility hit?
-- Inflation print: above or below 3%?
-- Banking health: are banks the patient or the rescuer?
+### Step 4 — Score the Breadth axis (sectoral refuge availability)
 
-If all 4 favorable → Fed can act = ~2020-like rescue available
-If 1-2 constrained → Fed limited, partial rescue
-If 3-4 constrained → **Fed paralyzed** = 2008-class risk surfaces
+Evaluate breadth-axis inputs:
 
-### Step 5 — Output survival probability + branches
+| Input | Contained | Mixed | Universal |
+|---|---|---|---|
+| Stress origin | one sector | multi-sector but with refuges | banking system / cross-asset |
+| Defensives state | unaffected | mildly hit | also under pressure |
+| Cross-asset contagion | equity-only | equity + credit | equity + credit + commodities + FX |
+| Hiding-place sector | clear (e.g. energy 2001, defensives 2022) | partial | none |
 
-Always structure output as branches (don't give a single number, give the path tree):
+Classify:
+- All inputs lean "contained" → **Contained** (axis score 0)
+- Mixed signals → **Mixed** (axis score 25)
+- All inputs lean "universal" → **Universal** (axis score 50)
+
+### Step 5 — Compose risk score + recommendation
+
+Risk Score = Duration axis score + Breadth axis score (0-100).
+
+The grid (from "Two-axis survival framework"):
+- Score 0 — fast Fed × contained breadth → trivial, system thrives (like 2018)
+- Score 25-50 — one axis bad → still surviving (like 2020 universal-but-fast, or 2022 contained-but-medium)
+- Score 75 — both axes worsening → uncertain (no clean historical precedent; closer to 2001-02 if rotation still works)
+- Score 100 — slow Fed × universal breadth → 2008-class → **system fails**
+
+### Step 6 — Output survival probability + path branches
+
+Translate risk score into P(survive) using calibration anchors, then expand into 3 paths so Cal sees the conditional tree:
 
 **Path A — Soft landing**: probability + what it looks like + fh likely outcome
 **Path B — Sector unwind without banking crisis**: probability + analog (e.g. 2001-02) + fh likely outcome
@@ -177,7 +220,7 @@ section order and headers identical so downstream parsing stays stable.
 **[scenario name or "Monthly Macro Snapshot YYYY-MM-DD"] — Survival Assessment**
 
 ## Risk Score: <0-100>
-Composite scalar derived per the scoring rubric below.
+Decomposition: Duration <0/25/50> + Breadth <0/25/50> = <total>
 
 ## Survival Probability
 P(survive) = X% — fh bucket year-loss < ~-20%
@@ -188,32 +231,36 @@ One-line rationale tying recommendation to risk score bracket.
 ## Key Reasons
 - 3-5 bullets, each pointing to specific macro evidence and what it
   implies for the system's failure mode (institutional cover-buy
-  durability).
+  durability in fh's universe).
 
-## Macro state snapshot
-| Dimension | 2008 condition | Current | Signature ✓/⚠️/✗ |
-|---|---|---|---|
-| Leveraged bubble in core financial sector | ... | ... | ✓ |
-| Banks ARE the patient | ... | ... | ⚠️ |
-| Counterparty opacity | ... | ... | ... |
-| Fed capacity constrained | ... | ... | ... |
-| Slow visible unwind | ... | ... | ... |
-| No sector rotation possible | ... | ... | ... |
+## Duration axis (Fed/external intervention speed)
+| Input | Current state | Constraint flagged? |
+|---|---|---|
+| Rate space | <bps above zero> | ✓/✗ |
+| Balance sheet | <% of GDP> | ✓/✗ |
+| Inflation | <print %> | ✓/✗ |
+| Banking health | <state> | ✓/✗ |
+| Fiscal capacity | <state> | ✓/✗ |
 
-## Fed intervention capacity
-- Rate space: ...
-- Balance sheet space: ...
-- Inflation constraint: ...
-- Banking sector health: ...
-- Verdict: <can act | partially constrained | paralyzed>
+Classification: <Fast / Medium / Slow> → axis score <0/25/50>
+
+## Breadth axis (sectoral refuge availability)
+| Input | Current state | Tendency |
+|---|---|---|
+| Stress origin | <sector / cross-asset> | contained / mixed / universal |
+| Defensives state | <unaffected / hit> | ... |
+| Cross-asset contagion | <scope> | ... |
+| Hiding-place sector | <named or none> | ... |
+
+Classification: <Contained / Mixed / Universal> → axis score <0/25/50>
 
 ## Path branches
-A. Soft landing — P(~X%): brief description
-B. Sector unwind — P(~Y%): brief description
-C. 2008-class — P(~Z%): brief description
+A. Soft landing — P(~X%): brief description, closest historical analog
+B. Sector unwind — P(~Y%): brief description, closest historical analog
+C. 2008-class — P(~Z%): brief description, the system-killer path
 
 ## Trigger signals to monitor
-- Specific data point + threshold + what shift it implies
+- Specific data point + threshold + which axis it would shift, and in what direction
 - ...
 
 ## Sources
@@ -224,39 +271,48 @@ C. 2008-class — P(~Z%): brief description
 
 ## Scoring rubric (Risk Score 0-100)
 
-Composite score is signature_count_component + fed_paralysis_component:
+Composite of the two survival axes (defined in detail in Steps 3-4 of
+the workflow):
 
-**Signature component** (0-60): sum of signatures from the macro table
-- Each ✓ signature: 10 points
-- Each ⚠️ partial: 5 points
-- Each ✗ absent: 0 points
-- Max: 6 × 10 = 60
+**Duration axis (0-50)** — how long is Fed intervention delayed?
+- Fast (0-1 constraint flagged): 0
+- Medium (2-3 constraints): 25
+- Slow (4-5 constraints): 50
 
-**Fed paralysis component** (0-40):
-- Fed "can act" (rate space + balance sheet + inflation room + healthy banks): 0
-- One constraint flagged: 10
-- Two constraints flagged: 20
-- Three constraints flagged: 30
-- "paralyzed" (all four constrained): 40
+**Breadth axis (0-50)** — is there a sectoral refuge?
+- Contained: 0
+- Mixed: 25
+- Universal: 50
+
+**Total = Duration + Breadth** (0-100).
+
+Why this works: the historical record shows the system survives every
+cell in the 3×3 grid EXCEPT the bottom-right corner (Slow × Universal,
+= score 100 = 2008). Any single axis at "safe" (0) brings score below
+the 60-point fatal threshold and at least one survival mechanism (fast
+recovery via Fed, or sector rotation refuge) kicks in.
 
 **Recommendation thresholds**:
-| Risk Score | Recommendation | Operational implication |
-|---:|---|---|
-| 0-29 | **continue** | normal operation, no changes |
-| 30-59 | **reduce / risk-limit** | consider lowering max_positions, tightening dollar volume filter, or pausing the most stress-exposed bucket (fh) — final call is Cal's |
-| 60-100 | **stop** | the macro state is approaching 2008-class; pause new fh entries until at least one signature/Fed constraint clears — final call is Cal's |
 
-Always include the numeric score, the bracket it falls in, and the
-recommendation — even when the recommendation is "continue".
+| Risk Score | Cell position | Recommendation | Operational implication |
+|---:|---|---|---|
+| 0-29 | both axes safe-to-mild | **continue** | normal operation |
+| 30-59 | one axis mild, the other safe-to-mild | **reduce / risk-limit** | consider lowering max_positions, tightening dollar volume filter, or pausing fh — final call is Cal's |
+| 60-100 | at least one axis severe with the other not safe | **stop** | macro is approaching 2008-class; pause new fh entries until at least one axis backs off — final call is Cal's |
+
+Always emit the numeric score, the axis decomposition (e.g. "Duration 25 + Breadth 50 = 75"), and the recommendation.
 
 ## Calibration anchors
 
-To stay calibrated across sessions, anchor estimates to these historical priors:
-- Year with ZERO 2008-class signatures: P(survive) ≈ 95-99% (like 2018, 2022)
-- Year with 1-2 signatures: P(survive) ≈ 85-95% (like 2011, 2015)
-- Year with 3-4 signatures, Fed has capacity: P(survive) ≈ 75-90% (like 2020 ex-ante)
-- Year with 3-4 signatures, Fed paralyzed: P(survive) ≈ 60-80%
-- Year with 5-6 signatures: P(survive) ≈ 30-50% (rare; 2008 only example)
+Anchor P(survive) to historical record by risk-score bracket:
+
+| Risk Score | Closest historical analog | P(survive) bracket |
+|---:|---|---|
+| 0-15 | 2018, 2011 | 95-99% |
+| 20-35 | 2022, 2015, 2001, 1994 | 85-95% |
+| 40-55 | 2020 (universal but Fed acted) | 75-90% |
+| 60-75 | no clean analog; closest = 2001-02 if rotation still saves it | 55-75% |
+| 80-100 | 2008 only | 30-55% |
 
 Don't output probabilities < 30% or > 95% unless evidence is overwhelming — be epistemically humble.
 
