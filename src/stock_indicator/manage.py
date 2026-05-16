@@ -1548,6 +1548,24 @@ class StockShell(cmd.Cmd):
                 entry_priority=entry_priority,
                 maximum_positions=bucket_maximum_positions,
                 fill_remaining=bool(raw_bucket.get("fill_remaining", False)),
+                additional_above_ranges=(
+                    [
+                        (float(low), float(high))
+                        for low, high in raw_bucket["additional_above_ranges"]
+                    ]
+                    if "additional_above_ranges" in raw_bucket
+                    and raw_bucket["additional_above_ranges"]
+                    else None
+                ),
+                max_hold=(
+                    int(raw_bucket["max_hold"])
+                    if "max_hold" in raw_bucket
+                    and raw_bucket["max_hold"] is not None
+                    else None
+                ),
+                reset_hold_on_reentry_signal=bool(
+                    raw_bucket.get("reset_hold_on_reentry_signal", False)
+                ),
                 exit_alpha_factor=exit_alpha_factor_value,
                 shape_slope_min=shape_slope_min_value,
                 shape_dev_50_max=shape_dev_50_max_value,

@@ -119,6 +119,7 @@ def simulate_trades(
     pending_market_entry: bool = False,
     cancel_pending_rule: Callable[[pandas.Series], bool] | None = None,
     reentry_on_signal: bool = False,
+    reset_hold_on_reentry_signal: bool = False,
 ) -> SimulationResult:
     """Simulate trades using supplied entry and exit rules.
 
@@ -194,6 +195,11 @@ def simulate_trades(
         and trailing_stop_percentage <= 0.0
     )
     current_bar_excursions: list[tuple[pandas.Timestamp, float, float]] = []
+    # Bars since entry or the most recent re-fire reset. Drives the
+    # min_hold gates for trailing stop, fixed TP, and signal exit. When
+    # reset_hold_on_reentry_signal is False this counter stays identical
+    # to (row_index - entry_row_index), preserving baseline behavior.
+    bars_since_anchor: int = 0
     for row_index in range(len(data)):
         current_row = data.iloc[row_index]
         is_last_row = row_index == len(data) - 1
@@ -224,6 +230,7 @@ def simulate_trades(
                     current_mfe_date = None
                     current_mae_date = None
                     current_bar_excursions = []
+                    bars_since_anchor = 0
                 # Limit order: check if limit is hit (low <= limit price)
                 elif "low" in data.columns and float(current_row["low"]) <= pending_limit_price:
                     fill_price = min(float(current_row[entry_price_column]), pending_limit_price)
@@ -243,6 +250,7 @@ def simulate_trades(
                     current_mfe_date = None
                     current_mae_date = None
                     current_bar_excursions = []
+                    bars_since_anchor = 0
                 # A new entry signal supersedes the old pending order
                 elif entry_rule(current_row):
                     pending_limit_price = float(current_row[entry_price_column])
@@ -274,9 +282,17 @@ def simulate_trades(
                     current_mfe_date = None
                     current_mae_date = None
                     current_bar_excursions = []
+                    bars_since_anchor = 0
         else:
             if entry_row is None or entry_row_index is None:
                 continue
+            # Bars since entry (or last re-fire reset). Increment first;
+            # then if a re-fire fires on this bar AND the bucket has the
+            # flag set, reset to 0 so the min_hold gate restarts from
+            # this bar. Re-fire bar itself is therefore exit-gated.
+            bars_since_anchor += 1
+            if reset_hold_on_reentry_signal and entry_rule(current_row):
+                bars_since_anchor = 0
             if pending_limit_entry and "_limit_fill_price" in entry_row.index:
                 entry_price = float(entry_row["_limit_fill_price"])
             else:
@@ -333,7 +349,7 @@ def simulate_trades(
                 0 < trailing_stop_percentage < 1
                 and trailing_high_price > 0
                 and not is_last_row
-                and (row_index - entry_row_index) >= minimum_holding_bars
+                and bars_since_anchor >= minimum_holding_bars
             ):
                 trailing_stop_price = trailing_high_price * (1 - trailing_stop_percentage)
                 if has_low and float(current_row["low"]) <= trailing_stop_price:
@@ -376,7 +392,7 @@ def simulate_trades(
 
             stop_loss_order_is_active = (
                 0 < stop_loss_percentage < 1
-                and (row_index - entry_row_index) > minimum_holding_bars
+                and bars_since_anchor > minimum_holding_bars
             )
             if stop_loss_order_is_active:
                 stop_price = risk_price * (1 - stop_loss_percentage)
@@ -536,7 +552,7 @@ def simulate_trades(
                 last_exit_index = row_index
                 continue
             if (
-                (row_index - entry_row_index) >= minimum_holding_bars
+                bars_since_anchor >= minimum_holding_bars
                 and exit_rule(current_row, entry_row)
             ):
                 exit_price = float(current_row[price_column_name])

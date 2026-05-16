@@ -485,6 +485,24 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
             pre_cross_signal_lookback=bool(
                 raw_bucket.get("pre_cross_signal_lookback", False)
             ),
+            additional_above_ranges=(
+                [
+                    (float(low), float(high))
+                    for low, high in raw_bucket["additional_above_ranges"]
+                ]
+                if "additional_above_ranges" in raw_bucket
+                and raw_bucket["additional_above_ranges"]
+                else None
+            ),
+            max_hold=(
+                int(raw_bucket["max_hold"])
+                if "max_hold" in raw_bucket
+                and raw_bucket["max_hold"] is not None
+                else None
+            ),
+            reset_hold_on_reentry_signal=bool(
+                raw_bucket.get("reset_hold_on_reentry_signal", False)
+            ),
             tp_slope_amplify=bool(raw_bucket.get("tp_slope_amplify", False)),
             override_min_hold_tp_only=(
                 bool(raw_bucket["override_min_hold_tp_only"])
@@ -1003,6 +1021,7 @@ def compute_today_signals(
             # live emitter and matches Cal's "today the signal fired"
             # mental model + the legacy find_history_signal output.
             use_unshifted_signals=True,
+            additional_above_ranges=bucket_def.additional_above_ranges,
             exit_alpha_factor=bucket_def.exit_alpha_factor,
         )
         per_bucket_signals[bucket_label] = signals

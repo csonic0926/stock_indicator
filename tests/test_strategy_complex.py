@@ -1630,3 +1630,118 @@ def test_run_complex_simulation_prioritizes_low_near_ratio_for_s6(
     ]
     assert len(entry_details) == 1
     assert entry_details[0].symbol == "LOW"
+
+
+def _build_flat_replay_trade(
+    num_bars: int,
+) -> strategy.Trade:
+    """Build a Trade with flat-price bar_excursions for replay tests."""
+    start = pandas.Timestamp("2024-01-02")
+    excursions = [
+        (start + pandas.Timedelta(days=offset), 0.0, 0.0, 0.0)
+        for offset in range(num_bars)
+    ]
+    return strategy.Trade(
+        entry_date=pandas.Timestamp("2024-01-01"),
+        exit_date=excursions[-1][0],
+        entry_price=100.0,
+        exit_price=100.0,
+        profit=0.0,
+        holding_period=num_bars,
+        exit_reason="signal",
+        bar_excursions=excursions,
+    )
+
+
+def test_replay_max_hold_fires_without_refire_reset() -> None:
+    """Without reset flag, max_hold cuts at the original bar (control)."""
+    trade = _build_flat_replay_trade(num_bars=20)
+    adjusted = strategy._replay_trade_with_adaptive_tp_sl(
+        trade,
+        tp_pct=0.50,
+        sl_pct=0.50,
+        minimum_holding_bars=0,
+        disable_sl_trigger=True,
+        max_hold_bars=5,
+        reset_hold_on_reentry_signal=False,
+        re_fire_dates=None,
+    )
+    assert adjusted.exit_reason == "max_hold"
+    assert adjusted.holding_period == 5
+    assert adjusted.exit_date == trade.bar_excursions[5][0]
+
+
+def test_replay_refire_resets_bars_since_anchor_extends_max_hold() -> None:
+    """A re-fire on bar 5 should restart max_hold counting from that bar."""
+    trade = _build_flat_replay_trade(num_bars=20)
+    re_fire_dates = {trade.bar_excursions[4][0]}
+    adjusted = strategy._replay_trade_with_adaptive_tp_sl(
+        trade,
+        tp_pct=0.50,
+        sl_pct=0.50,
+        minimum_holding_bars=0,
+        disable_sl_trigger=True,
+        max_hold_bars=5,
+        reset_hold_on_reentry_signal=True,
+        re_fire_dates=re_fire_dates,
+    )
+    assert adjusted.exit_reason == "max_hold"
+    assert adjusted.holding_period == 10
+    assert adjusted.exit_date == trade.bar_excursions[10][0]
+
+
+def test_replay_refire_disabled_when_flag_false_even_with_dates() -> None:
+    """When flag is False, re_fire_dates must be ignored (regression guard)."""
+    trade = _build_flat_replay_trade(num_bars=20)
+    re_fire_dates = {trade.bar_excursions[4][0]}
+    adjusted = strategy._replay_trade_with_adaptive_tp_sl(
+        trade,
+        tp_pct=0.50,
+        sl_pct=0.50,
+        minimum_holding_bars=0,
+        disable_sl_trigger=True,
+        max_hold_bars=5,
+        reset_hold_on_reentry_signal=False,
+        re_fire_dates=re_fire_dates,
+    )
+    assert adjusted.holding_period == 5
+    assert adjusted.exit_date == trade.bar_excursions[5][0]
+
+
+def test_replay_refire_blocks_sl_during_new_min_hold_window() -> None:
+    """Re-fire resets min_hold gate; SL cannot fire on the re-fire bar.
+
+    Bar 3 drops -10% and is also the re-fire bar. Without re-fire, min_hold_sl=4
+    would let SL fire here (holding=4). With re-fire, bars_since_anchor resets
+    to 0 on bar 3, so SL is gated until bars_since_anchor reaches 4 again — i.e.
+    bar 7 (also dropped -10% so SL has a trigger there).
+    """
+    start = pandas.Timestamp("2024-01-02")
+    bars: list[tuple[pandas.Timestamp, float, float, float]] = []
+    for offset in range(10):
+        low_pct = -0.10 if offset in {3, 7} else 0.0
+        bars.append((start + pandas.Timedelta(days=offset), 0.0, low_pct, 0.0))
+    trade = strategy.Trade(
+        entry_date=pandas.Timestamp("2024-01-01"),
+        exit_date=bars[-1][0],
+        entry_price=100.0,
+        exit_price=100.0,
+        profit=0.0,
+        holding_period=10,
+        exit_reason="signal",
+        bar_excursions=bars,
+    )
+    re_fire_dates = {bars[3][0]}
+    adjusted = strategy._replay_trade_with_adaptive_tp_sl(
+        trade,
+        tp_pct=0.50,
+        sl_pct=0.10,
+        minimum_holding_bars=4,
+        minimum_holding_bars_sl=4,
+        disable_sl_trigger=False,
+        reset_hold_on_reentry_signal=True,
+        re_fire_dates=re_fire_dates,
+    )
+    assert adjusted.exit_reason == "adaptive_stop_loss"
+    assert adjusted.holding_period == 8
+    assert adjusted.exit_date == bars[7][0]

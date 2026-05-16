@@ -720,9 +720,29 @@ class ComplexStrategySetDefinition:
     #   open position count (across all buckets) is below its maximum_positions.
     #   This mimics the complex simulation B-set behaviour where B fills
     #   positions that A didn't use, rather than having its own independent cap.
+    # - additional_above_ranges: when set, the bucket's above_pv entry filter
+    #   becomes OR-of-ranges: trade entries fire when above_pv is in the
+    #   primary range (from strategy_name) OR in any of these additional
+    #   ranges. Used to extend a single bucket's detection across multiple
+    #   saturation points (e.g., ft extending from 0.06-0.09 to also include
+    #   0.30-0.35 = ft-family multi-modal detector).
     entry_priority: int = 0
     maximum_positions: int | None = None
     fill_remaining: bool = False
+    additional_above_ranges: list[tuple[float, float]] | None = None
+    # When set, force-exit any open trade at the bar after `max_hold` bars
+    # have been held (next bar open). Empirically derived from winner
+    # holding-period ceiling (e.g., fh winners never held > 19 bars in
+    # 17yr; setting max_hold=15 cuts trades past the 99th percentile of
+    # winner holds, which are statistically certain losers).
+    max_hold: int | None = None
+    # When True, an entry signal firing on the held symbol from ANY bucket
+    # during the hold window resets bars_since_entry to 0 — restarting both
+    # the min_hold protection window and the max_hold time budget. Semantic:
+    # re-fire = setup re-confirmed, position re-anchored. Risk: in regime
+    # stress (e.g. 2008 deleveraging) the detector may re-fire repeatedly
+    # during a falling knife, removing the max_hold time floor.
+    reset_hold_on_reentry_signal: bool = False
 
 
 @dataclass
@@ -811,6 +831,11 @@ class StrategyEvaluationArtifacts:
     closing_price_series_by_symbol: Dict[str, pandas.Series]
     trade_detail_pairs: Dict[Trade, tuple[TradeDetail, TradeDetail]]
     simulation_start_date: pandas.Timestamp | None
+    # Per-symbol boolean series of this bucket's combined buy entry signal.
+    # Used by run_complex_simulation to build the cross-bucket any-entry
+    # signal union consumed by re-fire reset (per-bucket
+    # reset_hold_on_reentry_signal flag).
+    entry_signal_by_symbol: Dict[str, pandas.Series] = field(default_factory=dict)
 
 
 def _resolve_slot_release_date(
@@ -871,6 +896,9 @@ def _replay_trade_with_adaptive_tp_sl(
     tp_pct_late: float | None = None,
     sl_only: bool = False,
     disable_sl_trigger: bool = False,
+    max_hold_bars: int | None = None,
+    reset_hold_on_reentry_signal: bool = False,
+    re_fire_dates: set[pandas.Timestamp] | None = None,
 ) -> Trade:
     """Replay a raw trade using adaptive TP/SL levels.
 
@@ -909,6 +937,14 @@ def _replay_trade_with_adaptive_tp_sl(
         else minimum_holding_bars
     )
     active_sl_pct = sl_pct
+    # bars_since_anchor counts bars since the current "anchor" (entry, or
+    # the last re-fire that reset the window). All min_hold / max_hold
+    # checks use this counter. holding = bar_index + 1 (real bars since
+    # entry) is still used for trade-record fields (exit_date, slicing).
+    bars_since_anchor = 0
+    use_refire = (
+        reset_hold_on_reentry_signal and re_fire_dates is not None
+    )
     for bar_index, excursion in enumerate(trade.bar_excursions):
         # Support both 3-tuple (legacy) and 4-tuple (with open_pct).
         if len(excursion) == 4:
@@ -917,6 +953,14 @@ def _replay_trade_with_adaptive_tp_sl(
             bar_date, bar_high_pct, bar_low_pct = excursion[:3]
             bar_open_pct = 0.0
         holding = bar_index + 1
+        bars_since_anchor += 1
+        # Re-fire reset: any-bucket entry signal on this bar re-anchors the
+        # hold window — bars_since_anchor goes to 0, so min_hold and
+        # max_hold restart counting from the next bar. Exits below check
+        # bars_since_anchor (not holding), so re-fire bar itself is exit-
+        # immune. break-even SL stays sticky (price-based, not hold-based).
+        if use_refire and bar_date in re_fire_dates:
+            bars_since_anchor = 0
         # Upgrade SL to break-even once profit reaches trigger level
         if (
             breakeven_trigger_pct > 0
@@ -928,7 +972,7 @@ def _replay_trade_with_adaptive_tp_sl(
         # never fires as exit — skip the check entirely.
         if (
             not disable_sl_trigger
-            and holding >= effective_min_hold_sl
+            and bars_since_anchor >= effective_min_hold_sl
             and bar_low_pct <= -active_sl_pct
         ):
             effective_sl_pct = active_sl_pct
@@ -950,10 +994,10 @@ def _replay_trade_with_adaptive_tp_sl(
         # Switch to tp_pct_late after minimum_holding_bars if provided.
         if not sl_only:
             active_tp_pct = tp_pct
-            if tp_pct_late is not None and holding >= minimum_holding_bars:
+            if tp_pct_late is not None and bars_since_anchor >= minimum_holding_bars:
                 active_tp_pct = tp_pct_late
             if (
-                holding >= effective_min_hold_tp
+                bars_since_anchor >= effective_min_hold_tp
                 and active_tp_pct > 0
                 and bar_high_pct >= active_tp_pct
             ):
@@ -968,6 +1012,33 @@ def _replay_trade_with_adaptive_tp_sl(
                     holding_period=holding,
                     exit_reason="adaptive_take_profit",
                     bar_excursions=trade.bar_excursions[: holding],
+                )
+        # Max-hold force exit: when holding meets the per-bucket ceiling
+        # without TP/SL firing, exit at the NEXT bar's open (similar to
+        # eviction semantics — exit decided at bar close, executed at
+        # next bar open). If no next bar exists (end of data), fall
+        # through to natural exit fallback.
+        if (
+            max_hold_bars is not None
+            and bars_since_anchor >= max_hold_bars
+        ):
+            next_idx = bar_index + 1
+            if next_idx < len(trade.bar_excursions):
+                next_excursion = trade.bar_excursions[next_idx]
+                next_open_pct = (
+                    next_excursion[3] if len(next_excursion) == 4 else 0.0
+                )
+                next_date = next_excursion[0]
+                adjusted_exit_price = trade.entry_price * (1 + next_open_pct)
+                adjusted_profit = adjusted_exit_price - trade.entry_price
+                return replace(
+                    trade,
+                    exit_date=next_date,
+                    exit_price=adjusted_exit_price,
+                    profit=adjusted_profit,
+                    holding_period=holding,
+                    exit_reason="max_hold",
+                    bar_excursions=trade.bar_excursions[: holding + 1],
                 )
     if sl_only:
         # No SL triggered — hold indefinitely until evicted by a new signal.
@@ -1231,7 +1302,39 @@ def run_complex_simulation(
                 adaptive_tp_sl.evict_oldest if adaptive_tp_sl is not None else False
             ),
             pre_cross_signal_lookback=definition.pre_cross_signal_lookback,
+            additional_above_ranges=definition.additional_above_ranges,
+            reset_hold_on_reentry_signal=definition.reset_hold_on_reentry_signal,
         )
+
+    # Cross-bucket entry signal union: per-symbol set of dates where ANY
+    # bucket's combined buy entry signal fired. Consumed by re-fire reset
+    # logic in _replay_trade_with_adaptive_tp_sl when a bucket has
+    # reset_hold_on_reentry_signal=True. Build once across all buckets so
+    # the same set serves every bucket's replay invocations.
+    any_bucket_entry_dates_by_symbol: Dict[str, set[pandas.Timestamp]] = {}
+    any_bucket_re_fire_enabled = any(
+        definition.reset_hold_on_reentry_signal
+        for definition in set_definitions.values()
+    )
+    if any_bucket_re_fire_enabled:
+        for artifacts in artifacts_by_set.values():
+            for symbol_name, signal_series in (
+                artifacts.entry_signal_by_symbol.items()
+            ):
+                if signal_series is None or signal_series.empty:
+                    continue
+                true_dates = signal_series.index[signal_series.astype(bool)]
+                if len(true_dates) == 0:
+                    continue
+                bucket_dates = {
+                    pandas.Timestamp(d) for d in true_dates
+                }
+                if symbol_name in any_bucket_entry_dates_by_symbol:
+                    any_bucket_entry_dates_by_symbol[symbol_name].update(
+                        bucket_dates
+                    )
+                else:
+                    any_bucket_entry_dates_by_symbol[symbol_name] = bucket_dates
 
     accepted_trades_by_set: Dict[str, List[Trade]] = {
         label: [] for label in set_definitions
@@ -2043,6 +2146,20 @@ def run_complex_simulation(
                 effective_min_hold_sl: int | None = None
                 if effective_override_sl:
                     effective_min_hold_sl = effective_min_hold_sl_value
+                # Cross-bucket re-fire dates for this trade (only used when
+                # bucket flag is set; otherwise pass None to skip the lookup).
+                re_fire_dates_for_trade: set[pandas.Timestamp] | None = None
+                if bucket_def.reset_hold_on_reentry_signal:
+                    trade_symbol_for_refire = (
+                        artifacts_by_set[label].trade_symbol_lookup.get(
+                            trade, ""
+                        )
+                    )
+                    re_fire_dates_for_trade = (
+                        any_bucket_entry_dates_by_symbol.get(
+                            trade_symbol_for_refire
+                        )
+                    )
                 adjusted = _replay_trade_with_adaptive_tp_sl(
                     trade, tp_pct, sl_pct, effective_min_hold,
                     minimum_holding_bars_tp=effective_min_hold_tp,
@@ -2051,6 +2168,11 @@ def run_complex_simulation(
                     tp_pct_late=_tp_pct_late,
                     sl_only=use_evict_oldest,
                     disable_sl_trigger=adaptive_tp_sl.disable_sl_trigger,
+                    max_hold_bars=bucket_def.max_hold,
+                    reset_hold_on_reentry_signal=(
+                        bucket_def.reset_hold_on_reentry_signal
+                    ),
+                    re_fire_dates=re_fire_dates_for_trade,
                 )
                 # Dynamic min_hold throttle based on rolling regime sensors
                 # (rolling_ml / rolling_mp) — pure market signal with NO
@@ -2533,6 +2655,7 @@ def compute_signals_for_date(
     use_unshifted_signals: bool = False,
     near_delta_range: tuple[float, float] | None = None,
     price_tightness_range: tuple[float, float] | None = None,
+    additional_above_ranges: list[tuple[float, float]] | None = None,
     exit_alpha_factor: float | None = None,
 ) -> Dict[str, List[str]]:
     """Compute entry/exit signals on ``evaluation_date`` using simulation filters.
@@ -2774,6 +2897,11 @@ def compute_signals_for_date(
             ):
                 kwargs["near_range"] = near_range
                 kwargs["above_range"] = above_range
+            if (
+                base_name == "ema_sma_cross_testing"
+                and additional_above_ranges
+            ):
+                kwargs["additional_above_ranges"] = additional_above_ranges
             if base_name == "ema_sma_cross_testing":
                 if near_delta_range is not None:
                     kwargs["near_delta_range"] = near_delta_range
@@ -3281,6 +3409,7 @@ def attach_ema_sma_cross_testing_signals(
     shape_slope_min: float | None = None,
     shape_dev_50_max: float | None = None,
     shape_bsv_lookback: int | None = None,
+    additional_above_ranges: list[tuple[float, float]] | None = None,
 ) -> None:
     """Attach EMA/SMA cross testing signals with angle and chip filters.
 
@@ -3405,6 +3534,12 @@ def attach_ema_sma_cross_testing_signals(
         price_data_frame["above_price_volume_ratio_previous"].ge(above_lower_bound)
         & price_data_frame["above_price_volume_ratio_previous"].le(above_upper_bound)
     )
+    if additional_above_ranges:
+        for extra_low, extra_high in additional_above_ranges:
+            above_price_ratio_previous_ok = above_price_ratio_previous_ok | (
+                price_data_frame["above_price_volume_ratio_previous"].ge(extra_low)
+                & price_data_frame["above_price_volume_ratio_previous"].le(extra_high)
+            )
 
     # A-layer (signal-day, T): sma_angle filter ALWAYS uses the shifted
     # (previous-row) value so that at row T+1 we check sma_angle[T]. This
@@ -3627,17 +3762,19 @@ def attach_ema_sma_cross_testing_signals(
 
     # Exit signal: heavy-alpha EMA cross down SMA, or default cross exit
     if exit_alpha_factor is not None and exit_alpha_factor > 0:
-        # CustomEMA(α_heavy) crosses below SMA — same structure as Level 1
-        # entry (EMA up-cross SMA) but with heavier α for faster response
+        # Custom recursive EMA(alpha) crosses below SMA.  This is the simulator
+        # exit contract; chart scripts may approximate it when recursive EWM is
+        # unavailable, but production Python should use the recursive formula.
         _close_r3 = price_data_frame["close"].round(3)
         heavy_alpha = exit_alpha_factor / (window_size + 1)
-        heavy_alpha = min(heavy_alpha, 1.0)  # clamp to valid range
+        heavy_alpha = min(heavy_alpha, 1.0)
         ema_heavy = _close_r3.ewm(alpha=heavy_alpha, adjust=False).mean()
         ema_heavy_previous = ema_heavy.shift(1)
         sma_current = price_data_frame["sma_value"]
         sma_previous = price_data_frame["sma_previous"]
-        # Fire when heavy EMA crosses below SMA
-        heavy_cross_down = (ema_heavy_previous >= sma_previous) & (ema_heavy < sma_current)
+        heavy_cross_down = (
+            (ema_heavy_previous >= sma_previous) & (ema_heavy < sma_current)
+        )
         price_data_frame["ema_sma_cross_testing_exit_signal"] = (
             heavy_cross_down.shift(1, fill_value=False)
         )
@@ -3656,6 +3793,12 @@ def attach_ema_sma_cross_testing_signals(
             price_data_frame["above_price_volume_ratio"].ge(above_lower_bound)
             & price_data_frame["above_price_volume_ratio"].le(above_upper_bound)
         )
+        if additional_above_ranges:
+            for extra_low, extra_high in additional_above_ranges:
+                above_price_ratio_raw_ok = above_price_ratio_raw_ok | (
+                    price_data_frame["above_price_volume_ratio"].ge(extra_low)
+                    & price_data_frame["above_price_volume_ratio"].le(extra_high)
+                )
         price_data_frame["ema_sma_cross_testing_raw_entry_signal"] = (
             price_data_frame["ema_sma_cross_raw_entry_signal"]
             & (price_data_frame["sma_angle"] >= angle_lower_bound)
@@ -4166,6 +4309,8 @@ def _generate_strategy_evaluation_artifacts(
     shape_bsv_lookback: int | None = None,
     reentry_on_signal: bool = False,
     pre_cross_signal_lookback: bool = False,
+    additional_above_ranges: list[tuple[float, float]] | None = None,
+    reset_hold_on_reentry_signal: bool = False,
 ) -> StrategyEvaluationArtifacts:
     """Build intermediate artifacts for strategy evaluation.
 
@@ -4208,6 +4353,7 @@ def _generate_strategy_evaluation_artifacts(
     trade_symbol_lookup: Dict[Trade, str] = {}
     closing_price_series_by_symbol: Dict[str, pandas.Series] = {}
     trade_detail_pairs: Dict[Trade, Tuple[TradeDetail, TradeDetail]] = {}
+    entry_signal_by_symbol: Dict[str, pandas.Series] = {}
 
     symbol_frames: List[tuple[Path, pandas.DataFrame]] = []
     symbols_excluded_by_industry = (
@@ -4364,6 +4510,11 @@ def _generate_strategy_evaluation_artifacts(
                     kwargs["above_range"] = above_range
                 if (
                     base_name == "ema_sma_cross_testing"
+                    and additional_above_ranges
+                ):
+                    kwargs["additional_above_ranges"] = additional_above_ranges
+                if (
+                    base_name == "ema_sma_cross_testing"
                     and use_confirmation_angle
                 ):
                     kwargs["use_confirmation_angle"] = True
@@ -4517,11 +4668,16 @@ def _generate_strategy_evaluation_artifacts(
             pending_market_entry=use_confirmation_angle and confirmation_entry_mode == "market",
             cancel_pending_rule=cancel_rule if use_confirmation_angle else None,
             reentry_on_signal=reentry_on_signal,
+            reset_hold_on_reentry_signal=reset_hold_on_reentry_signal,
         )
         simulation_results.append(simulation_result)
         all_trades.extend(simulation_result.trades)
         symbol_name = csv_file_path.stem
         closing_price_series_by_symbol[symbol_name] = price_data_frame["close"].copy()
+        if "_combined_buy_entry" in price_data_frame.columns:
+            entry_signal_by_symbol[symbol_name] = (
+                price_data_frame["_combined_buy_entry"].astype(bool).copy()
+            )
         symbol_volume_lookup = simple_moving_average_dollar_volume_by_symbol_and_date.get(
             symbol_name, {}
         )
@@ -4739,6 +4895,7 @@ def _generate_strategy_evaluation_artifacts(
         closing_price_series_by_symbol=closing_price_series_by_symbol,
         trade_detail_pairs=trade_detail_pairs,
         simulation_start_date=simulation_start_date,
+        entry_signal_by_symbol=entry_signal_by_symbol,
     )
 
 

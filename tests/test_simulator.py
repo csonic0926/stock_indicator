@@ -706,3 +706,45 @@ def test_calculate_max_drawdown_marks_to_market() -> None:
     lowest_portfolio_value = cash_after_entry + 100 * 8.0
     expected_drawdown = (1000.0 - lowest_portfolio_value) / 1000.0
     assert maximum_drawdown_value == pytest.approx(expected_drawdown)
+
+
+def test_simulate_trades_refire_resets_min_hold_blocks_signal_exit() -> None:
+    """A re-fire during hold should reset bars_since_anchor so an exit
+    signal that would normally fire stays gated for another min_hold bars.
+
+    Setup: entry at bar 0, exit_rule fires at bar 5 and again at bar 9.
+    Without re-fire, min_hold=4 lets bar 5 close the trade.
+    With re-fire at bar 5 (entry_rule re-fires there), bars_since_anchor
+    resets to 0; next valid signal exit is gated until bars_since_anchor
+    reaches 4 again — bar 9, which is the next time exit_rule fires.
+    """
+    closes = [100.0] * 12
+    # Re-fire bars: 0 (initial entry) and 5 (re-fire while held).
+    fire_bars = {0, 5}
+    # Exit signal bars: 5 and 9.
+    exit_bars = {5, 9}
+
+    def entry_rule(current_row: pandas.Series) -> bool:
+        return current_row.name in fire_bars
+
+    def exit_rule(current_row: pandas.Series, entry_row: pandas.Series) -> bool:
+        return current_row.name in exit_bars
+
+    price_data_frame = pandas.DataFrame({"close": closes})
+
+    baseline = simulate_trades(
+        price_data_frame, entry_rule, exit_rule,
+        minimum_holding_bars=4,
+        reset_hold_on_reentry_signal=False,
+    )
+    treatment = simulate_trades(
+        price_data_frame, entry_rule, exit_rule,
+        minimum_holding_bars=4,
+        reset_hold_on_reentry_signal=True,
+    )
+
+    assert len(baseline.trades) == 1
+    assert baseline.trades[0].exit_date == 5
+
+    assert len(treatment.trades) == 1
+    assert treatment.trades[0].exit_date == 9
