@@ -1,0 +1,390 @@
+year_month,duration_score,breadth_score,risk_score,recommendation,key_event,confidence
+1994-01,0,0,0,continue,Pre-tightening calm; Fed hike not yet known,H
+1994-02,0,0,0,continue,Fed tightening risk visible; first hike not yet known,H
+1994-03,0,25,25,continue,1994 bond rout visible after first Fed hike,H
+1994-04,0,25,25,continue,Bond rout and Fed-tightening shock continuing,H
+1994-05,0,25,25,continue,Bond rout continuing; banks healthy,H
+1994-06,0,25,25,continue,Fed tightening and bond-volatility stress continuing,H
+1994-07,0,25,25,continue,Bond-market stress and dollar weakness visible,H
+1994-08,0,25,25,continue,Fed tightening cycle still repricing bonds,H
+1994-09,0,25,25,continue,Bond rout still the dominant macro stress,H
+1994-10,0,25,25,continue,Fed tightening and bond losses still visible,H
+1994-11,0,25,25,continue,Large Fed hike expected around tightening cycle,H
+1994-12,0,25,25,continue,Bond rout and Mexico-peso fragility visible; late-month devaluation not yet known,H
+1995-01,0,25,25,continue,Mexico peso crisis visible from prior month,H
+1995-02,0,25,25,continue,Mexico support package / EM aftershock still visible,H
+1995-03,0,0,0,continue,Soft-landing recovery; stress contained,H
+1995-04,0,0,0,continue,Calm soft-landing phase,H
+1995-05,0,0,0,continue,Calm bull recovery,H
+1995-06,0,0,0,continue,Calm bull recovery,H
+1995-07,0,0,0,continue,Fed easing expectation; broad stress absent,H
+1995-08,0,0,0,continue,Calm bull recovery,H
+1995-09,0,0,0,continue,Calm bull recovery,H
+1995-10,0,0,0,continue,Calm bull recovery,H
+1995-11,0,0,0,continue,Calm bull recovery,H
+1995-12,0,0,0,continue,Calm year-end,H
+1996-01,0,25,25,continue,Mexico/EM aftershock risk visible; US banks healthy,H
+1996-02,0,25,25,continue,EM aftershock risk fading but still visible,H
+1996-03,0,0,0,continue,Calm bull market,H
+1996-04,0,0,0,continue,Calm bull market,H
+1996-05,0,0,0,continue,Calm bull market,H
+1996-06,0,0,0,continue,Calm bull market,H
+1996-07,0,0,0,continue,Calm bull market,H
+1996-08,0,0,0,continue,Calm bull market,H
+1996-09,0,0,0,continue,Calm bull market,H
+1996-10,0,0,0,continue,Calm bull market,H
+1996-11,0,0,0,continue,Calm bull market,H
+1996-12,0,0,0,continue,Calm year-end,H
+1997-01,0,0,0,continue,Calm bull market,H
+1997-02,0,0,0,continue,Calm bull market,H
+1997-03,0,0,0,continue,Calm bull market,H
+1997-04,0,0,0,continue,Calm bull market,H
+1997-05,0,0,0,continue,Calm bull market,H
+1997-06,0,0,0,continue,Asian currency fragility visible but not yet broad,M
+1997-07,0,0,0,continue,Asia currency fragility visible; Thailand break not yet known,H
+1997-08,0,25,25,continue,Asian financial crisis visible; US banks healthy,H
+1997-09,0,25,25,continue,Asian crisis and EM risk-off continuing,H
+1997-10,0,25,25,continue,Asian crisis visible; late-month equity break not yet known,H
+1997-11,0,25,25,continue,Asian crisis contagion visible,H
+1997-12,0,25,25,continue,Asian crisis still pressuring EM,H
+1998-01,0,25,25,continue,Asian crisis tail still visible,H
+1998-02,0,25,25,continue,Asian crisis tail still visible,H
+1998-03,0,25,25,continue,Asian crisis tail fading,H
+1998-04,0,0,0,continue,Calm recovery from Asian crisis tail,H
+1998-05,0,0,0,continue,Calm bull market,H
+1998-06,0,25,25,continue,Russia/EM funding stress becoming visible,H
+1998-07,0,25,25,continue,Russia/EM stress visible,H
+1998-08,0,25,25,continue,Russia stress visible; default not yet known,H
+1998-09,25,25,50,reduce,Post-Russia default funding stress; LTCM risk visible,H
+1998-10,25,25,50,reduce,LTCM rescue/Fed-cut stress window still visible,H
+1998-11,0,25,25,continue,Post-LTCM calming but EM stress still visible,H
+1998-12,0,0,0,continue,Calm year-end after Fed response,H
+1999-01,0,0,0,continue,Post-LTCM calm restored,H
+1999-02,0,0,0,continue,Calm dot-com bull market,H
+1999-03,0,0,0,continue,Calm dot-com bull market,H
+1999-04,0,0,0,continue,Calm dot-com bull market,H
+1999-05,0,0,0,continue,Calm dot-com bull market,H
+1999-06,0,0,0,continue,Fed tightening risk but no crash catalyst,H
+1999-07,0,0,0,continue,Calm dot-com bull market,H
+1999-08,0,0,0,continue,Calm dot-com bull market,H
+1999-09,0,0,0,continue,Y2K liquidity planning visible; Fed has response room,H
+1999-10,0,0,0,continue,Y2K liquidity planning visible; broad stress absent,H
+1999-11,0,0,0,continue,Y2K liquidity planning visible; broad stress absent,H
+1999-12,0,25,25,continue,Y2K liquidity risk visible but Fed backstop expected,H
+2000-01,0,0,0,continue,Dot-com melt-up; crash catalyst not yet visible,H
+2000-02,0,0,0,continue,Dot-com melt-up; banks healthy,H
+2000-03,0,25,25,continue,Dot-com valuation and Fed-tightening fragility visible,H
+2000-04,0,25,25,continue,Tech unwind visible after dot-com peak,H
+2000-05,0,25,25,continue,Tech unwind and Fed tightening visible,H
+2000-06,0,25,25,continue,Tech unwind continuing; rotation refuge exists,H
+2000-07,0,25,25,continue,Dot-com unwind continuing,H
+2000-08,0,25,25,continue,Dot-com unwind continuing,H
+2000-09,0,25,25,continue,Dot-com unwind and earnings stress visible,H
+2000-10,0,25,25,continue,Dot-com bear market visible,H
+2000-11,0,25,25,continue,Dot-com bear market visible,H
+2000-12,0,25,25,continue,Dot-com bear market visible; Fed easing expected,H
+2001-01,0,25,25,continue,Dot-com recession risk visible; Fed easing capacity high,H
+2001-02,0,25,25,continue,Dot-com recession stress continuing,H
+2001-03,0,25,25,continue,Dot-com recession stress continuing,H
+2001-04,0,25,25,continue,Dot-com recession stress continuing,H
+2001-05,0,25,25,continue,Fed-cut cycle active; tech stress continuing,H
+2001-06,0,25,25,continue,Fed-cut cycle active; tech stress continuing,H
+2001-07,0,25,25,continue,Dot-com recession stress continuing,H
+2001-08,0,25,25,continue,Dot-com recession stress continuing,H
+2001-09,0,25,25,continue,Month-start dot-com/recession stress; terror attack not yet known,H
+2001-10,0,25,25,continue,Post-attack stress visible; Fed response fast and rotation exists,H
+2001-11,0,25,25,continue,Post-attack recovery attempt; tech stress still visible,H
+2001-12,0,25,25,continue,Recession/dot-com stress still visible,H
+2002-01,25,0,25,continue,Dot-com tail; Fed already cutting but slow grind persists,H
+2002-02,25,0,25,continue,Dot-com tail with sector rotation refuge,H
+2002-03,25,0,25,continue,Dot-com tail with sector rotation refuge,H
+2002-04,25,0,25,continue,Dot-com tail with sector rotation refuge,H
+2002-05,25,0,25,continue,Accounting-quality concern visible but sector refuge exists,H
+2002-06,25,25,50,reduce,Accounting scandal / credit concern broadening,H
+2002-07,25,25,50,reduce,WorldCom/Enron accounting stress visible; rotation still exists,H
+2002-08,25,25,50,reduce,Accounting and credit stress continuing,H
+2002-09,25,25,50,reduce,Dot-com tail and accounting stress continuing,H
+2002-10,25,25,50,reduce,Bear-market stress visible; rotation refuge still exists,H
+2002-11,25,0,25,continue,Recovery attempt after dot-com tail stress,H
+2002-12,25,0,25,continue,Dot-com tail fading but economy still sluggish,H
+2003-01,0,25,25,continue,Iraq-war risk and recession tail visible,H
+2003-02,0,25,25,continue,Iraq-war risk and recession tail visible,H
+2003-03,0,25,25,continue,Iraq-war risk visible; invasion timing not yet known,H
+2003-04,0,25,25,continue,War/recession tail still visible,H
+2003-05,0,0,0,continue,Recovery phase; broad stress fading,H
+2003-06,0,0,0,continue,Recovery phase; broad stress fading,H
+2003-07,0,0,0,continue,Calm recovery,H
+2003-08,0,0,0,continue,Calm recovery,H
+2003-09,0,0,0,continue,Calm recovery,H
+2003-10,0,0,0,continue,Calm recovery,H
+2003-11,0,0,0,continue,Calm recovery,H
+2003-12,0,0,0,continue,Calm recovery,H
+2004-01,0,0,0,continue,Calm expansion,H
+2004-02,0,0,0,continue,Calm expansion,H
+2004-03,0,0,0,continue,Calm expansion,H
+2004-04,0,0,0,continue,Calm expansion,H
+2004-05,0,0,0,continue,Calm expansion,H
+2004-06,0,0,0,continue,Fed hike cycle expected; no shock catalyst,H
+2004-07,0,0,0,continue,Measured Fed hikes; banks healthy,H
+2004-08,0,0,0,continue,Measured Fed hikes; banks healthy,H
+2004-09,0,0,0,continue,Measured Fed hikes; banks healthy,H
+2004-10,0,0,0,continue,Measured Fed hikes; banks healthy,H
+2004-11,0,0,0,continue,Measured Fed hikes; banks healthy,H
+2004-12,0,0,0,continue,Calm expansion,H
+2005-01,0,0,0,continue,Calm expansion; housing froth not yet a crash catalyst,H
+2005-02,0,0,0,continue,Calm expansion,H
+2005-03,0,0,0,continue,Calm expansion,H
+2005-04,0,0,0,continue,Calm expansion,H
+2005-05,0,0,0,continue,Calm expansion,H
+2005-06,0,0,0,continue,Calm expansion,H
+2005-07,0,0,0,continue,Calm expansion,H
+2005-08,0,0,0,continue,Calm expansion,H
+2005-09,0,0,0,continue,Calm expansion,H
+2005-10,0,0,0,continue,Calm expansion,H
+2005-11,0,0,0,continue,Calm expansion,H
+2005-12,0,0,0,continue,Calm expansion,H
+2006-01,0,0,0,continue,Housing froth visible but no funding stress,H
+2006-02,0,0,0,continue,Housing froth visible but no funding stress,H
+2006-03,0,0,0,continue,Housing slowdown risk building,H
+2006-04,0,0,0,continue,Housing slowdown risk building,H
+2006-05,0,0,0,continue,Housing slowdown risk building,H
+2006-06,0,25,25,continue,Housing slowdown and rate stress visible,H
+2006-07,0,25,25,continue,Housing slowdown and subprime concern visible,H
+2006-08,0,25,25,continue,Housing/subprime concern visible but contained,H
+2006-09,0,25,25,continue,Housing/subprime concern visible but contained,H
+2006-10,0,25,25,continue,Housing/subprime concern visible but contained,H
+2006-11,0,25,25,continue,Housing/subprime concern visible but contained,H
+2006-12,0,25,25,continue,Housing/subprime concern visible but contained,H
+2007-01,0,25,25,continue,Subprime deterioration visible but still contained,H
+2007-02,0,25,25,continue,Subprime deterioration visible but still contained,H
+2007-03,25,25,50,reduce,Subprime lender stress visible; banking-adjacent risk rising,H
+2007-04,25,25,50,reduce,Subprime lender failures visible; credit concern broadening,H
+2007-05,25,25,50,reduce,Subprime and mortgage-credit stress visible,H
+2007-06,25,25,50,reduce,Mortgage-credit stress visible; Bear hedge-fund risk building,H
+2007-07,25,25,50,reduce,Subprime hedge-fund stress visible,H
+2007-08,25,50,75,stop,Credit-market contagion visible after mortgage hedge-fund failures,H
+2007-09,25,50,75,stop,Global credit crunch visible; Fed easing underway,H
+2007-10,25,50,75,stop,Bank writedowns and credit stress visible,H
+2007-11,25,50,75,stop,Bank writedowns and funding stress visible,H
+2007-12,25,50,75,stop,Credit crunch and recession risk visible,H
+2008-01,25,50,75,stop,Credit crisis and recession risk visible; banks under pressure,H
+2008-02,25,50,75,stop,Credit crisis and monoline/bank stress visible,H
+2008-03,25,50,75,stop,Bank funding stress visible; Bear Stearns failure not yet known,H
+2008-04,50,50,100,stop,Post-Bear Stearns: banks are the patient; broad credit stress,H
+2008-05,50,50,100,stop,Post-Bear banking stress still unresolved,H
+2008-06,50,50,100,stop,Banks are the patient; housing/credit stress universalizing,H
+2008-07,50,50,100,stop,Fannie/Freddie and bank stress visible,H
+2008-08,50,50,100,stop,Systemic mortgage-credit stress visible,H
+2008-09,50,50,100,stop,Pre-Lehman systemic stress visible; rescue path uncertain,H
+2008-10,50,50,100,stop,Post-Lehman/AIG/TARP stress; institutional bid net-absent,H
+2008-11,50,50,100,stop,GFC panic continuing; banks still the patient,H
+2008-12,50,50,100,stop,GFC panic continuing despite policy response,H
+2009-01,50,50,100,stop,GFC panic continuing; banks still the patient,H
+2009-02,50,50,100,stop,GFC panic continuing; bank nationalization fear visible,H
+2009-03,50,50,100,stop,GFC panic visible; market bottom not yet known,H
+2009-04,25,25,50,reduce,Policy backstops visible; banking stress still elevated,H
+2009-05,25,25,50,reduce,Stress-test process visible; final relief not yet known,H
+2009-06,25,0,25,continue,Post-stress-test healing; banks still recovering,H
+2009-07,25,0,25,continue,GFC healing phase; breadth stress contained,H
+2009-08,25,0,25,continue,GFC healing phase; breadth stress contained,H
+2009-09,25,0,25,continue,GFC healing phase; breadth stress contained,H
+2009-10,25,0,25,continue,GFC healing phase; breadth stress contained,H
+2009-11,25,0,25,continue,GFC healing phase; breadth stress contained,H
+2009-12,25,0,25,continue,GFC healing phase; breadth stress contained,H
+2010-01,25,0,25,continue,GFC tail; ~140 small bank failures expected 2010,H
+2010-02,25,0,25,continue,Greek concerns rising,H
+2010-03,25,0,25,continue,Greek rescue talks; banking still partial,H
+2010-04,25,25,50,reduce,Month-start Greek rescue talks; SPX late-month peak not yet known,H
+2010-05,25,25,50,reduce,Month-start Eurozone stress visible; Flash Crash not yet known,H
+2010-06,25,25,50,reduce,Continued Eurozone stress; VIX 35+,H
+2010-07,0,25,25,continue,Recovery starting,H
+2010-08,0,0,0,continue,Month-start recovery phase; Jackson Hole QE2 hint not yet known,H
+2010-09,0,0,0,continue,QE2 anticipation; banking stable,H
+2010-10,0,0,0,continue,QE2 expected; gate applies,H
+2010-11,0,0,0,continue,Month-start QE2 expected; launch timing not yet known,H
+2010-12,0,0,0,continue,Calm year-end,H
+2011-01,0,0,0,continue,Calm; gate applies,H
+2011-02,0,0,0,continue,Calm,H
+2011-03,0,25,25,continue,Month-start calm; Japan earthquake not yet known,H
+2011-04,0,0,0,continue,Aftershocks fading,H
+2011-05,0,0,0,continue,QE2 ending soon,H
+2011-06,0,25,25,continue,Month-start QE2 end expected,H
+2011-07,0,25,25,continue,Italy bond stress builds (mark-to-market cliff),H
+2011-08,0,25,25,continue,Month-start Eurozone/Italy stress visible; US downgrade not yet known,H
+2011-09,0,25,25,continue,Eurozone deepening; bank-patient signal,H
+2011-10,0,25,25,continue,ECB action begins; calming,H
+2011-11,0,25,25,continue,Mario Draghi takes ECB,H
+2011-12,0,0,0,continue,Month-start ECB support expected; LTRO not yet known,H
+2012-01,0,0,0,continue,LTRO calming Eurozone,H
+2012-02,0,0,0,continue,Calm,H
+2012-03,0,0,0,continue,Greek default avoided,M
+2012-04,0,0,0,continue,Spanish concerns,M
+2012-05,0,25,25,continue,Spanish bond stress (bank-adjacent),H
+2012-06,0,25,25,continue,Spanish bank bailout request,H
+2012-07,0,0,0,continue,Month-start Spanish stress visible; Draghi pledge not yet known,H
+2012-08,0,0,0,continue,OMT announced,H
+2012-09,0,0,0,continue,Month-start policy support expected; QE3 not yet known,H
+2012-10,0,0,0,continue,Calm,H
+2012-11,0,0,0,continue,Calm,H
+2012-12,0,0,0,continue,"Fiscal cliff fears, minor",H
+2013-01,0,0,0,continue,Fiscal cliff resolved,H
+2013-02,0,0,0,continue,Calm bull,H
+2013-03,0,0,0,continue,"Cyprus crisis (sectoral, banking-adjacent EU only)",H
+2013-04,0,0,0,continue,Calm,H
+2013-05,0,25,25,continue,Month-start calm before taper-tantrum trigger,H
+2013-06,0,25,25,continue,Yields spike; EM selloff,H
+2013-07,0,25,25,continue,EM stress continues,H
+2013-08,0,25,25,continue,"EM crisis (India, Indonesia)",H
+2013-09,0,0,0,continue,Month-start taper uncertainty; no-taper surprise not yet known,H
+2013-10,0,0,0,continue,"Govt shutdown Oct 1-16 (risk-off, not Fed)",H
+2013-11,0,0,0,continue,Calm,H
+2013-12,0,0,0,continue,Month-start taper uncertainty,H
+2014-01,0,0,0,continue,"EM mini-crisis (Turkey, Argentina)",H
+2014-02,0,0,0,continue,EM stress continued,H
+2014-03,0,0,0,continue,Yellen first FOMC,H
+2014-04,0,0,0,continue,Calm,H
+2014-05,0,0,0,continue,Calm,H
+2014-06,0,0,0,continue,Oil peaks ~$115,H
+2014-07,0,0,0,continue,Calm,H
+2014-08,0,0,0,continue,Calm,H
+2014-09,0,0,0,continue,Calm,H
+2014-10,0,25,25,continue,Month-start rates/oil stress; flash-crash move not yet known,H
+2014-11,0,0,0,continue,Recovery,H
+2014-12,0,25,25,continue,Oil crashes to $50; SNB stress brewing,H
+2015-01,0,25,25,continue,Month-start oil/Europe stress; SNB shock not yet known,H
+2015-02,0,0,0,continue,Stabilizing,H
+2015-03,0,0,0,continue,Calm,H
+2015-04,0,0,0,continue,Calm,H
+2015-05,0,0,0,continue,Calm,H
+2015-06,0,25,25,continue,Greek 3rd crisis,H
+2015-07,0,25,25,continue,China A-shares correcting,H
+2015-08,0,25,25,continue,Month-start China/EM stress visible; devaluation not yet known,H
+2015-09,0,25,25,continue,EM contagion continues,H
+2015-10,0,25,25,continue,Calming,H
+2015-11,0,25,25,continue,Dec Fed liftoff approaching,H
+2015-12,0,25,25,continue,Month-start Fed liftoff expected; exact hike not yet known,H
+2016-01,0,25,25,continue,Oil $26; HY stress (energy sector mark-down),H
+2016-02,0,25,25,continue,Mid-Feb bottom; HY/energy mark-to-market cliff briefly,H
+2016-03,0,25,25,continue,Recovery (Yellen dovish),H
+2016-04,0,0,0,continue,Calm,H
+2016-05,0,0,0,continue,Calm,H
+2016-06,0,25,25,continue,Month-start Brexit referendum risk visible; vote result not yet known,H
+2016-07,0,0,0,continue,Post-Brexit recovery,H
+2016-08,0,0,0,continue,Calm summer,H
+2016-09,0,0,0,continue,Calm,H
+2016-10,0,0,0,continue,Pre-election jitters,H
+2016-11,0,25,25,continue,Month-start election uncertainty; result not yet known,H
+2016-12,0,0,0,continue,Month-start post-election rally; Fed hike expected,H
+2017-01,0,0,0,continue,Goldilocks bull,H
+2017-02,0,0,0,continue,Calm,H
+2017-03,0,0,0,continue,Calm,H
+2017-04,0,0,0,continue,Calm,H
+2017-05,0,0,0,continue,Calm,H
+2017-06,0,0,0,continue,Calm,H
+2017-07,0,0,0,continue,Calm,H
+2017-08,0,0,0,continue,Charlottesville; North Korea tensions,H
+2017-09,0,0,0,continue,Calm,H
+2017-10,0,0,0,continue,Calm bull,H
+2017-11,0,0,0,continue,Tax cuts approaching,H
+2017-12,0,0,0,continue,Month-start tax-cut expectation,H
+2018-01,0,0,0,continue,Melt-up,H
+2018-02,0,25,25,continue,Month-start volatility fragility visible; XIV event not yet known,H
+2018-03,0,25,25,continue,Recovering; trade war begins,H
+2018-04,0,0,0,continue,Stabilizing,H
+2018-05,0,25,25,continue,Italy political crisis brief,H
+2018-06,0,0,0,continue,Trade war escalating,H
+2018-07,0,0,0,continue,Calm,H
+2018-08,0,25,25,continue,"EM crisis (Turkey, Argentina)",H
+2018-09,0,0,0,continue,Calm,H
+2018-10,0,25,25,continue,Q4 selloff begins; SPX -7%,H
+2018-11,0,25,25,continue,Continued selloff,H
+2018-12,0,25,25,continue,Month-start Q4 selloff ongoing; Christmas Eve bottom not yet known,H
+2019-01,0,25,25,continue,Month-start post-Q4 stress; Powell pivot not yet known,H
+2019-02,0,0,0,continue,Recovery,H
+2019-03,0,0,0,continue,Yield curve inverts 3M-10Y,H
+2019-04,0,0,0,continue,Calm,H
+2019-05,0,0,0,continue,Trade war re-escalates,H
+2019-06,0,0,0,continue,Fed cut signaled,H
+2019-07,0,0,0,continue,Month-start insurance-cut expectation,H
+2019-08,0,25,25,continue,Trade war + 2Y/10Y inverts,H
+2019-09,0,25,25,continue,Month-start trade/yield-curve stress; repo squeeze not yet known,H
+2019-10,0,0,0,continue,Fed standing repo facility,H
+2019-11,0,0,0,continue,Trade deal optimism,H
+2019-12,0,0,0,continue,Phase 1 trade deal,H
+2020-01,0,0,0,continue,Pre-COVID calm,H
+2020-02,0,25,25,continue,Month-start COVID emerging; SPX peak not yet known,H
+2020-03,0,50,50,reduce,Month-start COVID shock visible; March rescue/bottom not yet known,H
+2020-04,0,25,25,continue,Recovery starting; QE massive,H
+2020-05,0,25,25,continue,V-shape underway; gate restored,H
+2020-06,0,0,0,continue,Recovery solid,H
+2020-07,0,0,0,continue,Tech leadership,H
+2020-08,0,0,0,continue,Bull resumption,H
+2020-09,0,0,0,continue,Tech correction; FAANG -10%,H
+2020-10,0,0,0,continue,Election approaching,H
+2020-11,0,0,0,continue,Month-start election/vaccine uncertainty; results not yet known,H
+2020-12,0,0,0,continue,Vaccine rally,H
+2021-01,0,0,0,continue,Month-start speculative-excess noise; GameStop squeeze not yet known,H
+2021-02,0,0,0,continue,Reflation trade,H
+2021-03,0,0,0,continue,Yields rising; rotation,H
+2021-04,0,0,0,continue,Calm bull,H
+2021-05,0,0,0,continue,Inflation concerns starting,H
+2021-06,0,0,0,continue,Month-start inflation/rate concern; hawkish surprise not yet known,H
+2021-07,0,0,0,continue,Calm,H
+2021-08,0,0,0,continue,Calm,H
+2021-09,0,25,25,continue,Evergrande; Chinese property concerns,H
+2021-10,0,0,0,continue,Inflation hitting 6%+,H
+2021-11,0,0,0,continue,Fed taper acceleration announced,H
+2021-12,0,0,0,continue,Inflation 6.8%; rate hikes telegraphed,H
+2022-01,0,25,25,continue,Tech selloff; gate ON (banks healthy),H
+2022-02,0,25,25,continue,Month-start Russia/Ukraine risk visible; invasion not yet known,H
+2022-03,0,25,25,continue,Month-start Ukraine/oil/inflation stress; Fed hike not yet known,H
+2022-04,0,25,25,continue,Crypto + tech selloff intensifying,H
+2022-05,0,25,25,continue,Fed 50bp; bonds + stocks both down,H
+2022-06,0,25,25,continue,"Fed 75bp; crypto crashing (3AC, Celsius)",H
+2022-07,0,25,25,continue,Recession fears,H
+2022-08,0,25,25,continue,Jackson Hole hawkish,H
+2022-09,25,25,50,reduce,Month-start rates/UK fragility visible; LDI break not yet known,H
+2022-10,0,25,25,continue,BoE backstop ends; tensions,H
+2022-11,0,25,25,continue,CPI peaked; rally,H
+2022-12,0,0,0,continue,Year-end calming,H
+2023-01,0,0,0,continue,Disinflation rally,H
+2023-02,0,0,0,continue,Strong jobs data; bull,H
+2023-03,25,25,50,reduce,Month-start bank-duration risk visible; SVB collapse not yet known,H
+2023-04,25,0,25,continue,Month-start regional-bank stress; First Republic resolution not yet known,H
+2023-05,25,0,25,continue,Debt ceiling drama,H
+2023-06,0,0,0,continue,Resolved; AI rally,H
+2023-07,0,0,0,continue,Fed pause near,H
+2023-08,0,0,0,continue,Fitch US downgrade Aug 1,H
+2023-09,0,0,0,continue,10Y > 4.5%,H
+2023-10,0,25,25,continue,Month-start rates/geopolitical risk; Mideast war not yet known,H
+2023-11,0,0,0,continue,Pivot rally,H
+2023-12,0,0,0,continue,Month-start disinflation/pivot expectation; FOMC surprise not yet known,H
+2024-01,0,0,0,continue,Calm bull,H
+2024-02,0,0,0,continue,AI rally,H
+2024-03,0,0,0,continue,Calm,H
+2024-04,0,0,0,continue,Inflation re-acceleration,H
+2024-05,0,0,0,continue,Calm,H
+2024-06,0,0,0,continue,Calm,H
+2024-07,0,0,0,continue,Rotation; small-caps surge,H
+2024-08,0,25,25,continue,Month-start yen-carry/Nikkei fragility visible; Aug-5 break not yet known,H
+2024-09,0,0,0,continue,Month-start Fed-cut expectation,H
+2024-10,0,0,0,continue,Pre-election,H
+2024-11,0,0,0,continue,Month-start election uncertainty; result not yet known,H
+2024-12,0,0,0,continue,Year-end calm,H
+2025-01,0,0,0,continue,Month-start policy/AI concentration risk; DeepSeek shock not yet known,M
+2025-02,0,0,0,continue,Tariff threats escalating,M
+2025-03,0,25,25,continue,Tariff war Mar; SPX correction,M
+2025-04,0,25,25,continue,Month-start tariff-policy risk; Apr-2 announcement not yet known,M
+2025-05,0,25,25,continue,Tariff pauses; recovery,M
+2025-06,0,0,0,continue,Calming,M
+2025-07,0,0,0,continue,Calm summer,M
+2025-08,0,0,0,continue,AI capex peak narrative,M
+2025-09,0,25,25,continue,Fed cuts amid inflation persistence,M
+2025-10,0,25,25,continue,AI valuations stretched; capex concerns,M
+2025-11,25,25,50,reduce,Hyperscaler debt rising; FSB warning brewing,M
+2025-12,25,0,25,continue,Year-end AI capex unease,M
+2026-01,25,0,25,continue,CPI rising; oil tensions; CRE delinquency record,H
+2026-02,25,25,50,reduce,Hyperscaler capex guidance up; market wobble,H
+2026-03,25,25,50,reduce,AI capex stress-test begins,H
+2026-04,25,25,50,reduce,Month-start AI capex/inflation stress; Apr-30 Meta move not yet known,H
+2026-05,25,25,50,reduce,Month-start AI capex stress and sector rotation; later FSB/CPI releases not yet known,H
