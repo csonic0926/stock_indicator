@@ -748,3 +748,47 @@ def test_simulate_trades_refire_resets_min_hold_blocks_signal_exit() -> None:
 
     assert len(treatment.trades) == 1
     assert treatment.trades[0].exit_date == 9
+
+
+def test_simulate_portfolio_balance_margin_overrides_reduce_sizing() -> None:
+    """Per-month margin_overrides must shrink the slot weight for trades
+    entered in those months — final balance differs because the same
+    trade gets sized smaller when its entry month is overridden.
+    """
+    trade_a = Trade(
+        entry_date=pandas.Timestamp("2010-01-15"),
+        exit_date=pandas.Timestamp("2010-01-25"),
+        entry_price=100.0,
+        exit_price=120.0,  # +20% winner
+        profit=20.0,
+        holding_period=10,
+    )
+    trade_b = Trade(
+        entry_date=pandas.Timestamp("2010-04-15"),
+        exit_date=pandas.Timestamp("2010-04-25"),
+        entry_price=100.0,
+        exit_price=120.0,
+        profit=20.0,
+        holding_period=10,
+    )
+
+    # Baseline: full margin 1.5 for both trades.
+    balance_full = simulate_trades  # only to satisfy linter (unused). Real call below.
+    balance_full = simulate_portfolio_balance(
+        trades=[trade_a, trade_b],
+        starting_cash=10_000.0,
+        maximum_position_count=2,
+        margin_multiplier=1.5,
+    )
+    # Treatment: Jan 2010 forced down to margin 1.0; Apr 2010 unchanged.
+    balance_gated = simulate_portfolio_balance(
+        trades=[trade_a, trade_b],
+        starting_cash=10_000.0,
+        maximum_position_count=2,
+        margin_multiplier=1.5,
+        margin_overrides={"2010-01": 1.0},
+    )
+    # Both trades are winners, but the Jan trade in the gated run is
+    # sized smaller (margin 1.0 vs 1.5) so the gated final balance must
+    # be strictly lower (less leveraged upside).
+    assert balance_gated < balance_full

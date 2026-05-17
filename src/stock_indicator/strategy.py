@@ -1204,6 +1204,8 @@ def run_complex_simulation(
     allowed_symbols: set[str] | None = None,
     export_state_at_date: pandas.Timestamp | None = None,
     exported_state: Dict[str, Any] | None = None,
+    risk_score_stop_months: set[str] | None = None,
+    margin_overrides: dict[str, float] | None = None,
 ) -> ComplexSimulationMetrics:
     """Evaluate multiple strategy sets under a shared configuration.
 
@@ -1304,6 +1306,7 @@ def run_complex_simulation(
             pre_cross_signal_lookback=definition.pre_cross_signal_lookback,
             additional_above_ranges=definition.additional_above_ranges,
             reset_hold_on_reentry_signal=definition.reset_hold_on_reentry_signal,
+            risk_score_stop_months=risk_score_stop_months,
         )
 
     # Cross-bucket entry signal union: per-symbol set of dates where ANY
@@ -2468,6 +2471,7 @@ def run_complex_simulation(
             trade_symbol_lookup=filtered_slot_trade_symbol_lookup,
             closing_price_series_by_symbol=artifacts.closing_price_series_by_symbol,
             settlement_lag_days=1,
+            margin_overrides=margin_overrides,
         )
         annual_trade_counts = calculate_annual_trade_counts(trades_for_set)
         final_balance = simulate_portfolio_balance(
@@ -2477,6 +2481,7 @@ def run_complex_simulation(
             withdraw_amount,
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
+            margin_overrides=margin_overrides,
         )
         # Propagate commission data from Trade objects (set by
         # simulate_portfolio_balance) back to the corresponding TradeDetails.
@@ -2499,6 +2504,7 @@ def run_complex_simulation(
             withdraw_amount,
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
+            margin_overrides=margin_overrides,
         )
         if slot_trades_for_set:
             last_trade_exit_date = max(
@@ -2582,6 +2588,7 @@ def run_complex_simulation(
                 aggregated_closing_price_series_by_symbol
             ),
             settlement_lag_days=1,
+            margin_overrides=margin_overrides,
         )
         aggregated_annual_trade_counts = calculate_annual_trade_counts(
             aggregated_trades
@@ -2593,6 +2600,7 @@ def run_complex_simulation(
             withdraw_amount,
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
+            margin_overrides=margin_overrides,
         )
         aggregated_maximum_drawdown = calculate_max_drawdown(
             aggregated_slot_trades,
@@ -2603,6 +2611,7 @@ def run_complex_simulation(
             withdraw_amount,
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
+            margin_overrides=margin_overrides,
         )
         last_exit_date = max(trade.exit_date for trade in aggregated_slot_trades)
         aggregated_compound_annual_growth_rate = 0.0
@@ -4311,6 +4320,7 @@ def _generate_strategy_evaluation_artifacts(
     pre_cross_signal_lookback: bool = False,
     additional_above_ranges: list[tuple[float, float]] | None = None,
     reset_hold_on_reentry_signal: bool = False,
+    risk_score_stop_months: set[str] | None = None,
 ) -> StrategyEvaluationArtifacts:
     """Build intermediate artifacts for strategy evaluation.
 
@@ -4622,6 +4632,19 @@ def _generate_strategy_evaluation_artifacts(
             )
         else:
             price_data_frame["_combined_buy_entry"] = False
+        # Risk-score gate: zero out entry signal for any bar whose
+        # year-month is in the stop-months set. Comes from
+        # historical_risk_scores.csv filtered by stop_threshold (see
+        # crash-survival-assessment skill). Applied to all buckets
+        # uniformly per Cal's "all new entries" rule.
+        if risk_score_stop_months:
+            year_month_series = price_data_frame.index.strftime("%Y-%m")
+            stop_mask = pandas.Series(
+                year_month_series, index=price_data_frame.index
+            ).isin(risk_score_stop_months)
+            price_data_frame["_combined_buy_entry"] = (
+                price_data_frame["_combined_buy_entry"] & (~stop_mask)
+            )
         if sell_signal_columns:
             price_data_frame["_combined_sell_exit"] = (
                 sell_price_data_frame[sell_signal_columns].any(axis=1).fillna(False)

@@ -1779,6 +1779,66 @@ class StockShell(cmd.Cmd):
             export_state_at_date_ts = pandas.Timestamp(export_state_on_date_str)
             exported_state_holder = {}
 
+        # Risk-score gate: optional `risk_score_gate` section in the JSON
+        # config drives two responses based on the monthly Risk Score
+        # produced by the crash-survival-assessment skill:
+        #
+        #   risk_score >= stop_threshold  → ALL buckets skip new entries
+        #   reduce_threshold <= score < stop_threshold
+        #                                 → bucket count unchanged, but
+        #                                   the per-position margin used
+        #                                   for sizing is forced to
+        #                                   reduce_margin (default 1.0
+        #                                   instead of configured 1.5).
+        #
+        # Gate fires only on real 2008-class regimes; the historical
+        # 2010-2026 CSV reaches max ~50 so stop_threshold=75 is dormant.
+        risk_score_stop_months: set[str] | None = None
+        margin_overrides: dict[str, float] | None = None
+        raw_gate = config_document.get("risk_score_gate")
+        if raw_gate is not None:
+            gate_csv_path_text = str(raw_gate.get("csv_path", ""))
+            try:
+                stop_threshold = int(raw_gate.get("stop_threshold", 75))
+                reduce_threshold = int(raw_gate.get("reduce_threshold", 50))
+                reduce_margin = float(raw_gate.get("reduce_margin", 1.0))
+            except (TypeError, ValueError) as parse_error:
+                self.stdout.write(
+                    f"risk_score_gate thresholds must be numeric: {parse_error}\n"
+                )
+                return
+            gate_csv_path = Path(gate_csv_path_text).expanduser()
+            if not gate_csv_path.is_absolute():
+                gate_csv_path = (
+                    Path(__file__).resolve().parent.parent.parent
+                    / gate_csv_path
+                )
+            if not gate_csv_path.exists():
+                self.stdout.write(
+                    f"risk_score_gate.csv_path not found: {gate_csv_path}\n"
+                )
+                return
+            import csv as _csv
+            risk_score_stop_months = set()
+            margin_overrides = {}
+            with gate_csv_path.open("r", newline="") as gate_file:
+                reader = _csv.DictReader(gate_file)
+                for row in reader:
+                    try:
+                        score = int(row["risk_score"])
+                    except (KeyError, ValueError):
+                        continue
+                    if score >= stop_threshold:
+                        risk_score_stop_months.add(row["year_month"])
+                    elif score >= reduce_threshold:
+                        margin_overrides[row["year_month"]] = reduce_margin
+            self.stdout.write(
+                f"Risk-score gate: stop_threshold={stop_threshold} "
+                f"({len(risk_score_stop_months)} stop months), "
+                f"reduce_threshold={reduce_threshold} margin->{reduce_margin} "
+                f"({len(margin_overrides)} reduce months)\n"
+            )
+
         try:
             simulation_metrics = strategy.run_complex_simulation(
                 data_directory,
@@ -1799,6 +1859,8 @@ class StockShell(cmd.Cmd):
                 allowed_symbols=allowed_symbols,
                 export_state_at_date=export_state_at_date_ts,
                 exported_state=exported_state_holder,
+                risk_score_stop_months=risk_score_stop_months,
+                margin_overrides=margin_overrides,
             )
         except ValueError as error:
             self.stdout.write(f"{error}\n")

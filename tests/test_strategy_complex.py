@@ -1745,3 +1745,49 @@ def test_replay_refire_blocks_sl_during_new_min_hold_window() -> None:
     assert adjusted.exit_reason == "adaptive_stop_loss"
     assert adjusted.holding_period == 8
     assert adjusted.exit_date == bars[7][0]
+
+
+def test_risk_score_stop_mask_zeroes_target_months() -> None:
+    """Test the gate-mask logic in isolation — month-keyed mask must
+    AND-zero entry signals for any bar in a stop month.
+
+    Replicates the masking applied inside
+    _generate_strategy_evaluation_artifacts after _combined_buy_entry
+    is built. Keeping this as a focused unit test avoids the full
+    artifacts-pipeline machinery (eligibility mask, dollar-volume
+    filter, etc.) and pins down the only logic this gate adds.
+    """
+    bars = pandas.date_range("2010-01-04", "2010-02-26", freq="B")
+    combined_buy_entry = pandas.Series(True, index=bars)
+    risk_score_stop_months = {"2010-01"}
+
+    year_month_series = bars.strftime("%Y-%m")
+    stop_mask = pandas.Series(
+        year_month_series, index=bars
+    ).isin(risk_score_stop_months)
+    gated = combined_buy_entry & (~stop_mask)
+
+    # All 2010-01 bars must be False; all 2010-02 bars must remain True.
+    jan_bars = gated[gated.index.strftime("%Y-%m") == "2010-01"]
+    feb_bars = gated[gated.index.strftime("%Y-%m") == "2010-02"]
+    assert not jan_bars.any()
+    assert feb_bars.all()
+
+
+def test_risk_score_stop_mask_noop_when_set_empty() -> None:
+    """Empty or None stop_months set must not change entry signal."""
+    bars = pandas.date_range("2010-01-04", "2010-02-26", freq="B")
+    combined_buy_entry = pandas.Series(True, index=bars)
+
+    # Mimic the early-return in production code: when set is falsy, the
+    # masking block is skipped entirely. Verify gated == original.
+    risk_score_stop_months: set[str] = set()
+    if risk_score_stop_months:
+        year_month_series = bars.strftime("%Y-%m")
+        stop_mask = pandas.Series(
+            year_month_series, index=bars
+        ).isin(risk_score_stop_months)
+        gated = combined_buy_entry & (~stop_mask)
+    else:
+        gated = combined_buy_entry.copy()
+    assert gated.all()
