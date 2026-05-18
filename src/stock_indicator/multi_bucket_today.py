@@ -817,6 +817,8 @@ def passes_per_bucket_entry_filters(
 
 @dataclass
 class AcceptedEntry:
+    """Entry-time metadata accepted by live cron and consumed by dashboard."""
+
     bucket_label: str
     strategy_id: str
     symbol: str
@@ -827,6 +829,8 @@ class AcceptedEntry:
     slope_60: float | None
     near_delta: float | None
     dollar_volume_rank: int
+    max_hold: int | None
+    reset_hold_on_reentry_signal: bool
 
 
 @dataclass
@@ -1211,6 +1215,10 @@ def compute_today_signals(
                 slope_60=slope_60_value if slope_60_value is not None else None,
                 near_delta=near_delta_value if near_delta_value is not None else None,
                 dollar_volume_rank=dollar_volume_rank,
+                max_hold=bucket_def.max_hold,
+                reset_hold_on_reentry_signal=(
+                    bucket_def.reset_hold_on_reentry_signal
+                ),
             )
             candidates.append((
                 bucket_def.entry_priority,
@@ -1360,7 +1368,9 @@ def compute_today_signals(
             f"rolling_mp={record.rolling_mp:.6f} "
             f"slope_60={slope_text} near_delta={near_delta_text} "
             f"min_hold_tp={adaptive.min_hold_tp} "
-            f"disable_sl_trigger={adaptive.disable_sl_trigger}"
+            f"disable_sl_trigger={adaptive.disable_sl_trigger} "
+            f"max_hold={record.max_hold} "
+            f"reset_hold_on_reentry_signal={record.reset_hold_on_reentry_signal}"
         )
 
     # ------------------------------------------------------------------
@@ -1416,6 +1426,10 @@ def compute_today_signals(
                     "rolling_mp": round(new_record.rolling_mp, 6),
                     "min_hold_sl": _resolve_min_hold_sl_for_bucket(
                         new_record.bucket_label
+                    ),
+                    "max_hold": new_record.max_hold,
+                    "reset_hold_on_reentry_signal": (
+                        new_record.reset_hold_on_reentry_signal
                     ),
                     "disable_sl_trigger": bool(adaptive.disable_sl_trigger),
                     "slope_60": (

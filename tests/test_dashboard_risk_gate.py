@@ -11,25 +11,74 @@ from typing import Any
 import pandas
 
 from stock_indicator import dashboard
+from stock_indicator.futu_trade_metadata import parse_futu_order_remark
 
 
 class FakeTradeContext:
     """Minimal Futu trade context for dashboard preview tests."""
 
-    def __init__(self, *, total_assets: float = 78_000.0) -> None:
+    def __init__(
+        self,
+        *,
+        total_assets: float = 78_000.0,
+        positions: list[dict[str, Any]] | None = None,
+        deals: list[dict[str, Any]] | None = None,
+        orders: list[dict[str, Any]] | None = None,
+    ) -> None:
         self.total_assets = total_assets
+        self.positions = positions or []
+        self.deals = deals or []
+        self.orders = orders or []
+        self.is_closed = False
+
+    def _raise_if_closed(self) -> None:
+        """Fail tests if dashboard queries history after closing Futu context."""
+        if self.is_closed:
+            raise RuntimeError("Futu context used after close")
 
     def accinfo_query(self, trd_env: Any = None) -> tuple[int, pandas.DataFrame]:
         """Return a deterministic account response."""
+        self._raise_if_closed()
         return 0, pandas.DataFrame([{"total_assets": self.total_assets}])
 
     def position_list_query(self, trd_env: Any = None) -> tuple[int, pandas.DataFrame]:
-        """Return no current positions."""
-        return 0, pandas.DataFrame(columns=["code", "qty"])
+        """Return deterministic current positions."""
+        self._raise_if_closed()
+        return 0, pandas.DataFrame(self.positions, columns=["code", "qty"])
+
+    def history_deal_list_query(
+        self,
+        code: str = "",
+        start: str = "",
+        end: str = "",
+        trd_env: Any = None,
+    ) -> tuple[int, pandas.DataFrame]:
+        """Return deterministic historical Futu deals."""
+        self._raise_if_closed()
+        return 0, pandas.DataFrame(
+            self.deals,
+            columns=["code", "trd_side", "qty", "create_time", "order_id"],
+        )
+
+    def history_order_list_query(
+        self,
+        status_filter_list: list[Any] | None = None,
+        code: str = "",
+        start: str = "",
+        end: str = "",
+        trd_env: Any = None,
+    ) -> tuple[int, pandas.DataFrame]:
+        """Return deterministic historical Futu orders."""
+        self._raise_if_closed()
+        return 0, pandas.DataFrame(
+            self.orders,
+            columns=["order_id", "remark"],
+        )
 
     def close(self) -> None:
         """Match the Futu context close contract."""
-        return None
+        self.is_closed = True
+
 
 
 def _write_dashboard_fixture(
@@ -120,6 +169,7 @@ def _patch_dashboard_paths(
     monkeypatch.setitem(sys.modules, "futu", futu_module)
     monkeypatch.setattr(dashboard, "PRODUCTION_CONFIG_PATH", config_path)
     monkeypatch.setattr(dashboard, "REPOSITORY_ROOT", repository_root)
+    monkeypatch.setattr(dashboard, "DATA_DIRECTORY", repository_root)
     monkeypatch.setattr(dashboard, "LOGS_DIRECTORY", log_directory)
     monkeypatch.setattr(dashboard, "_get_futu_trd_ctx", lambda: FakeTradeContext())
     monkeypatch.setattr(dashboard, "_get_trd_env", lambda: object())
@@ -183,6 +233,7 @@ def test_preview_orders_blocks_buy_orders_during_risk_score_stop(
             "tp_pct": 0.05,
             "sl_pct": 0.03,
             "dollar_volume_rank": 0,
+            "disable_sl_trigger": True,
             "status": "risk_score_stop",
             "skip_reason": "risk_score=100 >= stop_threshold=75 for 2008-04",
         }
@@ -213,6 +264,238 @@ def test_preview_orders_allows_buy_orders_when_risk_score_is_below_stop(
     assert order["symbol"] == "AAA"
     assert order["qty"] == 250
     assert "status" not in order
+
+def test_dashboard_buy_remark_uses_compact_v2_schema() -> None:
+    """BUY remarks should fit Futu limits and round-trip live metadata."""
+    order = {
+        "side": "BUY",
+        "strategy_id": "fish_head_b30_35",
+        "tp_pct": 0.0658,
+        "sl_pct": 0.0417,
+        "min_hold_sl": 1,
+        "disable_sl_trigger": True,
+        "max_hold": 14,
+        "reset_hold_on_reentry_signal": True,
+    }
+
+    remark_text = dashboard._format_dashboard_order_remark(order)
+    metadata = parse_futu_order_remark(remark_text)
+
+    assert remark_text == "si2|s=b|tp=658|sl=417|ms=1|ds=1|mh=14|rr=1"
+    assert len(remark_text.encode("utf-8")) <= 64
+    assert metadata["strategy_id"] == "fish_head_b30_35"
+    assert metadata["tp_pct"] == 0.0658
+    assert metadata["sl_pct"] == 0.0417
+    assert metadata["min_hold_sl"] == 1
+    assert metadata["disable_sl_trigger"] is True
+    assert metadata["max_hold"] == 14
+    assert metadata["reset_hold_on_reentry_signal"] is True
+    assert metadata["supports_tp_sl"] is True
+
+
+def test_legacy_remark_is_max_hold_only() -> None:
+    """Legacy remarks must not be treated as TP/SL metadata."""
+    metadata = parse_futu_order_remark(
+        "si|sid=fish_head_b30_35|b=fish_head_b30_35|mh=10|rr=0"
+    )
+
+    assert metadata["strategy_id"] == "fish_head_b30_35"
+    assert metadata["max_hold"] == 10
+    assert metadata["supports_tp_sl"] is False
+    assert "tp_pct" not in metadata
+
+
+def test_preview_orders_adds_max_hold_sell_order(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Dashboard should create SELL orders when a live position reaches max_hold."""
+    from stock_indicator import multi_bucket_today
+
+    config_path, log_directory = _write_dashboard_fixture(
+        tmp_path,
+        signal_date="2026-05-15",
+        risk_score=50,
+    )
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 6,
+                "starting_cash": 60_000,
+                "margin": 1.5,
+                "withdraw": 0,
+                "risk_score_gate": {
+                    "csv_path": "historical_risk_scores.csv",
+                    "stop_threshold": 75,
+                },
+                "buckets": [
+                    {
+                        "label": "fish_head_b30_35",
+                        "strategy_id": "fish_head_b30_35",
+                        "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                        "max_hold": 10,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: FakeTradeContext(
+            positions=[{"code": "US.HELD", "qty": 12}],
+            deals=[
+                {
+                    "code": "US.HELD",
+                    "trd_side": "BUY",
+                    "qty": 12,
+                    "create_time": "2026-05-01 09:30:00",
+                    "order_id": "101",
+                }
+            ],
+            orders=[
+                {
+                    "order_id": "101",
+                    "remark": "si|sid=fish_head_b30_35|b=fish_head_b30_35|mh=10|rr=0",
+                }
+            ],
+        ),
+    )
+    monkeypatch.setattr(
+        multi_bucket_today,
+        "load_strategy_set_mapping",
+        lambda: {"fish_head_b30_35": ("fish_head_buy", "fish_head_sell")},
+    )
+    monkeypatch.setattr(
+        multi_bucket_today,
+        "load_strategy_entry_filters",
+        lambda: {},
+    )
+
+    preview = dashboard.api_preview_orders()
+
+    max_hold_orders = [
+        order for order in preview["orders"]
+        if order.get("exit_reason") == "max_hold"
+    ]
+    assert max_hold_orders == [
+        {
+            "side": "SELL",
+            "symbol": "HELD",
+            "qty": 12,
+            "price": 10.0,
+            "order_type": "MARKET",
+            "bucket": "fish_head_b30_35",
+            "strategy_id": "fish_head_b30_35",
+            "exit_reason": "max_hold",
+            "bars_held": 11,
+            "max_hold": 10,
+            "entry_source": "futu_history_deals",
+        }
+    ]
+
+
+def test_preview_orders_skips_max_hold_when_reentry_resets_window(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A same-day raw entry should suppress max-hold for reset-enabled buckets."""
+    config_path, log_directory = _write_dashboard_fixture(
+        tmp_path,
+        signal_date="2026-05-15",
+        risk_score=50,
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: FakeTradeContext(
+            positions=[{"code": "US.AAA", "qty": 12}],
+            deals=[
+                {
+                    "code": "US.AAA",
+                    "trd_side": "BUY",
+                    "qty": 12,
+                    "create_time": "2026-05-01 09:30:00",
+                    "order_id": "201",
+                }
+            ],
+            orders=[
+                {
+                    "order_id": "201",
+                    "remark": "si|sid=fish_head_vacuum_turn|b=fish_head_production|mh=10|rr=1",
+                }
+            ],
+        ),
+    )
+
+    preview = dashboard.api_preview_orders()
+
+    assert not [
+        order for order in preview["orders"]
+        if order.get("exit_reason") == "max_hold"
+    ]
+
+
+def test_preview_orders_does_not_use_local_state_for_max_hold(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Local accepted_entries should not create live max-hold SELL orders."""
+    config_path, log_directory = _write_dashboard_fixture(
+        tmp_path,
+        signal_date="2026-05-15",
+        risk_score=50,
+    )
+    (tmp_path / "adaptive_state.json").write_text(
+        json.dumps(
+            {
+                "accepted_entries": [
+                    {
+                        "entry_date": "2026-05-01",
+                        "bucket": "fish_head_production",
+                        "strategy_id": "fish_head_vacuum_turn",
+                        "symbol": "LOCAL_ONLY",
+                        "max_hold": 10,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: FakeTradeContext(
+            positions=[{"code": "US.LOCAL_ONLY", "qty": 12}],
+            deals=[],
+        ),
+    )
+
+    preview = dashboard.api_preview_orders()
+
+    assert not [
+        order for order in preview["orders"]
+        if order.get("symbol") == "LOCAL_ONLY"
+    ]
 
 
 def test_risk_score_gate_reports_missing_csv(
