@@ -63,6 +63,34 @@
       "min_hold_sl": 1,
       "tp_regime_adjust": true,
       "tp_slope_amplify": true
+    },
+    {
+      "label": "fish_head_b30_35",
+      "strategy_id": "fish_head_b30_35",
+      "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+      "priority": 2,
+      "max_positions": 2,
+      "fill_remaining": true,
+      "exit_alpha_factor": 3,
+      "sigma": 0.75,
+      "min_sl": 0.01,
+      "fixed_sl": null,
+      "fixed_tp": null,
+      "free_fall_slope": -0.2,
+      "free_fall_near_delta": -0.05,
+      "override_min_hold_tp_only": true,
+      "min_hold_tp": 1,
+      "override_min_hold_sl_only": true,
+      "min_hold_sl": 1,
+      "tp_regime_adjust": false,
+      "tp_slope_amplify": false,
+      "pre_cross_signal_lookback": true,
+      "max_hold": 14,
+      "reset_hold_on_reentry_signal": true
     }
-  ]
+  ],
+  "risk_score_gate": {
+    "csv_path": "data/historical_risk_scores.csv",
+    "stop_threshold": 75
+  }
 }

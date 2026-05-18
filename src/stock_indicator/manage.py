@@ -1782,20 +1782,11 @@ class StockShell(cmd.Cmd):
             export_state_at_date_ts = pandas.Timestamp(export_state_on_date_str)
             exported_state_holder = {}
 
-        # Risk-score gate: optional `risk_score_gate` section in the JSON
-        # config drives two responses based on the monthly Risk Score
-        # produced by the crash-survival-assessment skill:
-        #
-        #   risk_score >= stop_threshold  → ALL buckets skip new entries
-        #   reduce_threshold <= score < stop_threshold
-        #                                 → bucket count unchanged, but
-        #                                   the per-position margin used
-        #                                   for sizing is forced to
-        #                                   reduce_margin (default 1.0
-        #                                   instead of configured 1.5).
-        #
-        # Gate fires only on real 2008-class regimes; the historical
-        # 2010-2026 CSV reaches max ~50 so stop_threshold=75 is dormant.
+        # Risk-score gate for simulation/backtest configs. Stop months
+        # remove new entries from gated buckets. Optional reduce months are
+        # supported only when `reduce_threshold` is explicitly present for
+        # legacy research runs; production stop-only configs omit it. Live
+        # order blocking belongs to dashboard.py, not cron/signal rolling.
         risk_score_stop_months: set[str] | None = None
         margin_overrides: dict[str, float] | None = None
         raw_gate = config_document.get("risk_score_gate")
@@ -1803,7 +1794,12 @@ class StockShell(cmd.Cmd):
             gate_csv_path_text = str(raw_gate.get("csv_path", ""))
             try:
                 stop_threshold = int(raw_gate.get("stop_threshold", 75))
-                reduce_threshold = int(raw_gate.get("reduce_threshold", 50))
+                raw_reduce_threshold = raw_gate.get("reduce_threshold")
+                reduce_threshold = (
+                    int(raw_reduce_threshold)
+                    if raw_reduce_threshold is not None
+                    else None
+                )
                 reduce_margin = float(raw_gate.get("reduce_margin", 1.0))
             except (TypeError, ValueError) as parse_error:
                 self.stdout.write(
@@ -1833,13 +1829,21 @@ class StockShell(cmd.Cmd):
                         continue
                     if score >= stop_threshold:
                         risk_score_stop_months.add(row["year_month"])
-                    elif score >= reduce_threshold:
+                    elif (
+                        reduce_threshold is not None
+                        and score >= reduce_threshold
+                    ):
                         margin_overrides[row["year_month"]] = reduce_margin
+            reduce_description = (
+                "disabled"
+                if reduce_threshold is None
+                else f"threshold={reduce_threshold} margin->{reduce_margin} "
+                     f"({len(margin_overrides)} reduce months)"
+            )
             self.stdout.write(
                 f"Risk-score gate: stop_threshold={stop_threshold} "
                 f"({len(risk_score_stop_months)} stop months), "
-                f"reduce_threshold={reduce_threshold} margin->{reduce_margin} "
-                f"({len(margin_overrides)} reduce months)\n"
+                f"reduce={reduce_description}\n"
             )
 
         try:

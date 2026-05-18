@@ -2,12 +2,65 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pandas
 
 from stock_indicator import multi_bucket_today, strategy
+
+
+def test_load_multi_bucket_config_preserves_bucket_sigma_overrides(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Live cron config loader should not lose per-bucket TP sigma knobs."""
+    config_path = tmp_path / "multi_bucket_config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 6,
+                "starting_cash": 60_000,
+                "margin": 1.5,
+                "withdraw": 0,
+                "adaptive_tp_sl": {"window": 20, "sigma": 0.5},
+                "buckets": [
+                    {
+                        "label": "fish_head_production",
+                        "strategy_id": "fish_head_vacuum_turn",
+                        "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                        "sigma": 0.75,
+                    },
+                    {
+                        "label": "fish_tail_explore",
+                        "strategy_id": "fish_tail_blow_off_top",
+                        "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                        "sigma": 0.0,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        multi_bucket_today,
+        "load_strategy_set_mapping",
+        lambda: {
+            "fish_head_vacuum_turn": ("fish_head_buy", "fish_head_sell"),
+            "fish_tail_blow_off_top": ("fish_tail_buy", "fish_tail_sell"),
+        },
+    )
+    monkeypatch.setattr(
+        multi_bucket_today,
+        "load_strategy_entry_filters",
+        lambda: {},
+    )
+
+    loaded_config = multi_bucket_today.load_multi_bucket_config(config_path)
+
+    assert loaded_config.bucket_definitions["fish_head_production"].sigma == 0.75
+    assert loaded_config.bucket_definitions["fish_tail_explore"].sigma == 0.0
 
 
 def _build_test_bucket(

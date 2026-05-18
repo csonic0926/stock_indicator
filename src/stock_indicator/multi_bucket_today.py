@@ -440,6 +440,16 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
                 and raw_bucket["min_sl"] is not None
                 else None
             ),
+            # TODO: review
+            # Production cron must honor the same per-bucket sigma override
+            # as the simulator; otherwise live frozen TP can silently inherit
+            # the top-level adaptive sigma for every bucket.
+            sigma=(
+                float(raw_bucket["sigma"])
+                if "sigma" in raw_bucket
+                and raw_bucket["sigma"] is not None
+                else None
+            ),
             slope_max=(
                 float(raw_bucket["slope_max"])
                 if "slope_max" in raw_bucket

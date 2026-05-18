@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import math
@@ -22,10 +23,58 @@ LOGS_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "logs"
 app = FastAPI(title="Stock Indicator Dashboard")
 
 
+def _parse_log_key_value_tokens(line_body: str) -> dict[str, Any]:
+    """Parse machine-readable dashboard log tokens into a dict."""
+    fields: dict[str, Any] = {}
+    for token_text in line_body.strip().split():
+        if "=" not in token_text:
+            continue
+        key_text, _, raw_value_text = token_text.partition("=")
+        if raw_value_text == "None":
+            fields[key_text] = None
+            continue
+        try:
+            if key_text in {
+                "tp_pct",
+                "sl_pct",
+                "rolling_mp",
+                "slope_60",
+                "near_delta",
+            }:
+                fields[key_text] = float(raw_value_text)
+            elif key_text in {"min_hold_tp", "dollar_volume_rank"}:
+                fields[key_text] = int(raw_value_text)
+            elif key_text == "disable_sl_trigger":
+                fields[key_text] = raw_value_text.lower() == "true"
+            else:
+                fields[key_text] = raw_value_text
+        except ValueError:
+            fields[key_text] = raw_value_text
+    return fields
+
+
 def _parse_log(log_path: Path) -> dict[str, Any]:
     """Parse a daily multi-bucket log into structured data."""
     text = log_path.read_text(encoding="utf-8")
     result: dict[str, Any] = {"raw": text, "date": log_path.stem}
+
+    # TODO: review
+    # Raw strategy entry signals are emitted before dashboard/order-layer
+    # checks. These should remain visible even when no BUY order is accepted
+    # or when the risk-score gate later blocks order submission.
+    entry_signal_records: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        if not line.startswith("[ENTRY_SIGNAL]"):
+            continue
+        entry_signal_records.append(
+            _parse_log_key_value_tokens(line[len("[ENTRY_SIGNAL]"):])
+        )
+    result["entry_signal_records"] = entry_signal_records
+    result["entry_signals"] = [
+        record.get("symbol")
+        for record in entry_signal_records
+        if record.get("symbol")
+    ]
 
     # Bucket-aware per-entry frozen TP/SL (multi-bucket schema).
     # Format: [FROZEN_TP_SL] entry_date=... bucket=... strategy_id=...
@@ -35,26 +84,9 @@ def _parse_log(log_path: Path) -> dict[str, Any]:
     for line in text.splitlines():
         if not line.startswith("[FROZEN_TP_SL]"):
             continue
-        fields: dict[str, Any] = {}
-        for token in line[len("[FROZEN_TP_SL]"):].strip().split():
-            if "=" not in token:
-                continue
-            key, _, raw_value = token.partition("=")
-            if raw_value == "None":
-                fields[key] = None
-                continue
-            try:
-                if key in {"tp_pct", "sl_pct", "rolling_mp", "slope_60", "near_delta"}:
-                    fields[key] = float(raw_value)
-                elif key in {"min_hold_tp", "dollar_volume_rank"}:
-                    fields[key] = int(raw_value)
-                elif key == "disable_sl_trigger":
-                    fields[key] = raw_value.lower() == "true"
-                else:
-                    fields[key] = raw_value
-            except ValueError:
-                fields[key] = raw_value
-        frozen_entries.append(fields)
+        frozen_entries.append(
+            _parse_log_key_value_tokens(line[len("[FROZEN_TP_SL]"):])
+        )
     result["frozen_entries"] = frozen_entries
     # Convenience: lists of new BUY symbols today (from frozen entries
     # whose entry_date matches today's log date).
@@ -63,6 +95,28 @@ def _parse_log(log_path: Path) -> dict[str, Any]:
         if e.get("entry_date") == log_path.stem and e.get("symbol")
     ]
     result["buy_actions"] = todays_buy_symbols
+    result["accepted_buy_actions"] = todays_buy_symbols
+
+    accepted_match = re.search(r"^accepted:\s*(.+)$", text, re.MULTILINE)
+    rejected_match = re.search(r"^rejected:\s*(.+)$", text, re.MULTILINE)
+    result["slot_allocation"] = {
+        "accepted": _parse_slot_allocation_pairs(accepted_match.group(1))
+        if accepted_match else [],
+        "rejected": _parse_slot_allocation_pairs(rejected_match.group(1))
+        if rejected_match else [],
+    }
+    allocation_summary_match = re.search(
+        r"max_position_count=(\d+)\s+"
+        r"held_before_today=(\d+)\s+"
+        r"same_day_closes=(\d+)",
+        text,
+    )
+    if allocation_summary_match:
+        result["slot_allocation"].update({
+            "max_position_count": int(allocation_summary_match.group(1)),
+            "held_before_today": int(allocation_summary_match.group(2)),
+            "same_day_closes": int(allocation_summary_match.group(3)),
+        })
 
     # Exit signals (machine-readable per-symbol lines).
     # Format: [EXIT_SIGNAL] symbol=X
@@ -103,9 +157,41 @@ def _parse_log(log_path: Path) -> dict[str, Any]:
 
     # Positions
     pos_m = re.search(r"Concurrent positions after entry \((\d+) total\)", text)
-    result["position_count"] = int(pos_m.group(1)) if pos_m else 0
+    if pos_m:
+        result["position_count"] = int(pos_m.group(1))
+    elif allocation_summary_match:
+        result["position_count"] = (
+            int(allocation_summary_match.group(2))
+            - int(allocation_summary_match.group(3))
+            + len(result["slot_allocation"]["accepted"])
+        )
+    else:
+        result["position_count"] = 0
 
     return result
+
+
+def _parse_slot_allocation_pairs(raw_allocation_text: str) -> list[dict[str, str]]:
+    """Parse cron's accepted/rejected slot-allocation tuple summaries."""
+    try:
+        raw_records = ast.literal_eval(raw_allocation_text)
+    except (ValueError, SyntaxError):
+        return []
+    if not isinstance(raw_records, list):
+        return []
+
+    parsed_records: list[dict[str, str]] = []
+    for raw_record in raw_records:
+        if not isinstance(raw_record, tuple) or len(raw_record) < 2:
+            continue
+        parsed_record = {
+            "symbol": str(raw_record[0]),
+            "bucket": str(raw_record[1]),
+        }
+        if len(raw_record) >= 3:
+            parsed_record["reason"] = str(raw_record[2])
+        parsed_records.append(parsed_record)
+    return parsed_records
 
 
 def _load_json(path: Path) -> dict:
@@ -115,6 +201,51 @@ def _load_json(path: Path) -> dict:
         except (json.JSONDecodeError, OSError):
             pass
     return {}
+
+
+def _load_current_bucket_tp_sl(adaptive_state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Compute current per-bucket base TP/SL from config and rolling state.
+
+    This diagnostic is intentionally separate from order preview. BUY orders
+    still use entry-time [FROZEN_TP_SL] values from the cron log, while the
+    dashboard summary should reflect current config + rolling pool after a
+    restart or code fix rather than stale historical frozen lines.
+    """
+    try:
+        from stock_indicator import multi_bucket_today, strategy
+
+        config = multi_bucket_today.load_multi_bucket_config(
+            PRODUCTION_CONFIG_PATH
+        )
+        if config.adaptive_tp_sl is None:
+            return []
+        bucket_states: list[dict[str, Any]] = []
+        for bucket_label, bucket_definition in config.bucket_definitions.items():
+            tp_pct, sl_pct, rolling_mp, rolling_ml = (
+                strategy.compute_frozen_tp_sl_for_bucket(
+                    bucket_def=bucket_definition,
+                    adaptive_tp_sl=config.adaptive_tp_sl,
+                    closed_winners=adaptive_state.get("winners", []),
+                    closed_losers=adaptive_state.get("losers", []),
+                    entry_slope_60=None,
+                )
+            )
+            bucket_states.append({
+                "bucket": bucket_label,
+                "strategy_id": bucket_definition.strategy_identifier,
+                "tp_pct": tp_pct,
+                "sl_pct": sl_pct,
+                "rolling_mp": rolling_mp,
+                "rolling_ml": rolling_ml,
+                "sigma": bucket_definition.sigma,
+                "tp_regime_adjust": bucket_definition.tp_regime_adjust,
+                "tp_slope_amplify": bucket_definition.tp_slope_amplify,
+                "source": "current_config_base",
+            })
+        return bucket_states
+    except (OSError, json.JSONDecodeError, ValueError) as config_error:
+        LOGGER.warning("Failed to compute current bucket TP/SL: %s", config_error)
+        return []
 
 
 def _get_log_dates() -> list[str]:
@@ -134,6 +265,7 @@ def api_state():
     """Current system state: signal trades, adaptive state, latest log."""
     signal_trades = _load_json(DATA_DIRECTORY / "signal_trades.json")
     adaptive = _load_json(DATA_DIRECTORY / "adaptive_state.json")
+    current_bucket_tp_sl = _load_current_bucket_tp_sl(adaptive)
     dates = _get_log_dates()
     latest_log = None
     if dates:
@@ -141,6 +273,7 @@ def api_state():
     return {
         "signal_trades": signal_trades,
         "adaptive_state": adaptive,
+        "current_bucket_tp_sl": current_bucket_tp_sl,
         "latest_log": latest_log,
         "available_dates": dates[:30],
     }
@@ -229,6 +362,18 @@ PRODUCTION_CONFIG_PATH = (
     / "data"
     / "multi_bucket_production.json"
 )
+REPOSITORY_ROOT = Path(__file__).resolve().parent.parent.parent
+RISK_GATE_SKIP_STATUSES = {"slot_full", "risk_score_stop"}
+
+# TODO: review
+
+def _load_production_config() -> dict[str, Any]:
+    """Read the live multi-bucket config without caching it."""
+    with PRODUCTION_CONFIG_PATH.open("r", encoding="utf-8") as config_file:
+        config_document = json.load(config_file)
+    if not isinstance(config_document, dict):
+        raise ValueError("production config root must be a JSON object")
+    return config_document
 
 
 def _load_max_positions() -> int:
@@ -239,10 +384,145 @@ def _load_max_positions() -> int:
     so dashboard sizing stays aligned without a hardcoded constant.
     """
     try:
-        with PRODUCTION_CONFIG_PATH.open("r", encoding="utf-8") as fp:
-            return int(json.load(fp).get("max_position_count", 6))
+        return int(_load_production_config().get("max_position_count", 6))
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return 6
+
+
+def _resolve_config_path(path_text: str) -> Path:
+    """Resolve a config-relative path from the repository root."""
+    resolved_path = Path(path_text).expanduser()
+    if resolved_path.is_absolute():
+        return resolved_path
+    return REPOSITORY_ROOT / resolved_path
+
+
+def _load_risk_score_gate_state(signal_date: str | None) -> dict[str, Any]:
+    """Return the dashboard order gate state for a signal date.
+
+    The risk-score gate belongs to the dashboard/order layer: cron should
+    keep emitting signals and updating rolling state, while this function
+    decides whether BUY orders are allowed to leave the dashboard.
+    """
+    default_state: dict[str, Any] = {
+        "enabled": False,
+        "status": "off",
+        "year_month": None,
+        "risk_score": None,
+        "stop_threshold": None,
+        "reason": "risk_score_gate not configured",
+    }
+    if not signal_date:
+        return {**default_state, "status": "error", "reason": "missing signal date"}
+
+    try:
+        signal_month = date.fromisoformat(signal_date).strftime("%Y-%m")
+    except ValueError:
+        return {
+            **default_state,
+            "status": "error",
+            "reason": f"invalid signal date: {signal_date}",
+        }
+
+    try:
+        config_document = _load_production_config()
+    except (OSError, json.JSONDecodeError, ValueError) as config_error:
+        return {
+            **default_state,
+            "status": "error",
+            "year_month": signal_month,
+            "reason": f"failed to read production config: {config_error}",
+        }
+
+    raw_gate = config_document.get("risk_score_gate")
+    if raw_gate is None:
+        return {**default_state, "year_month": signal_month}
+    if not isinstance(raw_gate, dict):
+        return {
+            **default_state,
+            "enabled": True,
+            "status": "error",
+            "year_month": signal_month,
+            "reason": "risk_score_gate must be a JSON object",
+        }
+
+    try:
+        stop_threshold = int(raw_gate.get("stop_threshold", 75))
+    except (TypeError, ValueError) as threshold_error:
+        return {
+            **default_state,
+            "enabled": True,
+            "status": "error",
+            "year_month": signal_month,
+            "reason": f"invalid risk_score_gate.stop_threshold: {threshold_error}",
+        }
+
+    csv_path_text = str(raw_gate.get("csv_path", "")).strip()
+    if not csv_path_text:
+        return {
+            **default_state,
+            "enabled": True,
+            "status": "error",
+            "year_month": signal_month,
+            "stop_threshold": stop_threshold,
+            "reason": "risk_score_gate.csv_path is required",
+        }
+
+    csv_path = _resolve_config_path(csv_path_text)
+    if not csv_path.exists():
+        return {
+            **default_state,
+            "enabled": True,
+            "status": "error",
+            "year_month": signal_month,
+            "stop_threshold": stop_threshold,
+            "reason": f"risk score CSV not found: {csv_path}",
+        }
+
+    import csv as csv_module
+
+    try:
+        with csv_path.open("r", newline="") as risk_score_file:
+            for row in csv_module.DictReader(risk_score_file):
+                if row.get("year_month") != signal_month:
+                    continue
+                risk_score = int(row["risk_score"])
+                status = "stop" if risk_score >= stop_threshold else "open"
+                return {
+                    "enabled": True,
+                    "status": status,
+                    "year_month": signal_month,
+                    "risk_score": risk_score,
+                    "stop_threshold": stop_threshold,
+                    "reason": (
+                        "risk_score >= stop_threshold"
+                        if status == "stop"
+                        else "risk_score below stop_threshold"
+                    ),
+                }
+    except (OSError, KeyError, TypeError, ValueError) as csv_error:
+        return {
+            **default_state,
+            "enabled": True,
+            "status": "error",
+            "year_month": signal_month,
+            "stop_threshold": stop_threshold,
+            "reason": f"failed to read risk score CSV: {csv_error}",
+        }
+
+    return {
+        **default_state,
+        "enabled": True,
+        "status": "error",
+        "year_month": signal_month,
+        "stop_threshold": stop_threshold,
+        "reason": f"risk score missing for {signal_month}",
+    }
+
+
+def _risk_gate_blocks_buy_orders(gate_state: dict[str, Any]) -> bool:
+    """Return True when dashboard must not send BUY orders."""
+    return gate_state.get("status") == "stop"
 
 
 # NOTE: do NOT cache this at module load — re-read per request so config
@@ -411,6 +691,11 @@ def api_preview_orders():
         return {"error": "No log files found"}
     log = _parse_log(LOGS_DIRECTORY / f"{dates[0]}.log")
 
+    risk_gate_state = _load_risk_score_gate_state(log.get("date"))
+    if risk_gate_state.get("status") == "error":
+        return {"error": risk_gate_state.get("reason"), "risk_score_gate": risk_gate_state}
+    buy_orders_blocked_by_risk_score = _risk_gate_blocks_buy_orders(risk_gate_state)
+
     # Build per-symbol metadata from today's [FROZEN_TP_SL] lines so the
     # preview can show bucket / tp_pct / sl_pct alongside each BUY.
     frozen_today: dict[str, dict[str, Any]] = {
@@ -453,7 +738,15 @@ def api_preview_orders():
             "sl_pct": meta.get("sl_pct"),
             "dollar_volume_rank": meta.get("dollar_volume_rank"),
         }
-        if slots_remaining <= 0:
+        if buy_orders_blocked_by_risk_score:
+            order_dict["status"] = "risk_score_stop"
+            order_dict["qty"] = 0
+            order_dict["skip_reason"] = (
+                f"risk_score={risk_gate_state.get('risk_score')} >= "
+                f"stop_threshold={risk_gate_state.get('stop_threshold')} "
+                f"for {risk_gate_state.get('year_month')}"
+            )
+        elif slots_remaining <= 0:
             order_dict["status"] = "slot_full"
             order_dict["skip_reason"] = (
                 f"max_positions={max_positions} already filled "
@@ -489,6 +782,7 @@ def api_preview_orders():
         "held_count": len(held_symbols),
         "trading_env": TRADING_ENV,
         "signal_date": log.get("date"),
+        "risk_score_gate": risk_gate_state,
     }
 
 
@@ -505,20 +799,37 @@ def api_execute_orders(req: ExecuteRequest):
     trd_env = _get_trd_env()
     results = []
 
+    latest_gate_state: dict[str, Any] | None = None
+    latest_dates = _get_log_dates()
+    if latest_dates:
+        latest_gate_state = _load_risk_score_gate_state(latest_dates[0])
+
     for order in req.orders:
         symbol = order["symbol"]
         side = TrdSide.BUY if order["side"] == "BUY" else TrdSide.SELL
         qty = order["qty"]
         code = f"US.{symbol}"
 
-        # Preview marked this BUY as slot_full (Futu portfolio already
-        # at max_positions). Skip without sending so we never exceed
-        # the cap when the user clicks Confirm.
-        if order.get("status") == "slot_full":
+        # Preview may mark BUY orders as non-sendable (slot cap or
+        # dashboard risk-score stop). Skip without sending so confirm cannot
+        # bypass the preview-layer guardrails.
+        if order.get("status") in RISK_GATE_SKIP_STATUSES:
             results.append({
                 "symbol": symbol,
                 "status": "skipped",
-                "reason": order.get("skip_reason") or "slot_full",
+                "reason": order.get("skip_reason") or order.get("status"),
+            })
+            continue
+
+        if (
+            order.get("side") == "BUY"
+            and latest_gate_state is not None
+            and latest_gate_state.get("status") in {"stop", "error"}
+        ):
+            results.append({
+                "symbol": symbol,
+                "status": "skipped",
+                "reason": latest_gate_state.get("reason") or "risk_score_gate",
             })
             continue
 
@@ -830,6 +1141,9 @@ function renderTrades() {
 function buildBucketMap(log, adaptive) {
   const m = {};
   const shorten = (b) => (b || '').replace('_production', '').replace('_explore', '');
+  for (const e of (log.entry_signal_records || [])) {
+    if (e.symbol && e.bucket) m[e.symbol] = shorten(e.bucket);
+  }
   for (const e of (log.frozen_entries || [])) {
     if (e.symbol && e.bucket) m[e.symbol] = shorten(e.bucket);
   }
@@ -865,32 +1179,25 @@ function render(state, futu) {
   const adaptive = state.adaptive_state || {};
   const positions = state.signal_trades || {};
 
-  // Per-bucket TP / SL derived from the most recent [FROZEN_TP_SL]
-  // emission per bucket. The legacy global tp_pct / sl_pct on
-  // adaptive_state ignored per-bucket sigma (fish_head 0.75 vs
-  // fish_tail 0.0) and per-bucket SL floors, so displaying it was
-  // misleading. cron no longer writes those globals.
+  // Per-bucket TP / SL summary comes from current config + rolling state.
+  // [FROZEN_TP_SL] remains the order-preview source because those values
+  // are entry-time trade constants; using them for this summary would keep
+  // showing stale values after a config/code fix until a new accepted entry
+  // appears in each bucket.
   let html = '';
-  const latestByBucket = {};
-  for (const e of (log.frozen_entries || [])) {
-    const b = e.bucket;
-    if (!b) continue;
-    if (!latestByBucket[b] || (e.entry_date || '') > (latestByBucket[b].entry_date || '')) {
-      latestByBucket[b] = e;
-    }
-  }
-  const bucketKeys = Object.keys(latestByBucket).sort();
-  if (bucketKeys.length === 0) {
-    html += stat('TP / SL', 'no frozen entries yet', '');
+  const currentBucketTpSl = state.current_bucket_tp_sl || [];
+  if (currentBucketTpSl.length === 0) {
+    html += stat('TP / SL', 'not available', '');
   } else {
-    for (const b of bucketKeys) {
-      const e = latestByBucket[b];
+    for (const e of currentBucketTpSl) {
+      const b = e.bucket || '';
       const short = b.replace('_production', '').replace('_explore', '');
       const tp_v = e.tp_pct != null ? '+' + (e.tp_pct * 100).toFixed(2) + '%' : '—';
       const sl_v = e.sl_pct != null ? '-' + (e.sl_pct * 100).toFixed(2) + '%' : '—';
       html += stat(short + ' TP', tp_v, 'positive');
       html += stat(short + ' SL', sl_v, 'negative');
     }
+    html += stat('TP source', 'current config base');
   }
   // Pool size: winners + losers deque length (these feed the frozen
   // TP/SL formula). closed_trades carries the full symbol/date/pct
@@ -922,8 +1229,11 @@ function render(state, futu) {
   $('#signal-date').textContent = log.date || '—';
   html = '';
   const bucketMap = buildBucketMap(log, adaptive);
-  html += '<div class="signal-row"><strong style="color:var(--text2)">BUY:</strong> ';
-  html += (log.buy_actions && log.buy_actions.length) ? log.buy_actions.map(s => tagWithBucket(s, 'buy', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
+  html += '<div class="signal-row"><strong style="color:var(--text2)">ENTRY (raw):</strong> ';
+  html += (log.entry_signals && log.entry_signals.length) ? log.entry_signals.map(s => tagWithBucket(s, 'neutral', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
+  html += '</div>';
+  html += '<div class="signal-row"><strong style="color:var(--text2)">BUY (accepted):</strong> ';
+  html += (log.accepted_buy_actions && log.accepted_buy_actions.length) ? log.accepted_buy_actions.map(s => tagWithBucket(s, 'buy', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">SELL:</strong> ';
   html += (log.sell_actions && log.sell_actions.length) ? log.sell_actions.map(s => tagWithBucket(s, 'sell', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
@@ -933,7 +1243,9 @@ function render(state, futu) {
   html += '</div>';
   // Entry/exit signal count
   html += '<div style="margin-top:8px; font-size:0.85em; color:var(--text2)">';
-  html += 'Entry signals: ' + (log.frozen_entries||[]).length + ' | ';
+  html += 'Raw entries: ' + (log.entry_signals||[]).length + ' | ';
+  html += 'Accepted buys: ' + (log.accepted_buy_actions||[]).length + ' | ';
+  html += 'Rejected: ' + (((log.slot_allocation||{}).rejected)||[]).length + ' | ';
   html += 'Exit signals: ' + (log.exit_signals||[]).length + ' | ';
   html += 'Positions: ' + (log.position_count||0);
   html += '</div>';
@@ -989,10 +1301,13 @@ async function loadDate(d) {
   $('#signal-date').textContent = log.date || d;
   let html = '';
   // For historical dates, bucket map comes only from that day's
-  // [FROZEN_TP_SL] lines (no current accepted_entries lookup).
+  // [ENTRY_SIGNAL] / [FROZEN_TP_SL] lines (no current accepted_entries lookup).
   const bucketMap = buildBucketMap(log, {});
-  html += '<div class="signal-row"><strong style="color:var(--text2)">BUY:</strong> ';
-  html += (log.buy_actions && log.buy_actions.length) ? log.buy_actions.map(s => tagWithBucket(s, 'buy', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
+  html += '<div class="signal-row"><strong style="color:var(--text2)">ENTRY (raw):</strong> ';
+  html += (log.entry_signals && log.entry_signals.length) ? log.entry_signals.map(s => tagWithBucket(s, 'neutral', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
+  html += '</div>';
+  html += '<div class="signal-row"><strong style="color:var(--text2)">BUY (accepted):</strong> ';
+  html += (log.accepted_buy_actions && log.accepted_buy_actions.length) ? log.accepted_buy_actions.map(s => tagWithBucket(s, 'buy', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">SELL:</strong> ';
   html += (log.sell_actions && log.sell_actions.length) ? log.sell_actions.map(s => tagWithBucket(s, 'sell', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
@@ -1001,7 +1316,9 @@ async function loadDate(d) {
   html += (log.hold_blocked && log.hold_blocked.length) ? log.hold_blocked.map(s => tagWithBucket(s, 'hold', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div style="margin-top:8px; font-size:0.85em; color:var(--text2)">';
-  html += 'Entry signals: ' + (log.frozen_entries||[]).length + ' | ';
+  html += 'Raw entries: ' + (log.entry_signals||[]).length + ' | ';
+  html += 'Accepted buys: ' + (log.accepted_buy_actions||[]).length + ' | ';
+  html += 'Rejected: ' + (((log.slot_allocation||{}).rejected)||[]).length + ' | ';
   html += 'Exit signals: ' + (log.exit_signals||[]).length + ' | ';
   html += 'Positions: ' + (log.position_count||0);
   html += '</div>';
@@ -1051,6 +1368,10 @@ async function previewOrders() {
     html += ' | Futu held: ' + data.held_count + '/' + data.max_positions;
     html += ' | Slots free: <strong' + (slotsFree===0 ? ' style="color:var(--red)"' : '') + '>' + slotsFree + '</strong>';
     html += ' | Signal: ' + (data.signal_date||'—');
+    const gate = data.risk_score_gate || {};
+    if (gate.status === 'stop') {
+      html += ' | <strong style="color:var(--red)">Risk gate STOP: ' + gate.year_month + ' score=' + gate.risk_score + '</strong>';
+    }
     html += '</div>';
 
     html += '<div class="order-row order-header"><span>Side</span><span>Symbol</span><span>Bucket</span><span>Rank</span><span>Qty</span><span>Ref Price</span><span>TP%</span><span>SL%</span></div>';
@@ -1062,10 +1383,10 @@ async function previewOrders() {
       const refDisplay = (o.ref_price != null) ? '$' + o.ref_price.toFixed(2)
                        : (o.price != null) ? '$' + o.price.toFixed(2) : '—';
       const rankDisplay = (o.dollar_volume_rank != null) ? '#' + o.dollar_volume_rank : '—';
-      const slotFull = o.status === 'slot_full';
-      const rowStyle = slotFull ? ' style="opacity:0.45"' : '';
-      const sideLabel = slotFull
-        ? `${o.side} <span style="font-size:0.75em; opacity:0.8">(slot_full)</span>`
+      const skipped = o.status === 'slot_full' || o.status === 'risk_score_stop';
+      const rowStyle = skipped ? ' style="opacity:0.45"' : '';
+      const sideLabel = skipped
+        ? `${o.side} <span style="font-size:0.75em; opacity:0.8">(${o.status})</span>`
         : o.side;
       html += `<div class="order-row"${rowStyle}>
         <span class="${sideClass}"><strong>${sideLabel}</strong></span>
