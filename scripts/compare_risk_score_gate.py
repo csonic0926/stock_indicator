@@ -1,18 +1,19 @@
-"""Compare baseline (no risk-score gate) vs gated (stop 75 + reduce 50→margin 1.0).
+"""Compare risk-score gate variants for anti-overfit validation.
 
-Uses multi_bucket_triple_explore.json as the source config and runs two
-variants:
-  - baseline: risk_score_gate stripped → identical to pre-gate behavior
-  - gated:    risk_score_gate kept (current default)
+Runs four config variants over the same multi-bucket base:
 
-Outputs CSV / log artifacts to logs/risk_score_gate_compare/ and prints
-side-by-side metrics (full-run + per-year totals).
+  baseline      no `risk_score_gate` at all (control)
+  stop_only     gate present, reduce_threshold high (>= 100) so only
+                stop (score >= 75) fires; isolates the 2007-2009 GFC
+                window's contribution to total Calmar lift
+  fh_b30_only   full gate, but ft bucket's `gate_enabled` flipped to
+                false; tests whether ft's near-zero gate sensitivity
+                from the per-bucket detail is real or noise
+  full          gate as configured (stop 75 + reduce 50 -> margin 1.0)
+                applied to every bucket
 
-The 2010_safe 2010-2026 historical CSV has max score 50 so:
-  - stop branch fires 0 months (threshold 75)
-  - reduce branch fires 11 months (threshold 50)
-Expected effect: drag on 2010 (3 months) + 2020-03 + 2022-09 + 2023-03 +
-2025-11 + 2026 Q2 — overall mild equity reduction in those windows.
+Outputs side-by-side summary + per-year totals to
+logs/risk_score_gate_compare/REPORT.md.
 """
 from __future__ import annotations
 
@@ -29,6 +30,8 @@ BASE_CONFIG = REPO / "data" / "multi_bucket_triple_explore.json"
 OUT_DIR = REPO / "logs" / "risk_score_gate_compare"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 VENV_PY = REPO / "venv" / "bin" / "python"
+
+VARIANTS = ("baseline", "stop_only", "fh_b30_only", "full")
 
 SUMMARY_RE = re.compile(
     r"\[(Total|fish_head_production|fish_tail_production|fish_head_b30_35)\] "
@@ -50,8 +53,19 @@ def make_cfg(variant: str, cfg_path: Path) -> None:
     cfg = json.loads(BASE_CONFIG.read_text(encoding="utf-8"))
     if variant == "baseline":
         cfg.pop("risk_score_gate", None)
-    elif variant == "gated":
-        # leave risk_score_gate as configured
+    elif variant == "stop_only":
+        # Keep gate present (stop_threshold default) but push reduce
+        # threshold above max possible score so reduce never fires.
+        gate = cfg.setdefault("risk_score_gate", {})
+        gate["reduce_threshold"] = 200
+    elif variant == "fh_b30_only":
+        # Flip gate_enabled=false on ft bucket only. fh + b30_35 keep
+        # gating (default gate_enabled=true).
+        for bucket in cfg.get("buckets", []):
+            if bucket.get("strategy_id") == "fish_tail_blow_off_top":
+                bucket["gate_enabled"] = False
+    elif variant == "full":
+        # Use config as-is.
         pass
     else:
         raise ValueError(f"Unknown variant: {variant}")
@@ -95,8 +109,9 @@ def fmt_pct(x: float, sign: bool = False) -> str:
 
 def main() -> int:
     print(f"[gate_compare] Start {time.strftime('%H:%M:%S')}", flush=True)
+    print(f"[gate_compare] Variants: {VARIANTS}", flush=True)
     results: dict[str, dict] = {}
-    for variant in ("baseline", "gated"):
+    for variant in VARIANTS:
         cfg_path = OUT_DIR / f"cfg_{variant}.json"
         out_path = OUT_DIR / f"sim_{variant}.log"
         make_cfg(variant, cfg_path)
@@ -115,24 +130,31 @@ def main() -> int:
             print(
                 f"  → {variant}: n={t['trades']} WR={t['wr']:.2%} "
                 f"CAGR={t['cagr']:.2%} MDD={t['mdd']:.2%} Calmar={cal:.3f} "
-                f"final={t['final_balance']:.0f}",
+                f"final=${t['final_balance']:,.0f}",
                 flush=True,
             )
         print(f"  elapsed: {elapsed/60:.1f}min", flush=True)
 
     # Report
     lines = [
-        "# Risk-Score Gate Comparison",
+        "# Risk-Score Gate Variant Comparison",
         "",
         f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
-        f"Base: `{BASE_CONFIG.name}` (2010_safe, 2010-2026)",
+        f"Base config: `{BASE_CONFIG.name}`",
+        "",
+        "Variants:",
+        "  - **baseline**: no gate (control)",
+        "  - **stop_only**: gate present, reduce_threshold raised so only",
+        "    stop (score >= 75) fires",
+        "  - **fh_b30_only**: full gate but ft bucket's gate_enabled=false",
+        "  - **full**: gate applied to all buckets (default)",
         "",
         "## Full-run summary (Total bucket)",
         "",
-        "| Variant | Trades | WR | CAGR | MDD | Calmar | Final Balance |",
+        "| Variant | Trades | WR | CAGR | MDD | Calmar | Final |",
         "|---|---:|---:|---:|---:|---:|---:|",
     ]
-    for variant in ("baseline", "gated"):
+    for variant in VARIANTS:
         t = results[variant]["parsed"]["summary"].get("Total")
         if not t:
             lines.append(f"| {variant} | — | | | | | failed |")
@@ -143,21 +165,32 @@ def main() -> int:
             f"{t['cagr']:.2%} | {t['mdd']:.2%} | **{cal:.3f}** | "
             f"${t['final_balance']:,.0f} |"
         )
-    # Delta row
-    b = results["baseline"]["parsed"]["summary"].get("Total")
-    g = results["gated"]["parsed"]["summary"].get("Total")
-    if b and g:
-        cal_b = b["cagr"] / b["mdd"] if b["mdd"] > 0 else 0
-        cal_g = g["cagr"] / g["mdd"] if g["mdd"] > 0 else 0
-        lines.append(
-            f"| delta | {g['trades']-b['trades']:+d} | "
-            f"{(g['wr']-b['wr'])*100:+.2f}pp | "
-            f"{(g['cagr']-b['cagr'])*100:+.2f}pp | "
-            f"{(g['mdd']-b['mdd'])*100:+.2f}pp | "
-            f"{cal_g-cal_b:+.3f} | "
-            f"${g['final_balance']-b['final_balance']:+,.0f} |"
-        )
 
+    # Delta vs baseline
+    base_total = results["baseline"]["parsed"]["summary"].get("Total")
+    if base_total:
+        lines.append("")
+        lines.append("## Delta vs baseline")
+        lines.append("")
+        lines.append("| Variant | ΔTrades | ΔCAGR | ΔMDD | ΔCalmar | ΔFinal |")
+        lines.append("|---|---:|---:|---:|---:|---:|")
+        cal_b = base_total["cagr"] / base_total["mdd"] if base_total["mdd"] > 0 else 0
+        for variant in VARIANTS:
+            if variant == "baseline":
+                continue
+            g = results[variant]["parsed"]["summary"].get("Total")
+            if not g:
+                continue
+            cal_g = g["cagr"] / g["mdd"] if g["mdd"] > 0 else 0
+            lines.append(
+                f"| {variant} | {g['trades']-base_total['trades']:+d} | "
+                f"{(g['cagr']-base_total['cagr'])*100:+.2f}pp | "
+                f"{(g['mdd']-base_total['mdd'])*100:+.2f}pp | "
+                f"{cal_g-cal_b:+.3f} | "
+                f"${g['final_balance']-base_total['final_balance']:+,.0f} |"
+            )
+
+    # Per-bucket detail
     lines.append("")
     lines.append("## Per-bucket detail")
     for bucket in (
@@ -168,7 +201,7 @@ def main() -> int:
         lines.append("")
         lines.append("| Variant | Trades | WR | CAGR | MDD | Calmar |")
         lines.append("|---|---:|---:|---:|---:|---:|")
-        for variant in ("baseline", "gated"):
+        for variant in VARIANTS:
             t = results[variant]["parsed"]["summary"].get(bucket)
             if not t:
                 lines.append(f"| {variant} | — | | | | |")
@@ -184,23 +217,22 @@ def main() -> int:
     lines.append("## Year-by-year Total returns")
     lines.append("")
     years = sorted(
-        set(results["baseline"]["parsed"]["yearly"].get("Total", {}).keys())
-        | set(results["gated"]["parsed"]["yearly"].get("Total", {}).keys())
+        set().union(
+            *[
+                set(results[v]["parsed"]["yearly"].get("Total", {}).keys())
+                for v in VARIANTS
+            ]
+        )
     )
-    lines.append("| Year | Baseline | Gated | Δ |")
-    lines.append("|---|---:|---:|---:|")
+    header_cells = ["Year"] + list(VARIANTS)
+    lines.append("| " + " | ".join(header_cells) + " |")
+    lines.append("|---|" + "|".join("---:" for _ in VARIANTS) + "|")
     for y in years:
-        bp = results["baseline"]["parsed"]["yearly"].get("Total", {}).get(y)
-        gp = results["gated"]["parsed"]["yearly"].get("Total", {}).get(y)
-        if bp is None and gp is None:
-            continue
-        b_s = fmt_pct(bp, sign=True) if bp is not None else "—"
-        g_s = fmt_pct(gp, sign=True) if gp is not None else "—"
-        if bp is not None and gp is not None:
-            d_s = f"{(gp-bp)*100:+.2f}pp"
-        else:
-            d_s = "—"
-        lines.append(f"| {y} | {b_s} | {g_s} | {d_s} |")
+        cells = [str(y)]
+        for v in VARIANTS:
+            yv = results[v]["parsed"]["yearly"].get("Total", {}).get(y)
+            cells.append(fmt_pct(yv, sign=True) if yv is not None else "—")
+        lines.append("| " + " | ".join(cells) + " |")
 
     (OUT_DIR / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     (OUT_DIR / "results.json").write_text(

@@ -743,6 +743,14 @@ class ComplexStrategySetDefinition:
     # stress (e.g. 2008 deleveraging) the detector may re-fire repeatedly
     # during a falling knife, removing the max_hold time floor.
     reset_hold_on_reentry_signal: bool = False
+    # When False, the risk-score gate (stop + reduce) does NOT apply to
+    # this bucket — its entries during stop months still fire and its
+    # positions during reduce months still use the configured margin.
+    # Use this to exempt buckets that the per-bucket detail showed are
+    # essentially unaffected by gating (e.g. ft, whose blow-off-top
+    # detector self-mutes during stress months and produces near-zero
+    # P&L from the few entries that fire).
+    gate_enabled: bool = True
 
 
 @dataclass
@@ -1306,7 +1314,9 @@ def run_complex_simulation(
             pre_cross_signal_lookback=definition.pre_cross_signal_lookback,
             additional_above_ranges=definition.additional_above_ranges,
             reset_hold_on_reentry_signal=definition.reset_hold_on_reentry_signal,
-            risk_score_stop_months=risk_score_stop_months,
+            risk_score_stop_months=(
+                risk_score_stop_months if definition.gate_enabled else None
+            ),
         )
 
     # Cross-bucket entry signal union: per-symbol set of dates where ANY
@@ -2336,6 +2346,11 @@ def run_complex_simulation(
     metrics_by_set: Dict[str, StrategyMetrics] = {}
     aggregated_trades: List[Trade] = []
     aggregated_slot_trades: List[Trade] = []
+    # Trade-id set of slot trades from gated buckets only. Used by the
+    # aggregated portfolio sim so that ungated buckets (gate_enabled=
+    # False) keep their entries' sizing on the configured margin even
+    # when the global margin_overrides map carries reduce-month entries.
+    aggregated_gated_trade_ids: set[int] = set()
     aggregated_trade_profit_list: List[float] = []
     aggregated_profit_percentage_list: List[float] = []
     aggregated_loss_percentage_list: List[float] = []
@@ -2452,6 +2467,14 @@ def run_complex_simulation(
         simulation_start_date = artifacts.simulation_start_date
         if simulation_start_date is None:
             simulation_start_date = pandas.Timestamp.now()
+        # Apply risk-score gate margin overrides only when the bucket
+        # has gate_enabled=True. Ungated buckets (e.g. ft) keep the
+        # configured margin for every month.
+        bucket_margin_overrides = (
+            margin_overrides
+            if set_definitions[label].gate_enabled
+            else None
+        )
         # Per-bucket sim uses the GLOBAL maximum_position_count (not the
         # bucket's per-bucket cap) so position sizing matches actual
         # portfolio allocation. Previously this used the per-bucket cap
@@ -2471,7 +2494,7 @@ def run_complex_simulation(
             trade_symbol_lookup=filtered_slot_trade_symbol_lookup,
             closing_price_series_by_symbol=artifacts.closing_price_series_by_symbol,
             settlement_lag_days=1,
-            margin_overrides=margin_overrides,
+            margin_overrides=bucket_margin_overrides,
         )
         annual_trade_counts = calculate_annual_trade_counts(trades_for_set)
         final_balance = simulate_portfolio_balance(
@@ -2481,7 +2504,7 @@ def run_complex_simulation(
             withdraw_amount,
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
-            margin_overrides=margin_overrides,
+            margin_overrides=bucket_margin_overrides,
         )
         # Propagate commission data from Trade objects (set by
         # simulate_portfolio_balance) back to the corresponding TradeDetails.
@@ -2504,7 +2527,7 @@ def run_complex_simulation(
             withdraw_amount,
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
-            margin_overrides=margin_overrides,
+            margin_overrides=bucket_margin_overrides,
         )
         if slot_trades_for_set:
             last_trade_exit_date = max(
@@ -2541,6 +2564,8 @@ def run_complex_simulation(
 
         aggregated_trades.extend(trades_for_set)
         aggregated_slot_trades.extend(slot_trades_for_set)
+        if set_definitions[label].gate_enabled:
+            aggregated_gated_trade_ids.update(id(t) for t in slot_trades_for_set)
         aggregated_trade_profit_list.extend(trade_profit_list)
         aggregated_profit_percentage_list.extend(profit_percentage_list)
         aggregated_loss_percentage_list.extend(loss_percentage_list)
@@ -2575,6 +2600,17 @@ def run_complex_simulation(
             aggregated_simulation_start_date = min(start_dates)
         else:
             aggregated_simulation_start_date = pandas.Timestamp.now()
+        # When ALL buckets are gated, treat gated_trade_ids=None so the
+        # simulator follows the year-month dict for every trade (cheap
+        # fast-path identical to pre-bucket-gating behaviour). Only
+        # pass the explicit set when some buckets are ungated.
+        aggregated_gated_arg = (
+            aggregated_gated_trade_ids
+            if any(
+                not d.gate_enabled for d in set_definitions.values()
+            )
+            else None
+        )
         aggregated_annual_returns = calculate_annual_returns(
             aggregated_slot_trades,
             starting_cash,
@@ -2589,6 +2625,7 @@ def run_complex_simulation(
             ),
             settlement_lag_days=1,
             margin_overrides=margin_overrides,
+            gated_trade_ids=aggregated_gated_arg,
         )
         aggregated_annual_trade_counts = calculate_annual_trade_counts(
             aggregated_trades
@@ -2601,6 +2638,7 @@ def run_complex_simulation(
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
             margin_overrides=margin_overrides,
+            gated_trade_ids=aggregated_gated_arg,
         )
         aggregated_maximum_drawdown = calculate_max_drawdown(
             aggregated_slot_trades,
@@ -2612,6 +2650,7 @@ def run_complex_simulation(
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
             margin_overrides=margin_overrides,
+            gated_trade_ids=aggregated_gated_arg,
         )
         last_exit_date = max(trade.exit_date for trade in aggregated_slot_trades)
         aggregated_compound_annual_growth_rate = 0.0

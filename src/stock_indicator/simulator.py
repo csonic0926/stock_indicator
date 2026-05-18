@@ -704,6 +704,7 @@ def simulate_portfolio_balance(
     margin_interest_annual_rate: float = 0.048,
     settlement_lag_days: int = 1,
     margin_overrides: dict[str, float] | None = None,
+    gated_trade_ids: set[int] | None = None,
 ) -> float:
     """Simulate capital allocation across multiple trades.
 
@@ -743,10 +744,16 @@ def simulate_portfolio_balance(
 
     default_slot_weight = min(margin_multiplier / maximum_position_count, maximum_position_weight)
 
-    def _slot_weight_at(event_timestamp: pandas.Timestamp) -> float:
+    def _slot_weight_at(
+        event_timestamp: pandas.Timestamp, current_trade: Trade
+    ) -> float:
         """Return per-event slot_weight respecting per-month margin
-        overrides. Default falls back to module-level slot_weight."""
+        overrides. When gated_trade_ids is set, trades not in that set
+        skip the override (used for per-bucket gate scoping in the
+        aggregated portfolio sim)."""
         if margin_overrides:
+            if gated_trade_ids is not None and id(current_trade) not in gated_trade_ids:
+                return default_slot_weight
             ym = event_timestamp.strftime("%Y-%m")
             if ym in margin_overrides:
                 return min(
@@ -809,7 +816,7 @@ def simulate_portfolio_balance(
             equity = cash_balance + sum(
                 position.invested_amount for position in open_trades.values()
             )
-            budget_per_position = equity * _slot_weight_at(event_timestamp)
+            budget_per_position = equity * _slot_weight_at(event_timestamp, trade)
             share_count = math.floor(budget_per_position / trade.entry_price)
             if share_count <= 0:
                 continue
@@ -861,6 +868,7 @@ def calculate_max_drawdown(
     margin_multiplier: float = 1.0,
     margin_interest_annual_rate: float = 0.048,
     margin_overrides: dict[str, float] | None = None,
+    gated_trade_ids: set[int] | None = None,
 ) -> float:
     """Compute the maximum portfolio drawdown across the simulation period.
 
@@ -916,8 +924,12 @@ def calculate_max_drawdown(
         margin_multiplier / maximum_position_count, maximum_position_weight
     )
 
-    def _slot_weight_at(event_timestamp: pandas.Timestamp) -> float:
+    def _slot_weight_at(
+        event_timestamp: pandas.Timestamp, current_trade: Trade
+    ) -> float:
         if margin_overrides:
+            if gated_trade_ids is not None and id(current_trade) not in gated_trade_ids:
+                return default_slot_weight
             ym = event_timestamp.strftime("%Y-%m")
             if ym in margin_overrides:
                 return min(
@@ -958,7 +970,7 @@ def calculate_max_drawdown(
                         position.share_count * (position.last_known_price or 0.0)
                         for position in open_trades.values()
                     )
-                    budget_per_position = equity * _slot_weight_at(current_date)
+                    budget_per_position = equity * _slot_weight_at(current_date, trade)
                     share_count = math.floor(budget_per_position / trade.entry_price)
                     if share_count > 0:
                         invested_amount = share_count * trade.entry_price
@@ -1040,6 +1052,7 @@ def calculate_annual_returns(
     closing_price_series_by_symbol: Dict[str, pandas.Series] | None = None,
     settlement_lag_days: int = 1,
     margin_overrides: dict[str, float] | None = None,
+    gated_trade_ids: set[int] | None = None,
 ) -> Dict[int, float]:
     """Compute yearly portfolio returns with mark-to-market and margin interest.
 
@@ -1072,8 +1085,12 @@ def calculate_annual_returns(
         margin_multiplier / maximum_position_count, maximum_position_weight
     )
 
-    def _slot_weight_at(event_timestamp: pandas.Timestamp) -> float:
+    def _slot_weight_at(
+        event_timestamp: pandas.Timestamp, current_trade: Trade
+    ) -> float:
         if margin_overrides:
+            if gated_trade_ids is not None and id(current_trade) not in gated_trade_ids:
+                return default_slot_weight
             ym = event_timestamp.strftime("%Y-%m")
             if ym in margin_overrides:
                 return min(
@@ -1106,7 +1123,7 @@ def calculate_annual_returns(
                 equity = cash_balance + sum(
                     position.invested_amount for position in open_trades.values()
                 )
-                budget_per_position = equity * _slot_weight_at(current_date)
+                budget_per_position = equity * _slot_weight_at(current_date, trade)
                 share_count = math.floor(budget_per_position / trade.entry_price)
                 if share_count <= 0:
                     continue

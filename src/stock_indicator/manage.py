@@ -1566,6 +1566,9 @@ class StockShell(cmd.Cmd):
                 reset_hold_on_reentry_signal=bool(
                     raw_bucket.get("reset_hold_on_reentry_signal", False)
                 ),
+                gate_enabled=bool(
+                    raw_bucket.get("gate_enabled", True)
+                ),
                 exit_alpha_factor=exit_alpha_factor_value,
                 shape_slope_min=shape_slope_min_value,
                 shape_dev_50_max=shape_dev_50_max_value,

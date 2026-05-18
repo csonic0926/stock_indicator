@@ -503,6 +503,7 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
             reset_hold_on_reentry_signal=bool(
                 raw_bucket.get("reset_hold_on_reentry_signal", False)
             ),
+            gate_enabled=bool(raw_bucket.get("gate_enabled", True)),
             tp_slope_amplify=bool(raw_bucket.get("tp_slope_amplify", False)),
             override_min_hold_tp_only=(
                 bool(raw_bucket["override_min_hold_tp_only"])
