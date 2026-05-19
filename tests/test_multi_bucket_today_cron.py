@@ -235,6 +235,10 @@ def test_compute_today_signals_emits_all_dashboard_exit_signals(
         for log_line in result.log_lines
     )
     assert sum(
+        log_line.startswith("[BUCKET_TP_SL]")
+        for log_line in result.log_lines
+    ) == 2
+    assert sum(
         log_line.startswith("[FROZEN_TP_SL]")
         for log_line in result.log_lines
     ) == 2

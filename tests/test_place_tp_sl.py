@@ -69,7 +69,7 @@ class FakeTradeContext:
         """Return deterministic historical order remarks."""
         return 0, pandas.DataFrame(
             self.historical_orders,
-            columns=["order_id", "remark"],
+            columns=["order_id", "remark", "create_time"],
         )
 
     def place_order(self, **kwargs: Any) -> tuple[int, pandas.DataFrame]:
@@ -110,11 +110,11 @@ def test_entry_keeps_stop_loss_enabled_when_flag_is_absent() -> None:
     assert place_tp_sl._entry_disables_stop_loss_trigger(entry_record) is False
 
 
-def test_place_tp_sl_uses_futu_v2_remark_and_honors_disable_sl(
+def test_place_tp_sl_does_not_require_or_trust_futu_v2_remark_for_tp_sl(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """V2 Futu remark metadata should place TP and suppress disabled SL."""
+    """Futu remarks are debug metadata, not TP/SL placement source."""
     fake_context = FakeTradeContext(
         positions=[{"code": "US.HELD", "qty": 10, "cost_price": 100.0}],
         historical_deals=[
@@ -139,11 +139,7 @@ def test_place_tp_sl_uses_futu_v2_remark_and_honors_disable_sl(
     place_tp_sl.main()
 
     assert fake_context.is_closed is True
-    assert len(fake_context.placed_orders) == 1
-    take_profit_order = fake_context.placed_orders[0]
-    assert take_profit_order["code"] == "US.HELD"
-    assert take_profit_order["order_type"] == "NORMAL"
-    assert take_profit_order["price"] == 106.58
+    assert fake_context.placed_orders == []
 
 
 def test_place_tp_sl_does_not_duplicate_existing_orders(
@@ -217,19 +213,195 @@ def test_place_tp_sl_does_not_use_local_accepted_entries(
     )
     _install_fake_futu_module(monkeypatch, fake_context)
     monkeypatch.setattr(place_tp_sl, "LOGS_DIRECTORY", tmp_path)
+    monkeypatch.setattr(place_tp_sl, "DATA_DIRECTORY", tmp_path)
 
     place_tp_sl.main()
 
     assert fake_context.placed_orders == []
-    assert "[ORPHAN_POSITION]" in caplog.text
+    assert "[TP_SL_METADATA_MISSING]" in caplog.text
 
 
-def test_place_tp_sl_treats_legacy_remark_as_orphan_for_tp_sl(
+def test_place_tp_sl_uses_api_position_and_production_signal_without_remark(
     tmp_path: Path,
     monkeypatch,
-    caplog,
 ) -> None:
-    """Legacy remarks support max-hold only and must not drive TP/SL."""
+    """Futu position plus production signal metadata should place TP."""
+    (tmp_path / "2026-05-18.log").write_text(
+        "[FROZEN_TP_SL] entry_date=2026-05-18 "
+        "bucket=fish_tail_explore strategy_id=fish_tail_blow_off_top "
+        "symbol=NO_REMARK tp_pct=0.167497 sl_pct=0.041702 "
+        "min_hold_sl=1 disable_sl_trigger=True\n",
+        encoding="utf-8",
+    )
+    fake_context = FakeTradeContext(
+        positions=[{"code": "US.NO_REMARK", "qty": 3, "cost_price": 1430.55}],
+        historical_deals=[
+            {
+                "code": "US.NO_REMARK",
+                "trd_side": "BUY",
+                "qty": 3,
+                "create_time": "2026-05-18 09:30:00",
+                "order_id": "3001",
+            }
+        ],
+        historical_orders=[
+            {
+                "order_id": "3001",
+                "remark": "",
+            }
+        ],
+    )
+    _install_fake_futu_module(monkeypatch, fake_context)
+    monkeypatch.setattr(place_tp_sl, "LOGS_DIRECTORY", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["place_tp_sl"])
+
+    place_tp_sl.main()
+
+    assert len(fake_context.placed_orders) == 1
+    take_profit_order = fake_context.placed_orders[0]
+    assert take_profit_order["code"] == "US.NO_REMARK"
+    assert take_profit_order["qty"] == 3
+    assert take_profit_order["price"] == 1670.16
+
+
+def test_futu_open_entries_sort_deals_before_fifo() -> None:
+    """Newest-first Futu deal history must not attach stale BUY metadata."""
+    fake_context = FakeTradeContext(
+        historical_deals=[
+            {
+                "code": "US.SNDK",
+                "trd_side": "BUY",
+                "qty": 3,
+                "create_time": "2026-05-18 09:30:01",
+                "order_id": "new_buy",
+            },
+            {
+                "code": "US.SNDK",
+                "trd_side": "SELL",
+                "qty": 14,
+                "create_time": "2026-03-23 09:30:01",
+                "order_id": "old_sell",
+            },
+            {
+                "code": "US.SNDK",
+                "trd_side": "BUY",
+                "qty": 14,
+                "create_time": "2026-03-17 09:30:00",
+                "order_id": "old_buy",
+            },
+        ],
+        historical_orders=[
+            {"order_id": "new_buy", "remark": ""},
+            {"order_id": "old_buy", "remark": "si|sid=old|b=old|mh=10|rr=0"},
+        ],
+    )
+
+    open_entries = place_tp_sl._load_futu_open_trade_entries(
+        fake_context,
+        "REAL",
+        as_of_date_text="2026-05-18",
+    )
+
+    assert open_entries["SNDK"]["futu_buy_order_id"] == "new_buy"
+
+
+def test_signal_metadata_can_match_futu_order_create_date() -> None:
+    """Production signal matching should use API order date before fill date."""
+    fake_context = FakeTradeContext(
+        historical_deals=[
+            {
+                "code": "US.PEP",
+                "trd_side": "BUY",
+                "qty": 36,
+                "create_time": "2026-05-18 09:30:01",
+                "order_id": "buy_order",
+            },
+        ],
+        historical_orders=[
+            {
+                "order_id": "buy_order",
+                "remark": "",
+                "create_time": "2026-05-15 21:20:52",
+            },
+        ],
+    )
+
+    open_entries = place_tp_sl._load_futu_open_trade_entries(
+        fake_context,
+        "REAL",
+        as_of_date_text="2026-05-18",
+    )
+    merged_entry = place_tp_sl._merge_production_signal_metadata(
+        symbol="PEP",
+        entry=open_entries["PEP"],
+        signal_entries_by_symbol_and_date={
+            (
+                "PEP",
+                "2026-05-15",
+            ): {
+                "symbol": "PEP",
+                "entry_date": "2026-05-15",
+                "bucket": "fish_head_production",
+                "strategy_id": "fish_head_vacuum_turn",
+                "tp_pct": 0.0658,
+                "sl_pct": 0.0417,
+            }
+        },
+        bucket_tp_sl_entries_by_key_and_date={},
+        production_exit_rules={},
+    )
+
+    assert merged_entry is not None
+    assert merged_entry["supports_tp_sl"] is True
+    assert merged_entry["tp_pct"] == 0.0658
+
+
+def test_signal_metadata_can_fallback_to_entry_date_bucket_snapshot() -> None:
+    """TP/SL metadata can come from the Futu entry date's bucket log snapshot."""
+    merged_entry = place_tp_sl._merge_production_signal_metadata(
+        symbol="PEP",
+        entry={
+            "symbol": "PEP",
+            "entry_date": "2026-05-15",
+            "bucket": "fish_head_production",
+            "strategy_id": "fish_head_vacuum_turn",
+        },
+        signal_entries_by_symbol_and_date={},
+        bucket_tp_sl_entries_by_key_and_date={
+            (
+                "fish_head_production",
+                "2026-05-15",
+            ): {
+                "date": "2026-05-15",
+                "bucket": "fish_head_production",
+                "strategy_id": "fish_head_vacuum_turn",
+                "tp_pct": 0.0742,
+                "sl_pct": 0.0434,
+                "min_hold_sl": 1,
+                "disable_sl_trigger": True,
+            }
+        },
+        production_exit_rules={},
+    )
+
+    assert merged_entry is not None
+    assert merged_entry["supports_tp_sl"] is True
+    assert merged_entry["tp_pct"] == 0.0742
+    assert merged_entry["sl_pct"] == 0.0434
+
+
+def test_legacy_remark_does_not_block_production_signal_tp(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A legacy remark should not block production-config TP placement."""
+    (tmp_path / "2026-01-02.log").write_text(
+        "[FROZEN_TP_SL] entry_date=2026-01-02 "
+        "bucket=fish_head_b30_35 strategy_id=fish_head_b30_35 "
+        "symbol=LEGACY tp_pct=0.0658 sl_pct=0.0417 "
+        "min_hold_sl=1 disable_sl_trigger=True\n",
+        encoding="utf-8",
+    )
     fake_context = FakeTradeContext(
         positions=[{"code": "US.LEGACY", "qty": 10, "cost_price": 100.0}],
         historical_deals=[
@@ -253,5 +425,5 @@ def test_place_tp_sl_treats_legacy_remark_as_orphan_for_tp_sl(
 
     place_tp_sl.main()
 
-    assert fake_context.placed_orders == []
-    assert "[ORPHAN_POSITION]" in caplog.text
+    assert len(fake_context.placed_orders) == 1
+    assert fake_context.placed_orders[0]["price"] == 106.58

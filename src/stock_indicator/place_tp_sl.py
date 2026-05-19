@@ -1,16 +1,15 @@
 """Place per-position TP/SL orders from Futu live source of truth.
 
 Source of truth:
-- Futu API for current positions, open orders, historical deals, and order remarks.
-- Local JSON files are not used for live TP/SL decisions.
+- Futu API for current positions, open orders, and historical deals.
+- Production signal logs identify which production bucket opened the API-confirmed
+  lot; production config controls TP/SL behavior.
 
 Contract:
-- Each live position must have a Futu BUY order remark with v2 metadata
-  (`si2|...|tp=...|sl=...`). Positions without that metadata are marked
-  [ORPHAN_POSITION] and skipped.
-- TP price = Futu position cost_price * (1 + remark.tp_pct), GTC limit sell.
-- SL price = Futu position cost_price * (1 - remark.sl_pct), GTC stop, only
-  after remark.min_hold_sl trading bars unless remark.disable_sl_trigger is true.
+- TP price = Futu position cost_price * (1 + production tp_pct), GTC limit sell.
+- SL price = Futu position cost_price * (1 - production sl_pct), GTC stop, only
+  after production min_hold_sl bars unless disable_sl_trigger is true.
+- Futu BUY remarks are optional debug metadata, not a TP/SL prerequisite.
 
 Usage:
     venv/bin/python -m stock_indicator.place_tp_sl [--dry-run]
@@ -31,7 +30,10 @@ from stock_indicator.futu_trade_metadata import parse_futu_order_remark
 
 LOGGER = logging.getLogger(__name__)
 
-LOGS_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "logs"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+DATA_DIRECTORY = PROJECT_ROOT / "data"
+LOGS_DIRECTORY = PROJECT_ROOT / "logs"
+PRODUCTION_CONFIG_PATH = DATA_DIRECTORY / "multi_bucket_production.json"
 
 TRADING_ENV = "REAL"
 DEFAULT_HISTORY_LOOKBACK_DAYS = 180
@@ -87,6 +89,29 @@ def _extract_deal_date(row: Any) -> str | None:
         return None
 
 
+def _sort_deals_for_fifo(deal_data: pandas.DataFrame) -> pandas.DataFrame:
+    """Sort Futu deals oldest-first before reconstructing open lots.
+
+    Futu history can return rows newest-first. FIFO lot reconstruction must
+    process buys and sells chronologically, otherwise a later sell can consume a
+    newer buy before an older buy and attach the wrong order metadata.
+    """
+    sortable_deal_data = deal_data.copy()
+    sort_values: list[pandas.Timestamp] = []
+    for _, deal_row in sortable_deal_data.iterrows():
+        raw_time = _row_value(
+            deal_row,
+            ["create_time", "updated_time", "dealt_time", "deal_time", "time"],
+        )
+        sort_values.append(pandas.to_datetime(raw_time, errors="coerce"))
+    sortable_deal_data["_fifo_sort_time"] = sort_values
+    return sortable_deal_data.sort_values(
+        by="_fifo_sort_time",
+        kind="stable",
+        na_position="last",
+    )
+
+
 def _count_weekday_bars_held(entry_date_text: str, today_text: str) -> int:
     """Count weekday bars held using the same convention as dashboard max-hold."""
     entry_date = date.fromisoformat(entry_date_text)
@@ -103,14 +128,14 @@ def _count_weekday_bars_held(entry_date_text: str, today_text: str) -> int:
     return bars_held
 
 
-def _load_futu_order_remarks(
+def _load_futu_order_history(
     trade_context: Any,
     trading_environment: Any,
     *,
     start_date_text: str,
     end_date_text: str,
-) -> dict[str, str]:
-    """Load Futu order remarks keyed by order id for the history window."""
+) -> dict[str, dict[str, Any]]:
+    """Load Futu order history keyed by order id for the history window."""
     if not hasattr(trade_context, "history_order_list_query"):
         return {}
     return_code, order_data = trade_context.history_order_list_query(
@@ -121,13 +146,17 @@ def _load_futu_order_remarks(
     if return_code != 0 or order_data is None or len(order_data) == 0:
         return {}
 
-    remarks_by_order_id: dict[str, str] = {}
+    order_history_by_order_id: dict[str, dict[str, Any]] = {}
     for _, order_row in order_data.iterrows():
         order_identifier = _row_value(order_row, ["order_id"])
         remark_text = _row_value(order_row, ["remark", "order_remark"])
-        if order_identifier is not None and remark_text:
-            remarks_by_order_id[str(order_identifier)] = str(remark_text)
-    return remarks_by_order_id
+        order_date_text = _extract_deal_date(order_row)
+        if order_identifier is not None:
+            order_history_by_order_id[str(order_identifier)] = {
+                "remark": str(remark_text or ""),
+                "order_date": order_date_text,
+            }
+    return order_history_by_order_id
 
 
 def _load_futu_open_trade_entries(
@@ -152,7 +181,7 @@ def _load_futu_open_trade_entries(
     if return_code != 0 or deal_data is None or len(deal_data) == 0:
         return {}
 
-    remarks_by_order_id = _load_futu_order_remarks(
+    order_history_by_order_id = _load_futu_order_history(
         trade_context,
         trading_environment,
         start_date_text=start_date_text,
@@ -160,7 +189,7 @@ def _load_futu_open_trade_entries(
     )
     open_lots_by_symbol: dict[str, list[dict[str, Any]]] = {}
 
-    for _, deal_row in deal_data.iterrows():
+    for _, deal_row in _sort_deals_for_fifo(deal_data).iterrows():
         code_text = str(_row_value(deal_row, ["code"]) or "")
         symbol = code_text.replace("US.", "")
         if not symbol:
@@ -177,8 +206,12 @@ def _load_futu_open_trade_entries(
         if "BUY" in side_text:
             order_identifier = _row_value(deal_row, ["order_id"])
             remark_text = str(_row_value(deal_row, ["remark", "order_remark"]) or "")
+            order_history = (
+                order_history_by_order_id.get(str(order_identifier), {})
+                if order_identifier is not None else {}
+            )
             if not remark_text and order_identifier is not None:
-                remark_text = remarks_by_order_id.get(str(order_identifier), "")
+                remark_text = str(order_history.get("remark") or "")
             metadata = parse_futu_order_remark(remark_text)
             entry_date_text = _extract_deal_date(deal_row)
             if entry_date_text is None:
@@ -187,6 +220,9 @@ def _load_futu_open_trade_entries(
                 "symbol": symbol,
                 "entry_date": entry_date_text,
                 "remaining_quantity": quantity,
+                "futu_buy_order_id": str(order_identifier or ""),
+                "futu_buy_remark_present": bool(remark_text),
+                "futu_buy_order_date": order_history.get("order_date"),
                 **metadata,
             }
             open_lots_by_symbol.setdefault(symbol, []).append(lot)
@@ -262,6 +298,170 @@ def _entry_supports_take_profit_stop_loss(entry: dict[str, Any]) -> bool:
     return bool(entry.get("supports_tp_sl")) and "tp_pct" in entry and "sl_pct" in entry
 
 
+def _parse_signal_log_tokens(token_text: str) -> dict[str, Any]:
+    """Parse key=value tokens from production signal log lines."""
+    parsed_values: dict[str, Any] = {}
+    for raw_token in token_text.strip().split():
+        key_text, separator, raw_value_text = raw_token.partition("=")
+        if not separator:
+            continue
+        try:
+            if raw_value_text.lower() in {"true", "false"}:
+                parsed_values[key_text] = raw_value_text.lower() == "true"
+            elif "." in raw_value_text or "e" in raw_value_text.lower():
+                parsed_values[key_text] = float(raw_value_text)
+            else:
+                parsed_values[key_text] = int(raw_value_text)
+        except ValueError:
+            parsed_values[key_text] = raw_value_text
+    return parsed_values
+
+
+def _load_production_signal_entries() -> dict[tuple[str, str], dict[str, Any]]:
+    """Load production [FROZEN_TP_SL] entries keyed by symbol and entry date.
+
+    Futu confirms that a live lot exists and when it opened. The production log
+    maps that confirmed lot back to the bucket/config that generated the signal.
+    """
+    entries_by_symbol_and_date: dict[tuple[str, str], dict[str, Any]] = {}
+    for log_path in sorted(LOGS_DIRECTORY.glob("*.log")):
+        try:
+            log_text = log_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for log_line in log_text.splitlines():
+            if not log_line.startswith("[FROZEN_TP_SL]"):
+                continue
+            entry = _parse_signal_log_tokens(log_line[len("[FROZEN_TP_SL]"):])
+            symbol = str(entry.get("symbol") or "").upper()
+            entry_date_text = str(entry.get("entry_date") or "")
+            if symbol and entry_date_text:
+                entries_by_symbol_and_date[(symbol, entry_date_text)] = entry
+    return entries_by_symbol_and_date
+
+
+def _load_production_bucket_tp_sl_entries() -> dict[tuple[str, str], dict[str, Any]]:
+    """Load daily [BUCKET_TP_SL] snapshots keyed by bucket or strategy and date."""
+    entries_by_bucket_or_strategy_and_date: dict[tuple[str, str], dict[str, Any]] = {}
+    for log_path in sorted(LOGS_DIRECTORY.glob("*.log")):
+        try:
+            log_text = log_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for log_line in log_text.splitlines():
+            if not log_line.startswith("[BUCKET_TP_SL]"):
+                continue
+            entry = _parse_signal_log_tokens(log_line[len("[BUCKET_TP_SL]"):])
+            date_text = str(entry.get("date") or log_path.stem)
+            bucket = str(entry.get("bucket") or "")
+            strategy_identifier = str(entry.get("strategy_id") or "")
+            if bucket:
+                entries_by_bucket_or_strategy_and_date[(bucket, date_text)] = entry
+            if strategy_identifier:
+                entries_by_bucket_or_strategy_and_date[
+                    (strategy_identifier, date_text)
+                ] = entry
+    return entries_by_bucket_or_strategy_and_date
+
+
+def _load_production_exit_rules() -> dict[str, dict[str, Any]]:
+    """Load production TP/SL management rules keyed by bucket and strategy id."""
+    from stock_indicator import multi_bucket_today
+
+    config = multi_bucket_today.load_multi_bucket_config(PRODUCTION_CONFIG_PATH)
+    adaptive_config = config.adaptive_tp_sl
+    default_min_hold_stop_loss = (
+        adaptive_config.min_hold_sl if adaptive_config is not None else 1
+    )
+    default_disable_stop_loss_trigger = (
+        adaptive_config.disable_sl_trigger if adaptive_config is not None else False
+    )
+
+    rules_by_key: dict[str, dict[str, Any]] = {}
+    for bucket_label, bucket_definition in config.bucket_definitions.items():
+        min_hold_stop_loss = (
+            bucket_definition.min_hold_sl
+            if bucket_definition.min_hold_sl is not None
+            else default_min_hold_stop_loss
+        )
+        rule = {
+            "bucket": bucket_label,
+            "strategy_id": bucket_definition.strategy_identifier,
+            "min_hold_sl": min_hold_stop_loss,
+            "disable_sl_trigger": default_disable_stop_loss_trigger,
+            "max_hold": bucket_definition.max_hold,
+            "reset_hold_on_reentry_signal": (
+                bucket_definition.reset_hold_on_reentry_signal
+            ),
+        }
+        rules_by_key[bucket_label] = rule
+        rules_by_key[bucket_definition.strategy_identifier] = rule
+    return rules_by_key
+
+
+def _merge_production_signal_metadata(
+    *,
+    symbol: str,
+    entry: dict[str, Any] | None,
+    signal_entries_by_symbol_and_date: dict[tuple[str, str], dict[str, Any]],
+    bucket_tp_sl_entries_by_key_and_date: dict[tuple[str, str], dict[str, Any]],
+    production_exit_rules: dict[str, dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Resolve TP/SL metadata for an API-confirmed open lot."""
+    entry_record = dict(entry or {})
+    entry_date_text = str(entry_record.get("entry_date") or "")
+    signal_date_candidates = [
+        str(entry_record.get("futu_buy_order_date") or ""),
+        entry_date_text,
+    ]
+    signal_entry = None
+    for signal_date_text in signal_date_candidates:
+        if not signal_date_text:
+            continue
+        signal_entry = signal_entries_by_symbol_and_date.get(
+            (symbol, signal_date_text)
+        )
+        if signal_entry is not None:
+            break
+    if signal_entry is None:
+        bucket_candidates = [
+            str(entry_record.get("bucket") or ""),
+            str(entry_record.get("strategy_id") or ""),
+        ]
+        for signal_date_text in signal_date_candidates:
+            if not signal_date_text:
+                continue
+            for bucket_candidate in bucket_candidates:
+                if not bucket_candidate:
+                    continue
+                signal_entry = bucket_tp_sl_entries_by_key_and_date.get(
+                    (bucket_candidate, signal_date_text)
+                )
+                if signal_entry is not None:
+                    break
+            if signal_entry is not None:
+                break
+    if signal_entry is None:
+        return None
+
+    bucket = str(signal_entry.get("bucket") or "")
+    strategy_identifier = str(signal_entry.get("strategy_id") or "")
+    production_rule = (
+        production_exit_rules.get(bucket)
+        or production_exit_rules.get(strategy_identifier)
+        or {}
+    )
+    merged_entry = {
+        **entry_record,
+        **signal_entry,
+        **production_rule,
+        "symbol": symbol,
+        "supports_tp_sl": "tp_pct" in signal_entry and "sl_pct" in signal_entry,
+        "metadata_source": "production_signal_log",
+    }
+    return merged_entry
+
+
 def main() -> None:
     """Place missing TP/SL orders for live Futu positions."""
     from futu import (
@@ -274,10 +474,10 @@ def main() -> None:
         TrdSide,
     )
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+
     dry_run = "--dry-run" in sys.argv
     trading_environment = TrdEnv.REAL if TRADING_ENV == "REAL" else TrdEnv.SIMULATE
-
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
     trade_context = OpenSecTradeContext(
         host="127.0.0.1",
@@ -324,18 +524,32 @@ def main() -> None:
             trading_environment,
             as_of_date_text=today_text,
         )
+        signal_entries_by_symbol_and_date = _load_production_signal_entries()
+        bucket_tp_sl_entries_by_key_and_date = _load_production_bucket_tp_sl_entries()
+        production_exit_rules = _load_production_exit_rules()
 
         LOGGER.info("--- TP check ---")
         for code, position in positions.items():
             symbol = code.replace("US.", "")
-            entry = open_entries_by_symbol.get(symbol)
+            entry = _merge_production_signal_metadata(
+                symbol=symbol,
+                entry=open_entries_by_symbol.get(symbol),
+                signal_entries_by_symbol_and_date=signal_entries_by_symbol_and_date,
+                bucket_tp_sl_entries_by_key_and_date=bucket_tp_sl_entries_by_key_and_date,
+                production_exit_rules=production_exit_rules,
+            )
             if entry is None or not _entry_supports_take_profit_stop_loss(entry):
                 LOGGER.warning(
-                    "[ORPHAN_POSITION] code=%s qty=%d cost=$%.2f — "
-                    "no Futu v2 BUY remark metadata, skipping TP/SL",
+                    "[TP_SL_METADATA_MISSING] code=%s qty=%d cost=$%.2f "
+                    "entry_date=%s buy_order_id=%s — no production signal "
+                    "metadata for API-confirmed lot, skipping TP/SL",
                     code,
                     position["qty"],
                     position["cost_price"],
+                    (open_entries_by_symbol.get(symbol) or {}).get("entry_date"),
+                    (open_entries_by_symbol.get(symbol) or {}).get(
+                        "futu_buy_order_id",
+                    ),
                 )
                 continue
 
@@ -396,7 +610,13 @@ def main() -> None:
         LOGGER.info("--- SL check ---")
         for code, position in positions.items():
             symbol = code.replace("US.", "")
-            entry = open_entries_by_symbol.get(symbol)
+            entry = _merge_production_signal_metadata(
+                symbol=symbol,
+                entry=open_entries_by_symbol.get(symbol),
+                signal_entries_by_symbol_and_date=signal_entries_by_symbol_and_date,
+                bucket_tp_sl_entries_by_key_and_date=bucket_tp_sl_entries_by_key_and_date,
+                production_exit_rules=production_exit_rules,
+            )
             if entry is None or not _entry_supports_take_profit_stop_loss(entry):
                 continue
 

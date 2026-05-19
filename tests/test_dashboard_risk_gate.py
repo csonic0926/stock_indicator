@@ -118,6 +118,12 @@ def _write_dashboard_fixture(
         "accepted: [('AAA', 'fish_head_production')]\n"
         "rejected: [('BBB', 'fish_tail_explore', 'bucket_cap')]\n"
         "max_position_count=6 held_before_today=2 same_day_closes=0\n"
+        "[ROLLING_TP_SL_STATE] winners=20 losers=20 pending_rolling=0 closed_trades=40\n"
+        "[BUCKET_TP_SL] date=2026-05-15 bucket=fish_head_production "
+        "strategy_id=fish_head_vacuum_turn tp_pct=0.074200 sl_pct=0.043400 "
+        "rolling_mp=0.055000 rolling_ml=-0.030000 min_hold_tp=1 "
+        "min_hold_sl=1 disable_sl_trigger=True max_hold=None "
+        "reset_hold_on_reentry_signal=False\n"
         "[FROZEN_TP_SL] "
         f"entry_date={signal_date} bucket=fish_head_production "
         "strategy_id=fish_head_vacuum_turn symbol=AAA "
@@ -152,6 +158,28 @@ def test_parse_log_separates_raw_entries_from_accepted_buys(
             "symbol": "BBB",
             "bucket": "fish_tail_explore",
             "reason": "bucket_cap",
+        }
+    ]
+    assert parsed_log["rolling_tp_sl_state"] == {
+        "winners": 20,
+        "losers": 20,
+        "pending_rolling": 0,
+        "closed_trades": 40,
+    }
+    assert parsed_log["bucket_tp_sl"] == [
+        {
+            "date": "2026-05-15",
+            "bucket": "fish_head_production",
+            "strategy_id": "fish_head_vacuum_turn",
+            "tp_pct": 0.0742,
+            "sl_pct": 0.0434,
+            "rolling_mp": 0.055,
+            "rolling_ml": -0.03,
+            "min_hold_tp": 1,
+            "min_hold_sl": 1,
+            "disable_sl_trigger": True,
+            "max_hold": None,
+            "reset_hold_on_reentry_signal": False,
         }
     ]
     assert parsed_log["position_count"] == 3
@@ -583,3 +611,18 @@ def test_current_bucket_tp_sl_uses_config_sigma_not_stale_frozen_log(
 
     assert tp_by_bucket["fish_head_production"] > tp_by_bucket["fish_tail_explore"]
     assert tp_by_bucket["fish_tail_explore"] == 0.07
+
+
+def test_cron_dashboard_contract_names_layer_ownership() -> None:
+    """Dashboard should expose a plain-language source-of-truth contract."""
+    communication_contract = dashboard._build_cron_dashboard_contract()
+
+    step_owners = [
+        contract_step["owner"]
+        for contract_step in communication_contract["steps"]
+    ]
+    note_text = " ".join(communication_contract["notes"])
+
+    assert step_owners == ["Cron", "Dashboard", "Futu"]
+    assert "Raw entries are strategy signals" in note_text
+    assert "diagnostic" in note_text

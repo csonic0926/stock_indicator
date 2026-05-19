@@ -44,6 +44,7 @@ def _parse_log_key_value_tokens(line_body: str) -> dict[str, Any]:
                 "tp_pct",
                 "sl_pct",
                 "rolling_mp",
+                "rolling_ml",
                 "slope_60",
                 "near_delta",
             }:
@@ -53,6 +54,10 @@ def _parse_log_key_value_tokens(line_body: str) -> dict[str, Any]:
                 "min_hold_sl",
                 "dollar_volume_rank",
                 "max_hold",
+                "winners",
+                "losers",
+                "pending_rolling",
+                "closed_trades",
             }:
                 fields[key_text] = int(raw_value_text)
             elif key_text in {
@@ -110,6 +115,26 @@ def _parse_log(log_path: Path) -> dict[str, Any]:
     ]
     result["buy_actions"] = todays_buy_symbols
     result["accepted_buy_actions"] = todays_buy_symbols
+
+    bucket_tp_sl_records: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        if not line.startswith("[BUCKET_TP_SL]"):
+            continue
+        bucket_tp_sl_records.append(
+            _parse_log_key_value_tokens(line[len("[BUCKET_TP_SL]"):])
+        )
+    result["bucket_tp_sl"] = bucket_tp_sl_records
+
+    rolling_state_records: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        if not line.startswith("[ROLLING_TP_SL_STATE]"):
+            continue
+        rolling_state_records.append(
+            _parse_log_key_value_tokens(line[len("[ROLLING_TP_SL_STATE]"):])
+        )
+    result["rolling_tp_sl_state"] = (
+        rolling_state_records[-1] if rolling_state_records else {}
+    )
 
     accepted_match = re.search(r"^accepted:\s*(.+)$", text, re.MULTILINE)
     rejected_match = re.search(r"^rejected:\s*(.+)$", text, re.MULTILINE)
@@ -266,6 +291,49 @@ def _load_current_bucket_tp_sl(adaptive_state: dict[str, Any]) -> list[dict[str,
         return []
 
 
+def _build_cron_dashboard_contract() -> dict[str, Any]:
+    """Describe which layer owns each trading decision shown by dashboard."""
+    # TODO: review
+    # This text is user-facing dashboard copy, so keep it natural rather
+    # than mirroring internal file or function names.
+    return {
+        "title": "Cron → Dashboard contract",
+        "steps": [
+            {
+                "owner": "Cron",
+                "label": "Signal layer",
+                "detail": (
+                    "Finds raw entry/exit signals, runs cross-bucket slot "
+                    "competition, freezes TP/SL for accepted entries, and "
+                    "updates the virtual rolling pool."
+                ),
+            },
+            {
+                "owner": "Dashboard",
+                "label": "Order layer",
+                "detail": (
+                    "Reads cron log lines, reconciles them against live Futu "
+                    "positions, applies real account slots and risk gate, then "
+                    "previews or sends orders."
+                ),
+            },
+            {
+                "owner": "Futu",
+                "label": "Live truth",
+                "detail": (
+                    "Live holdings and order status are the source of truth "
+                    "for what can actually be bought or sold."
+                ),
+            },
+        ],
+        "notes": [
+            "Raw entries are strategy signals before order-layer checks.",
+            "Cron accepted buys have frozen TP/SL but may still be skipped by dashboard.",
+            "The local signal mirror is diagnostic; it is not the live portfolio.",
+        ],
+    }
+
+
 def _get_log_dates() -> list[str]:
     """Return sorted list of available log dates (newest first)."""
     dates = []
@@ -283,7 +351,6 @@ def api_state():
     """Current system state: signal trades, adaptive state, latest log."""
     signal_trades = _load_json(DATA_DIRECTORY / "signal_trades.json")
     adaptive = _load_json(DATA_DIRECTORY / "adaptive_state.json")
-    current_bucket_tp_sl = _load_current_bucket_tp_sl(adaptive)
     dates = _get_log_dates()
     latest_log = None
     if dates:
@@ -291,7 +358,7 @@ def api_state():
     return {
         "signal_trades": signal_trades,
         "adaptive_state": adaptive,
-        "current_bucket_tp_sl": current_bucket_tp_sl,
+        "communication_contract": _build_cron_dashboard_contract(),
         "latest_log": latest_log,
         "available_dates": dates[:30],
     }
@@ -1405,6 +1472,12 @@ HTML_PAGE = """<!DOCTYPE html>
     <div id="signals-content"></div>
   </div>
 
+  <!-- Cron / Dashboard Communication -->
+  <div class="card full" id="contract-card">
+    <h2>Cron / Dashboard Communication</h2>
+    <div id="contract-content"></div>
+  </div>
+
   <!-- Order Preview -->
   <div class="card full" id="orders-card">
     <h2>Order Preview <span class="env-badge" id="env-badge"></span></h2>
@@ -1521,6 +1594,83 @@ function tagWithBucket(symbol, type, bucketMap) {
   return `<span class="tag ${type}">${symbol}${suffix}</span>`;
 }
 
+function renderCommunicationContract(contract) {
+  const fallbackContract = {
+    title: 'Cron → Dashboard contract',
+    steps: [
+      {
+        owner: 'Cron',
+        label: 'Signal layer',
+        detail: 'Finds signals, accepts slots, freezes TP/SL, and updates the rolling pool.'
+      },
+      {
+        owner: 'Dashboard',
+        label: 'Order layer',
+        detail: 'Checks live Futu positions, real account slots, and risk gate before orders.'
+      },
+      {
+        owner: 'Futu',
+        label: 'Live truth',
+        detail: 'Live holdings and orders decide what can actually be traded.'
+      }
+    ],
+    notes: [
+      'Raw entries are not orders.',
+      'Cron accepted buys may still be skipped by dashboard.',
+      'The local signal mirror is diagnostic only.'
+    ]
+  };
+  const displayedContract = contract || fallbackContract;
+  let html = '<div style="font-size:0.9em">';
+  for (const contractStep of (displayedContract.steps || [])) {
+    html += `<div style="margin-bottom:10px">
+      <strong style="color:var(--blue)">${contractStep.owner || '—'}</strong>
+      <span style="color:var(--text2)"> — ${contractStep.label || ''}</span>
+      <div style="color:var(--text2); margin-top:2px">${contractStep.detail || ''}</div>
+    </div>`;
+  }
+  const contractNotes = displayedContract.notes || [];
+  if (contractNotes.length) {
+    html += '<div style="border-top:1px solid var(--border); padding-top:8px; color:var(--text2)">';
+    for (const contractNote of contractNotes) {
+      html += `<div>• ${contractNote}</div>`;
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  $('#contract-content').innerHTML = html;
+}
+
+function renderAdaptiveTpSlFromLog(log, adaptive) {
+  const bucketTpSlRecords = log.bucket_tp_sl || [];
+  let html = '';
+  if (bucketTpSlRecords.length === 0) {
+    html += stat('TP / SL', 'not available in selected log', '');
+  } else {
+    for (const bucketRecord of bucketTpSlRecords) {
+      const bucketName = bucketRecord.bucket || '';
+      const shortBucketName = bucketName.replace('_production', '').replace('_explore', '');
+      const takeProfitValue = bucketRecord.tp_pct != null ? '+' + (bucketRecord.tp_pct * 100).toFixed(2) + '%' : '—';
+      const stopLossValue = bucketRecord.sl_pct != null ? '-' + (bucketRecord.sl_pct * 100).toFixed(2) + '%' : '—';
+      const maxHoldValue = bucketRecord.max_hold != null ? bucketRecord.max_hold + ' bars' : '—';
+      html += stat(shortBucketName + ' TP', takeProfitValue, 'positive');
+      html += stat(shortBucketName + ' SL', stopLossValue, 'negative');
+      html += stat(shortBucketName + ' MaxHold', maxHoldValue);
+    }
+    html += stat('TP source', (log.date || 'selected date') + ' log');
+  }
+
+  const rollingState = log.rolling_tp_sl_state || {};
+  if (rollingState.winners != null || rollingState.losers != null) {
+    html += stat('Pool', `${rollingState.winners || 0} winners + ${rollingState.losers || 0} losers`);
+  } else {
+    const winners = (adaptive.winners || []);
+    const losers = (adaptive.losers || []);
+    html += stat('Pool', `${winners.length} winners + ${losers.length} losers`);
+  }
+  $('#adaptive-stats').innerHTML = html;
+}
+
 async function load() {
   try {
     const [stateRes, futuRes] = await Promise.all([
@@ -1540,39 +1690,12 @@ function render(state, futu) {
   const log = state.latest_log || {};
   const adaptive = state.adaptive_state || {};
   const positions = state.signal_trades || {}; // diagnostic local mirror only
+  renderCommunicationContract(state.communication_contract);
 
-  // Per-bucket TP / SL summary comes from current config + rolling state.
-  // [FROZEN_TP_SL] remains the order-preview source because those values
-  // are entry-time trade constants; using them for this summary would keep
-  // showing stale values after a config/code fix until a new accepted entry
-  // appears in each bucket.
-  let html = '';
-  const currentBucketTpSl = state.current_bucket_tp_sl || [];
-  if (currentBucketTpSl.length === 0) {
-    html += stat('TP / SL', 'not available', '');
-  } else {
-    for (const e of currentBucketTpSl) {
-      const b = e.bucket || '';
-      const short = b.replace('_production', '').replace('_explore', '');
-      const tp_v = e.tp_pct != null ? '+' + (e.tp_pct * 100).toFixed(2) + '%' : '—';
-      const sl_v = e.sl_pct != null ? '-' + (e.sl_pct * 100).toFixed(2) + '%' : '—';
-      const maxHoldValue = e.max_hold != null ? e.max_hold + ' bars' : '—';
-      html += stat(short + ' TP', tp_v, 'positive');
-      html += stat(short + ' SL', sl_v, 'negative');
-      html += stat(short + ' MaxHold', maxHoldValue);
-    }
-    html += stat('TP source', 'current config base');
-  }
-  // Pool size: winners + losers deque length (these feed the frozen
-  // TP/SL formula). closed_trades carries the full symbol/date/pct
-  // records and drives the table view below.
-  const winners = (adaptive.winners || []);
-  const losers = (adaptive.losers || []);
-  html += stat('Pool', `${winners.length} winners + ${losers.length} losers`);
-  $('#adaptive-stats').innerHTML = html;
+  renderAdaptiveTpSlFromLog(log, adaptive);
 
   // Account
-  html = '';
+  let html = '';
   if (futu.connected) {
     $('#futu-badge').className = 'futu-badge on';
     $('#futu-badge').textContent = 'FUTU LIVE';
@@ -1595,7 +1718,7 @@ function render(state, futu) {
   html += '<div class="signal-row"><strong style="color:var(--text2)">ENTRY (raw):</strong> ';
   html += (log.entry_signals && log.entry_signals.length) ? log.entry_signals.map(s => tagWithBucket(s, 'neutral', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
-  html += '<div class="signal-row"><strong style="color:var(--text2)">BUY (accepted):</strong> ';
+  html += '<div class="signal-row"><strong style="color:var(--text2)">BUY (cron accepted):</strong> ';
   html += (log.accepted_buy_actions && log.accepted_buy_actions.length) ? log.accepted_buy_actions.map(s => tagWithBucket(s, 'buy', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">SELL:</strong> ';
@@ -1607,7 +1730,7 @@ function render(state, futu) {
   // Entry/exit signal count
   html += '<div style="margin-top:8px; font-size:0.85em; color:var(--text2)">';
   html += 'Raw entries: ' + (log.entry_signals||[]).length + ' | ';
-  html += 'Accepted buys: ' + (log.accepted_buy_actions||[]).length + ' | ';
+  html += 'Cron accepted buys: ' + (log.accepted_buy_actions||[]).length + ' | ';
   html += 'Rejected: ' + (((log.slot_allocation||{}).rejected)||[]).length + ' | ';
   html += 'Exit signals: ' + (log.exit_signals||[]).length + ' | ';
   html += 'Positions: ' + (log.position_count||0);
@@ -1662,7 +1785,7 @@ async function loadDate(d) {
   html += '<div class="signal-row"><strong style="color:var(--text2)">ENTRY (raw):</strong> ';
   html += (log.entry_signals && log.entry_signals.length) ? log.entry_signals.map(s => tagWithBucket(s, 'neutral', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
-  html += '<div class="signal-row"><strong style="color:var(--text2)">BUY (accepted):</strong> ';
+  html += '<div class="signal-row"><strong style="color:var(--text2)">BUY (cron accepted):</strong> ';
   html += (log.accepted_buy_actions && log.accepted_buy_actions.length) ? log.accepted_buy_actions.map(s => tagWithBucket(s, 'buy', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">SELL:</strong> ';
@@ -1673,20 +1796,12 @@ async function loadDate(d) {
   html += '</div>';
   html += '<div style="margin-top:8px; font-size:0.85em; color:var(--text2)">';
   html += 'Raw entries: ' + (log.entry_signals||[]).length + ' | ';
-  html += 'Accepted buys: ' + (log.accepted_buy_actions||[]).length + ' | ';
+  html += 'Cron accepted buys: ' + (log.accepted_buy_actions||[]).length + ' | ';
   html += 'Rejected: ' + (((log.slot_allocation||{}).rejected)||[]).length + ' | ';
   html += 'Exit signals: ' + (log.exit_signals||[]).length + ' | ';
   html += 'Positions: ' + (log.position_count||0);
   html += '</div>';
-  if (log.tp_pct != null) {
-    let ahtml = '';
-    ahtml += stat('TP', pct(log.tp_pct), 'positive');
-    ahtml += stat('SL', pct(log.sl_pct), 'negative');
-    if (log.rolling_mp != null) ahtml += stat('Rolling MP', '+' + pct(log.rolling_mp) + ' (n=' + log.rolling_mp_n + ')', 'positive');
-    if (log.rolling_ml != null) ahtml += stat('Rolling ML', '-' + pct(log.rolling_ml) + ' (n=' + log.rolling_ml_n + ')', 'negative');
-    ahtml += stat('Window', '20 trades');
-    $('#adaptive-stats').innerHTML = ahtml;
-  }
+  renderAdaptiveTpSlFromLog(log, {});
   $('#signals-content').innerHTML = html;
   document.querySelectorAll('.date-btn').forEach(b => {
     b.className = b.textContent === d ? 'date-btn active' : 'date-btn';
@@ -1713,7 +1828,7 @@ async function previewOrders() {
     badge.className = env === 'REAL' ? 'env-badge env-real' : 'env-badge env-simulate';
 
     if (data.orders.length === 0) {
-      $('#orders-content').innerHTML = '<div style="color:var(--text2)">No pending orders (signal date: ' + (data.signal_date||'—') + ')</div>';
+      $('#orders-content').innerHTML = '<div style="color:var(--text2)">No dashboard-sendable orders (signal date: ' + (data.signal_date||'—') + '). Cron may still have raw or accepted signals that were already held, blocked, or not actionable live.</div>';
       return;
     }
 
@@ -1728,6 +1843,9 @@ async function previewOrders() {
     if (gate.status === 'stop') {
       html += ' | <strong style="color:var(--red)">Risk gate STOP: ' + gate.year_month + ' score=' + gate.risk_score + '</strong>';
     }
+    html += '</div>';
+    html += '<div style="font-size:0.78em; color:var(--text2); margin-bottom:8px">';
+    html += 'This table is dashboard-sendable orders. It starts from cron accepted buys, then removes or marks items blocked by live Futu holdings, account slots, or risk gate.';
     html += '</div>';
 
     html += '<div class="order-row order-header"><span>Side</span><span>Symbol</span><span>Bucket</span><span>Rank</span><span>Qty</span><span>Ref Price</span><span>TP%</span><span>SL%</span></div>';

@@ -1352,6 +1352,36 @@ def compute_today_signals(
         f"closed_trades={len(state.get('closed_trades', []))}"
     )
 
+    for bucket_label, bucket_def in config.bucket_definitions.items():
+        (
+            bucket_tp_pct,
+            bucket_sl_pct,
+            bucket_rolling_mp,
+            bucket_rolling_ml,
+        ) = strategy.compute_frozen_tp_sl_for_bucket(
+            bucket_def=bucket_def,
+            adaptive_tp_sl=adaptive,
+            closed_winners=state.get("winners", []),
+            closed_losers=state.get("losers", []),
+            entry_slope_60=None,
+        )
+        max_hold_text = (
+            str(bucket_def.max_hold) if bucket_def.max_hold is not None else "None"
+        )
+        log_lines.append(
+            f"[BUCKET_TP_SL] date={eval_date_string} "
+            f"bucket={bucket_label} "
+            f"strategy_id={bucket_def.strategy_identifier} "
+            f"tp_pct={bucket_tp_pct:.6f} sl_pct={bucket_sl_pct:.6f} "
+            f"rolling_mp={bucket_rolling_mp:.6f} "
+            f"rolling_ml={bucket_rolling_ml:.6f} "
+            f"min_hold_tp={adaptive.min_hold_tp} "
+            f"min_hold_sl={adaptive.min_hold_sl} "
+            f"disable_sl_trigger={adaptive.disable_sl_trigger} "
+            f"max_hold={max_hold_text} "
+            f"reset_hold_on_reentry_signal={bucket_def.reset_hold_on_reentry_signal}"
+        )
+
     for record in accepted_records:
         slope_text = (
             f"{record.slope_60:.4f}" if record.slope_60 is not None else "None"
