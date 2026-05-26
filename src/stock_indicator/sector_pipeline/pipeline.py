@@ -18,6 +18,8 @@ from typing import Optional
 import pandas as pd
 import requests
 
+from stock_indicator.symbols import load_symbols
+
 from .config import (
     SUBMISSIONS_DIRECTORY,
     LAST_RUN_CONFIG_PATH,
@@ -25,18 +27,25 @@ from .config import (
     DEFAULT_OUTPUT_CSV_PATH,
     SIC_TO_FAMA_FRENCH_MAPPING_PATH,
 )
-from .utils import ensure_directory_exists, save_json_file, load_json_file
+from .utils import (
+    ensure_directory_exists,
+    save_json_file,
+    load_json_file,
+    normalize_ticker_symbol,
+)
 from .sec_api import (
     map_tickers_to_central_index_and_classification,
-    load_company_tickers,
 )
 from .ff_mapping import (
     load_fama_french_mapping,
     build_classification_lookup,
     attach_fama_french_groups,
 )
+from .secondary_classification import apply_secondary_classifications
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_SYMBOL_UNIVERSE_SOURCE = "symbols.txt"
 
 # Ensure required cache directories exist for incremental updates
 ensure_directory_exists(LAST_RUN_CONFIG_PATH.parent)
@@ -67,25 +76,68 @@ def load_universe(source: str | Path) -> pd.DataFrame:
     else:
         with Path(source_str).open("r", encoding="utf-8") as file_pointer:
             text = file_pointer.read()
-    tickers = [symbol.strip().upper() for symbol in text.splitlines() if symbol.strip()]
+    tickers = [
+        normalize_ticker_symbol(symbol)
+        for symbol in text.splitlines()
+        if symbol.strip()
+    ]
     return pd.DataFrame({"ticker": tickers})
+
+
+def load_current_symbol_universe() -> pd.DataFrame:
+    """Return the current tradable symbol universe from ``data/symbols.txt``."""
+
+    normalized_symbols = [
+        normalize_ticker_symbol(symbol_name)
+        for symbol_name in load_symbols()
+        if symbol_name and str(symbol_name).strip()
+    ]
+    unique_symbols = sorted(dict.fromkeys(normalized_symbols))
+    return pd.DataFrame({"ticker": unique_symbols})
+
+
+def resolve_sector_universe(
+    universe_source: str | Path | pd.DataFrame | None,
+) -> pd.DataFrame:
+    """Return the symbol universe used for sector classification.
+
+    ``None`` means the already-curated project symbol cache. Passing a
+    DataFrame or explicit file/URL remains available for tests and one-off
+    audits, but production should classify only ``symbols.txt``.
+    """
+
+    if universe_source is None:
+        return load_current_symbol_universe()
+    if isinstance(universe_source, pd.DataFrame):
+        if "ticker" not in universe_source.columns:
+            raise ValueError("Universe DataFrame must contain a 'ticker' column")
+        universe_data_frame = universe_source[["ticker"]].copy()
+    else:
+        universe_data_frame = load_universe(universe_source)
+    universe_data_frame["ticker"] = universe_data_frame["ticker"].map(
+        normalize_ticker_symbol
+    )
+    universe_data_frame = universe_data_frame.dropna()
+    universe_data_frame = universe_data_frame.loc[universe_data_frame["ticker"] != ""]
+    return universe_data_frame.drop_duplicates(subset=["ticker"])
 
 
 def build_sector_classification_dataset(
     mapping_source: str | Path = SIC_TO_FAMA_FRENCH_MAPPING_PATH,
     output_parquet_path: Path = DEFAULT_OUTPUT_PARQUET_PATH,
     output_csv_path: Optional[Path] = DEFAULT_OUTPUT_CSV_PATH,
+    universe_source: str | Path | pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Generate a dataset of symbols with CIK, SIC, and Fama-French codes.
 
-    The ticker universe is downloaded from the SEC ``company_tickers.json``
-    dataset. ``mapping_source`` may be a path to a CSV file or a URL pointing
-    to one. By default the local ``sic_to_ff.csv`` file under the repository's
+    The production ticker universe comes from the curated ``data/symbols.txt``
+    cache. ``mapping_source`` may be a path to a CSV file or a URL pointing to
+    one. By default the local ``sic_to_ff.csv`` file under the repository's
     ``data`` directory is used.
     """
     ensure_directory_exists(LAST_RUN_CONFIG_PATH.parent)
     ensure_directory_exists(SUBMISSIONS_DIRECTORY)
-    universe_data_frame = load_company_tickers()
+    universe_data_frame = resolve_sector_universe(universe_source)
     ticker_mapping_data_frame = map_tickers_to_central_index_and_classification(
         universe_data_frame
     )
@@ -94,6 +146,7 @@ def build_sector_classification_dataset(
     classified_data_frame = attach_fama_french_groups(
         ticker_mapping_data_frame, lookup_data_frame
     )
+    classified_data_frame = apply_secondary_classifications(classified_data_frame)
     classified_data_frame["sic_desc"] = ""
     ensure_directory_exists(output_parquet_path.parent)
     classified_data_frame.to_parquet(output_parquet_path, index=False)
@@ -104,6 +157,11 @@ def build_sector_classification_dataset(
         {
             "mapping_source": str(mapping_source),
             "output": str(output_parquet_path),
+            "universe_source": (
+                str(universe_source)
+                if universe_source is not None
+                else DEFAULT_SYMBOL_UNIVERSE_SOURCE
+            ),
         },
         LAST_RUN_CONFIG_PATH,
     )
@@ -136,7 +194,18 @@ def update_latest_dataset() -> pd.DataFrame:
                     f"Fama-French mapping file not found: {mapping_source}. "
                     "Place a mapping at data/sic_to_ff.csv or run 'update_sector_data --ff-map-url=URL OUTPUT_PATH'."
                 )
-    return build_sector_classification_dataset(mapping_source, output_path)
+    configured_universe_source = configuration.get("universe_source")
+    universe_source = (
+        None
+        if configured_universe_source in (None, DEFAULT_SYMBOL_UNIVERSE_SOURCE)
+        else configured_universe_source
+    )
+    return build_sector_classification_dataset(
+        mapping_source,
+        output_path,
+        DEFAULT_OUTPUT_CSV_PATH,
+        universe_source=universe_source,
+    )
 
 
 def generate_coverage_report(data_frame: pd.DataFrame) -> str:
@@ -144,10 +213,20 @@ def generate_coverage_report(data_frame: pd.DataFrame) -> str:
     total_count = len(data_frame)
     with_cik = data_frame["cik"].notna().sum()
     with_sic = data_frame["sic"].notna().sum()
-    with_fama_french = (data_frame["ff48"] != -1).sum()
+    with_ff12 = data_frame["ff12"].notna().sum()
+    if "classification_confidence" in data_frame.columns:
+        low_confidence_ff12 = (
+            data_frame["classification_confidence"].astype(str).str.lower()
+            == "low"
+        ).sum()
+    else:
+        low_confidence_ff12 = 0
+    trusted_ff12 = with_ff12 - low_confidence_ff12
     return (
         f"Total: {total_count}\n"
         f"CIK: {with_cik} ({with_cik / total_count:.1%})\n"
         f"SIC: {with_sic} ({with_sic / total_count:.1%})\n"
-        f"FF tag: {with_fama_french} ({with_fama_french / total_count:.1%})"
+        f"FF12 trusted: {trusted_ff12} ({trusted_ff12 / total_count:.1%})\n"
+        f"FF12 low-confidence fallback: "
+        f"{low_confidence_ff12} ({low_confidence_ff12 / total_count:.1%})"
     )

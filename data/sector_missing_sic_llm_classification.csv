@@ -1,0 +1,95 @@
+ticker,llm_decision,ff12,ff_label,classification_confidence,classification_issue,ff12_source,semantic_type,reason
+ACMIF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,Allied Critical Metals is a critical-metals/mining issuer; metal mining maps to FF12 Other.
+ALEUY,include,9,Shops,medium,resolved_missing_sic_llm,secondary_llm,operating_company_adr,Allegro.eu is an e-commerce marketplace ADR; retail marketplace activity maps to Shops.
+AUGCF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,AU Gold is a gold issuer; gold mining/exploration maps to FF12 Other.
+BAWAY,include,11,Money,medium,resolved_missing_sic_llm,secondary_llm,bank_adr,BAWAG Group is a banking ADR; banks map to Money.
+BEBE,exclude,,,low,shell_company,excluded_llm,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+BKZHY,include,11,Money,medium,resolved_missing_sic_llm,secondary_llm,bank_adr,Santander Bank Polska/Erste Bank Polska is a banking ADR; banks map to Money.
+CCEYF,include,4,Enrgy,medium,resolved_missing_sic_llm,secondary_llm,energy_common_equity,CanCambria Energy is an energy issuer; oil/gas energy activity maps to Enrgy.
+CEPV,exclude,,,low,shell_company,excluded_llm,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+CFSU,exclude,,,low,shell_company,excluded_llm,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+CGDCF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,Carlin Gold is a gold issuer; gold mining/exploration maps to FF12 Other.
+CICB,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+CICC,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+CPPMF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,Coppernico Metals is a copper/metals issuer; metal mining maps to FF12 Other.
+CPRHF,include,8,Utils,medium,resolved_missing_sic_llm,secondary_llm,utility_common_equity,Capital Power is a power-generation utility issuer; electric utilities map to Utils.
+CPWPF,include,8,Utils,medium,resolved_missing_sic_llm,secondary_llm,utility_common_equity,Capital Power is a power-generation utility issuer; electric utilities map to Utils.
+CUPPF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,Super Copper is a copper/metals issuer; metal mining maps to FF12 Other.
+DNMX,exclude,,,low,shell_company,excluded_llm,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+EBCRY,include,6,BusEq,medium,resolved_missing_sic_llm,secondary_llm,operating_company_adr,Embracer Group is an interactive entertainment/software publisher; software/electronic gaming maps to BusEq.
+ECCU,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+ECCV,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+FRECF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,operating_common_equity,"Frequency Exchange lacks reliable sector metadata; its broad device/wellness profile is outside the first eleven FF12 buckets, so it is kept in Other."
+GAING,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+GAINI,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+GAINZ,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+GARLF,exclude,,,low,shell_company,excluded_llm,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+GECCG,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+GECCH,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+GECCI,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+GECCO,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+GHRTF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,Greenheart Gold is a gold issuer; gold mining/exploration maps to FF12 Other.
+GIW,exclude,,,low,shell_company,excluded_llm,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+GONYF,include,11,Money,medium,resolved_missing_sic_llm,secondary_llm,reit_common_equity,GO Residential Real Estate Investment Trust is a REIT/common equity exposure; real estate maps to Money.
+HCXY,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+HTFC,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+ICGSF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,ICG Silver & Gold is a precious-metals issuer; mining maps to FF12 Other.
+IDXMF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,IDEX Metals is a metals issuer; metal mining maps to FF12 Other.
+KXHCF,include,6,BusEq,medium,resolved_missing_sic_llm,secondary_llm,technology_adr,Kioxia is a memory semiconductor/electronics company; semiconductor hardware maps to BusEq.
+MFICL,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+MGCOF,include,2,Durbl,medium,resolved_missing_sic_llm,secondary_llm,operating_company_adr,Midea Group is a household appliance manufacturer ADR; appliances map to Durbl.
+MIMDF,include,6,BusEq,medium,resolved_missing_sic_llm,secondary_llm,technology_common_equity,MiMedia is a cloud/software platform company; software maps to BusEq.
+MLIZY,include,9,Shops,medium,resolved_missing_sic_llm,secondary_llm,operating_company_adr,Meliuz is a cashback/e-commerce marketplace company; retail marketplace activity maps to Shops.
+MOGMF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,Mogotes Metals is a metals issuer; metal mining maps to FF12 Other.
+MPJPY,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,operating_company_adr,"Metaplanet is a non-standard hotel/Bitcoin-treasury issuer; no first-eleven FF12 bucket fits cleanly, so it is kept in Other."
+MRUWY,include,6,BusEq,medium,resolved_missing_sic_llm,secondary_llm,technology_adr,MARUWA makes ceramic/electronic components; electronic components map to BusEq.
+MTLMY,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,materials_common_equity,Metallium is a metals/materials issuer; metal mining/materials exposure maps to FF12 Other.
+MXUBY,include,9,Shops,medium,resolved_missing_sic_llm,secondary_llm,operating_company_adr,Mixue Bingcheng is a beverage/ice-cream retail chain ADR; restaurants/retail map to Shops.
+NEXHY,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,transportation_adr,Nippon Express is a logistics/transport issuer; transportation is a valid FF12 Other industry.
+NHLTY,include,10,Hlth,medium,resolved_missing_sic_llm,secondary_llm,healthcare_common_equity,Nightingale Health is a health diagnostics company; healthcare maps to Hlth.
+NKGFD,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,Nevada King Gold is a gold issuer; gold mining/exploration maps to FF12 Other.
+NMFCZ,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+NOPFF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,Nevada Organic Phosphate is a phosphate/mining issuer; mining maps to FF12 Other.
+NPICF,include,8,Utils,medium,resolved_missing_sic_llm,secondary_llm,utility_common_equity,Northland Power is a power-generation utility issuer; electric utilities map to Utils.
+NSURF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,North Shore Uranium is a uranium exploration issuer; uranium mining maps to FF12 Other.
+OFSSH,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+OFSSO,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+ONWRY,include,10,Hlth,medium,resolved_missing_sic_llm,secondary_llm,healthcare_adr,ONWARD Medical is a medical technology company; medical devices/healthcare maps to Hlth.
+OXLCG,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+OXLCI,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+OXLCL,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+OXLCM,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+OXLCZ,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+OXSQG,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+OXSQH,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+PCPPF,include,6,BusEq,medium,resolved_missing_sic_llm,secondary_llm,technology_common_equity,PC Partner is a computer hardware/electronics manufacturer; computer hardware maps to BusEq.
+PFXNZ,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+PHDWY,include,9,Shops,medium,resolved_missing_sic_llm,secondary_llm,retail_adr,PT Ace Hardware Indonesia is a home-improvement retailer ADR; retail maps to Shops.
+POWMF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,Power Metal Resources is a metals exploration issuer; metal mining maps to FF12 Other.
+PRNCF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,Prince Silver is a silver issuer; silver mining/exploration maps to FF12 Other.
+PSUS,include,11,Money,medium,resolved_missing_sic_llm,secondary_llm,investment_company_common_equity,Pershing Square USA is an investment company/common equity exposure; investment companies map to Money.
+RACC,exclude,,,low,shell_company,excluded_llm,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+RCWLY,include,3,Manuf,medium,resolved_missing_sic_llm,secondary_llm,manufacturing_adr,ROCKWOOL manufactures insulation/building materials; building-material manufacturing maps to Manuf.
+RKWAF,include,3,Manuf,medium,resolved_missing_sic_llm,secondary_llm,manufacturing_adr,ROCKWOOL manufactures insulation/building materials; building-material manufacturing maps to Manuf.
+RWAYI,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+RWAYL,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+SAJ,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+SAT,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+SAV,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+SAY,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+SAZ,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+SBXE,exclude,,,low,shell_company,excluded_llm,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+SCAFF,include,2,Durbl,medium,resolved_missing_sic_llm,secondary_llm,operating_company_adr,Schaeffler makes automotive and industrial components; auto parts map to Durbl.
+SICOF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,Silverco Mining is a silver issuer; silver mining maps to FF12 Other.
+SNHIY,include,3,Manuf,medium,resolved_missing_sic_llm,secondary_llm,operating_company_adr,SANY Heavy Industries is a heavy machinery manufacturer ADR; machinery maps to Manuf.
+SSSSL,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+TDGGF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,TDG Gold is a gold issuer; gold mining/exploration maps to FF12 Other.
+TGRGF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,Tiger Gold is a gold issuer; gold mining/exploration maps to FF12 Other.
+TRINI,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+TRINZ,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+TSLVF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,Tier One Silver is a silver issuer; silver mining/exploration maps to FF12 Other.
+TY.P,exclude,,,low,non_common_security,excluded_llm,fund_or_preferred_security,"Ticker is a fund/preferred-style security rather than operating-company common equity, so no trusted FF12 is assigned."
+WHFCL,exclude,,,low,non_common_security,excluded_llm,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+YARRF,include,12,Other,medium,resolved_missing_sic_llm,secondary_llm,mining_common_equity,Pirate Gold is a gold issuer; gold mining/exploration maps to FF12 Other.
+ZHDM,exclude,,,low,shell_company,excluded_llm,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+ZJLMF,include,2,Durbl,medium,resolved_missing_sic_llm,secondary_llm,operating_company_adr,Zhejiang Leapmotor is an electric vehicle manufacturer ADR; automobile manufacturing maps to Durbl.

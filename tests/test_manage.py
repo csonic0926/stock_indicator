@@ -6,6 +6,7 @@ import datetime
 import io
 import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(
@@ -62,6 +63,144 @@ def test_update_symbols(monkeypatch: pytest.MonkeyPatch) -> None:
     shell = manage_module.StockShell(stdout=io.StringIO())
     shell.onecmd("update_symbols")
     assert call_record["called"] is True
+
+
+def test_update_universe_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The command should invoke the atomic universe pipeline."""
+
+    import stock_indicator.manage as manage_module
+    from stock_indicator.universe_pipeline import UniversePipelineReport
+
+    call_record = {"called": False}
+
+    def fake_run_universe_pipeline(
+        *,
+        publish_outputs: bool = True,
+    ) -> UniversePipelineReport:
+        call_record["called"] = True
+        return UniversePipelineReport(
+            published=publish_outputs,
+            final_symbol_count=3,
+            current_symbol_count=3,
+            added_symbols=[],
+            removed_symbols=[],
+            sector_row_count=3,
+            hard_filter_decision_counts={"include": 3},
+            hard_plus_decision_counts={"include": 3},
+            final_decision_counts={"include": 3},
+            decision_source_counts={"hard_filter_clean_pass": 3},
+            ff12_source_counts={"sic_mapping": 3},
+            price_quarantine_count=0,
+            missing_llm_classification_count=0,
+            title_changed_llm_classification_count=0,
+            output_paths={},
+        )
+
+    monkeypatch.setattr(
+        manage_module.universe_pipeline,
+        "run_universe_pipeline",
+        fake_run_universe_pipeline,
+    )
+
+    output_buffer = io.StringIO()
+    shell = manage_module.StockShell(stdout=output_buffer)
+    shell.onecmd("update_universe_pipeline")
+    assert call_record["called"] is True
+    assert "Universe pipeline completed" in output_buffer.getvalue()
+    assert "symbols: 3" in output_buffer.getvalue()
+
+
+def test_update_universe_pipeline_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dry-run option should validate without publishing outputs."""
+
+    import stock_indicator.manage as manage_module
+    from stock_indicator.universe_pipeline import UniversePipelineReport
+
+    recorded_publish_values: list[bool] = []
+
+    def fake_run_universe_pipeline(*, publish_outputs: bool = True) -> UniversePipelineReport:
+        recorded_publish_values.append(publish_outputs)
+        return UniversePipelineReport(
+            published=publish_outputs,
+            final_symbol_count=3,
+            current_symbol_count=4,
+            added_symbols=["NA"],
+            removed_symbols=["GDST", "OLD"],
+            sector_row_count=3,
+            hard_filter_decision_counts={"include": 3},
+            hard_plus_decision_counts={"include": 3},
+            final_decision_counts={"include": 3},
+            decision_source_counts={"hard_filter_clean_pass": 3},
+            ff12_source_counts={"sic_mapping": 3},
+            price_quarantine_count=0,
+            missing_llm_classification_count=0,
+            title_changed_llm_classification_count=0,
+            output_paths={},
+        )
+
+    monkeypatch.setattr(
+        manage_module.universe_pipeline,
+        "run_universe_pipeline",
+        fake_run_universe_pipeline,
+    )
+
+    output_buffer = io.StringIO()
+    shell = manage_module.StockShell(stdout=output_buffer)
+    shell.onecmd("update_universe_pipeline --dry-run")
+    assert recorded_publish_values == [False]
+    assert "Universe pipeline dry run completed" in output_buffer.getvalue()
+    assert "added symbols: 1 (NA)" in output_buffer.getvalue()
+    assert "removed symbols: 2 (GDST, OLD)" in output_buffer.getvalue()
+
+
+def test_update_universe_pipeline_accepts_maximum_drop_ratio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The command should pass a one-run migration drop threshold."""
+
+    import stock_indicator.manage as manage_module
+    from stock_indicator.universe_pipeline import UniversePipelineReport
+
+    recorded_publish_values: list[bool] = []
+    recorded_drop_ratios: list[float] = []
+
+    def fake_run_universe_pipeline(
+        *,
+        publish_outputs: bool = True,
+        maximum_symbol_drop_ratio: float = 0.05,
+    ) -> UniversePipelineReport:
+        recorded_publish_values.append(publish_outputs)
+        recorded_drop_ratios.append(maximum_symbol_drop_ratio)
+        return UniversePipelineReport(
+            published=publish_outputs,
+            final_symbol_count=3,
+            current_symbol_count=4,
+            added_symbols=[],
+            removed_symbols=["OLD"],
+            sector_row_count=3,
+            hard_filter_decision_counts={"include": 3},
+            hard_plus_decision_counts={"include": 3},
+            final_decision_counts={"include": 3},
+            decision_source_counts={"hard_filter_clean_pass": 3},
+            ff12_source_counts={"sic_mapping": 3},
+            price_quarantine_count=0,
+            missing_llm_classification_count=0,
+            title_changed_llm_classification_count=0,
+            output_paths={},
+        )
+
+    monkeypatch.setattr(
+        manage_module.universe_pipeline,
+        "run_universe_pipeline",
+        fake_run_universe_pipeline,
+    )
+
+    output_buffer = io.StringIO()
+    shell = manage_module.StockShell(stdout=output_buffer)
+    shell.onecmd("update_universe_pipeline --dry-run --maximum-drop-ratio 0.60")
+    assert recorded_publish_values == [False]
+    assert recorded_drop_ratios == [0.60]
+    assert "Universe pipeline dry run completed" in output_buffer.getvalue()
 
 
 def test_update_data_from_yf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -203,6 +342,7 @@ def test_find_history_signal_prints_recalculated_signals(
         sell_strategy: str,
         stop_loss: float,
         allowed_group_identifiers: set[int] | None = None,
+        **keyword_arguments: object,
     ) -> dict[str, list[str]]:
         recorded_arguments["date"] = date_string
         recorded_arguments["filter"] = dollar_volume_filter
@@ -213,10 +353,11 @@ def test_find_history_signal_prints_recalculated_signals(
             date_string,
             dollar_volume_filter,
             buy_strategy,
-            sell_strategy,
-            stop_loss,
-            allowed_group_identifiers,
-        )
+                sell_strategy,
+                stop_loss,
+                allowed_group_identifiers,
+                **keyword_arguments,
+            )
 
     monkeypatch.setattr(
         manage_module.daily_job,
@@ -260,7 +401,9 @@ def test_find_history_signal_without_date_prints_recalculated_signals(
         sell_strategy: str,
         stop_loss: float,
         allowed_group_identifiers: set[int] | None = None,
+        **keyword_arguments: object,
     ) -> dict[str, list[str] | dict[str, float]]:
+        del keyword_arguments
         recorded_arguments["date"] = date_string
         recorded_arguments["filter"] = dollar_volume_filter
         recorded_arguments["buy"] = buy_strategy
@@ -313,7 +456,9 @@ def test_find_history_signal_invalid_argument(
         sell_strategy: str,
         stop_loss: float,
         allowed_group_identifiers: set[int] | None = None,
+        **keyword_arguments: object,
     ) -> dict[str, list[str]]:
+        del keyword_arguments
         call_record["called"] = True
         return {"entry_signals": [], "exit_signals": []}
 
@@ -351,7 +496,9 @@ def test_find_history_signal_with_strategy_id(
         sell_strategy: str,
         stop_loss: float,
         allowed_group_identifiers: set[int] | None = None,
+        **keyword_arguments: object,
     ) -> dict[str, list[str]]:
+        del keyword_arguments
         recorded_arguments["date"] = date_string
         recorded_arguments["filter"] = dollar_volume_filter
         recorded_arguments["buy"] = buy_strategy
@@ -400,7 +547,10 @@ def test_find_history_signal_sorts_entry_signals_for_s4(
         sell_strategy: str,
         stop_loss: float,
         allowed_group_identifiers: set[int] | None = None,
+        **keyword_arguments: object,
     ) -> dict[str, list[str]]:
+        del dollar_volume_filter, buy_strategy, sell_strategy, stop_loss
+        del allowed_group_identifiers, keyword_arguments
         captured_arguments["date"] = date_string
         return {
             "entry_signals": ["CCC", "AAA", "BBB"],
@@ -471,7 +621,10 @@ def test_find_history_signal_prints_filtered_symbols(monkeypatch: pytest.MonkeyP
         sell_strategy: str,
         stop_loss: float,
         allowed_group_identifiers: set[int] | None = None,
+        **keyword_arguments: object,
     ) -> dict[str, list[object]]:
+        del date_string, buy_strategy, sell_strategy, stop_loss
+        del allowed_group_identifiers, keyword_arguments
         captured["filter"] = dollar_volume_filter
         return {
             "filtered_symbols": [("AAA", 1), ("BBB", 2)],
@@ -510,7 +663,10 @@ def test_find_history_signal_prints_empty_filtered_symbols(
         sell_strategy: str,
         stop_loss: float,
         allowed_group_identifiers: set[int] | None = None,
+        **keyword_arguments: object,
     ) -> dict[str, list[object]]:
+        del date_string, dollar_volume_filter, buy_strategy, sell_strategy
+        del stop_loss, allowed_group_identifiers, keyword_arguments
         return {
             "filtered_symbols": [],
             "entry_signals": [],
@@ -2881,3 +3037,190 @@ def test_multi_bucket_simulation_forwards_symbol_list(
 
     assert recorded_allowed_symbols["value"] == {"AAA", "BBB"}
     assert "Symbol list: 2 symbols" in output_buffer.getvalue()
+
+
+def test_multi_bucket_simulation_rejects_daily_data_source(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Simulations must not read the production daily price cache."""
+
+    import json
+
+    import stock_indicator.manage as manage_module
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 2,
+                "starting_cash": 1000,
+                "start_date": "2020-01-01",
+                "data_source": "daily",
+                "buckets": [
+                    {
+                        "label": "fish_head_production",
+                        "strategy_id": "fish_head_vacuum_turn",
+                        "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "load_strategy_set_mapping",
+        lambda: {"fish_head_vacuum_turn": ("ema_sma_cross", "ema_sma_cross")},
+    )
+    monkeypatch.setattr(manage_module, "load_strategy_entry_filters", lambda: {})
+
+    run_called = False
+
+    def fake_run_complex_simulation(
+        *unused_positional_arguments: object,
+        **unused_keyword_arguments: object,
+    ) -> object:
+        del unused_positional_arguments, unused_keyword_arguments
+        nonlocal run_called
+        run_called = True
+        return object()
+
+    monkeypatch.setattr(
+        manage_module.strategy,
+        "run_complex_simulation",
+        fake_run_complex_simulation,
+    )
+
+    output_buffer = io.StringIO()
+    shell = manage_module.StockShell(stdout=output_buffer)
+    shell.onecmd(f"multi_bucket_simulation {config_path}")
+
+    assert run_called is False
+    assert "rejects data_source='daily'" in output_buffer.getvalue()
+
+
+def test_multi_bucket_daily_signal_forwards_ff12_data_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Daily signal generation should apply the configured FF12 override."""
+
+    import stock_indicator.manage as manage_module
+    from stock_indicator import multi_bucket_today
+
+    data_directory = tmp_path / "prices"
+    data_directory.mkdir()
+    symbol_list_path = tmp_path / "symbols.txt"
+    symbol_list_path.write_text("AAA\n", encoding="utf-8")
+    ff12_data_path = tmp_path / "symbols_with_sector.parquet"
+    pandas.DataFrame(
+        [
+            {
+                "ticker": "AAA",
+                "ff12": 6,
+                "ff12_source": "legacy_backtest",
+                "classification_confidence": "high",
+            }
+        ]
+    ).to_parquet(ff12_data_path, index=False)
+    config_path = tmp_path / "multi_bucket_config.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    bucket_definition = manage_module.strategy.ComplexStrategySetDefinition(
+        label="fish_head_production",
+        buy_strategy_name="buy",
+        sell_strategy_name="sell",
+        strategy_identifier="fish_head_vacuum_turn",
+    )
+    loaded_config = multi_bucket_today.MultiBucketRunConfig(
+        bucket_definitions={bucket_definition.label: bucket_definition},
+        adaptive_tp_sl=manage_module.strategy.AdaptiveTPSLConfig(),
+        maximum_position_count=1,
+        starting_cash=1000.0,
+        withdraw_amount=0.0,
+        margin_multiplier=1.0,
+        minimum_holding_bars=0,
+        show_trade_details=False,
+        start_date_string=None,
+        confirmation_mode=None,
+        use_confirmation_angle=False,
+        confirmation_entry_mode="limit",
+        confirmation_sma_angle_range=None,
+        data_source_name="daily",
+        symbol_list_name="test_symbols",
+        ff12_data_path_text=str(ff12_data_path),
+        max_same_symbol=1,
+        raw_document={},
+    )
+
+    monkeypatch.setattr(
+        manage_module.multi_bucket_today,
+        "load_multi_bucket_config",
+        lambda _: loaded_config,
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "DATA_SOURCE_PATHS",
+        {"daily": data_directory},
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "SYMBOL_LIST_PATHS",
+        {"test_symbols": symbol_list_path},
+    )
+    monkeypatch.setattr(
+        manage_module.multi_bucket_today,
+        "load_state",
+        lambda _: {"accepted_entries": []},
+    )
+    def fake_save_state_atomically(
+        state_path: Path,
+        state: dict[str, object],
+    ) -> None:
+        del state_path, state
+
+    monkeypatch.setattr(
+        manage_module.multi_bucket_today,
+        "save_state_atomically",
+        fake_save_state_atomically,
+    )
+
+    recorded_override_paths: list[Path | None] = []
+
+    @contextmanager
+    def fake_override_ff12_group_source_path(
+        sector_data_path: Path | None,
+    ):
+        recorded_override_paths.append(sector_data_path)
+        yield
+
+    def fake_compute_today_signals(
+        **unused_keyword_arguments: object,
+    ) -> multi_bucket_today.TodaySignalsResult:
+        del unused_keyword_arguments
+        return multi_bucket_today.TodaySignalsResult(
+            eval_date_string="2026-01-02",
+            accepted_per_strategy={},
+            accepted_records=[],
+            rejected_records=[],
+            log_lines=["ok"],
+        )
+
+    monkeypatch.setattr(
+        manage_module.strategy,
+        "override_ff12_group_source_path",
+        fake_override_ff12_group_source_path,
+    )
+    monkeypatch.setattr(
+        manage_module.multi_bucket_today,
+        "compute_today_signals",
+        fake_compute_today_signals,
+    )
+
+    output_buffer = io.StringIO()
+    shell = manage_module.StockShell(stdout=output_buffer)
+    shell.onecmd(f"multi_bucket_daily_signal {config_path} 2026-01-02")
+
+    assert recorded_override_paths == [ff12_data_path]
+    assert f"FF12 data: {ff12_data_path}" in output_buffer.getvalue()

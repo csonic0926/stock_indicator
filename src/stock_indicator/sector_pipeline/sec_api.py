@@ -13,6 +13,7 @@ import requests
 
 from .config import (
     SEC_COMPANY_TICKERS_URL,
+    SEC_COMPANY_TICKERS_EXCHANGE_URL,
     SEC_SUBMISSIONS_URL_TEMPLATE,
     SEC_USER_AGENT,
     SUBMISSIONS_DIRECTORY,
@@ -70,6 +71,35 @@ def fetch_company_ticker_table() -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def fetch_company_ticker_exchange_table() -> pd.DataFrame:
+    """Retrieve SEC ticker, central index key, title, and exchange rows.
+
+    The exchange endpoint is the production universe source because tradability
+    requires knowing whether a ticker is on a primary national exchange or OTC.
+    """
+
+    data = _request_json(SEC_COMPANY_TICKERS_EXCHANGE_URL)
+    fields = [str(field_name) for field_name in data.get("fields", [])]
+    if not fields or "data" not in data:
+        raise ValueError("SEC company_tickers_exchange.json returned no data")
+
+    ticker_rows: list[dict[str, Any]] = []
+    for raw_row in data["data"]:
+        row_by_field = dict(zip(fields, raw_row))
+        ticker_symbol = normalize_ticker_symbol(row_by_field.get("ticker", ""))
+        if not ticker_symbol:
+            continue
+        ticker_rows.append(
+            {
+                "ticker": ticker_symbol,
+                "cik": int(row_by_field["cik"]),
+                "title": row_by_field.get("name"),
+                "exchange": row_by_field.get("exchange", ""),
+            }
+        )
+    return pd.DataFrame(ticker_rows)
 
 
 def load_company_tickers() -> pd.DataFrame:

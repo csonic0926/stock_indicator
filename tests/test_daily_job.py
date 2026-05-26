@@ -205,10 +205,10 @@ def test_update_all_data_from_yf_logs_warning_on_error(
 
 
 
-def test_load_runtime_download_symbols_skips_non_stock_and_missing_sector(
+def test_load_runtime_download_symbols_skips_missing_sector_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Runtime refresh should only include sector-classified common stocks."""
+    """Runtime refresh should trust symbols.txt and only require FF12 coverage."""
 
     monkeypatch.setattr(
         daily_job,
@@ -234,24 +234,33 @@ def test_load_runtime_download_symbols_skips_non_stock_and_missing_sector(
 
     assert daily_job.load_runtime_download_symbols() == [
         "AAA",
+        "CCC",
         daily_job.SP500_SYMBOL,
     ]
 
 
-def test_load_runtime_download_symbols_skips_asset_and_listing_name_rejections(
+def test_load_runtime_download_symbols_does_not_apply_hidden_legacy_guardrails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Runtime refresh should remove known ETFs, warrants and units."""
+    """Runtime refresh should not override the upstream symbol-universe contract."""
 
     monkeypatch.setattr(
         daily_job,
         "load_symbols",
-        lambda: ["AAA", "ETF", "UNKNOWN", "WARRANT"],
+        lambda: ["AAA", "ETF", "UNKNOWN", "WARRANT", "FLWS", "CRWS", "CWT"],
     )
     monkeypatch.setattr(
         daily_job.strategy,
         "load_ff12_groups_by_symbol",
-        lambda: {"AAA": 1, "ETF": 1, "UNKNOWN": 1, "WARRANT": 1},
+        lambda: {
+            "AAA": 1,
+            "ETF": 1,
+            "UNKNOWN": 1,
+            "WARRANT": 1,
+            "FLWS": 9,
+            "CRWS": 1,
+            "CWT": 8,
+        },
     )
     monkeypatch.setattr(
         daily_job.strategy, "load_symbols_excluded_by_industry", lambda: set()
@@ -265,6 +274,11 @@ def test_load_runtime_download_symbols_skips_asset_and_listing_name_rejections(
 
     assert daily_job.load_runtime_download_symbols() == [
         "AAA",
+        "CRWS",
+        "CWT",
+        "ETF",
+        "FLWS",
         "UNKNOWN",
+        "WARRANT",
         daily_job.SP500_SYMBOL,
     ]

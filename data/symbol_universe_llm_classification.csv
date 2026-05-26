@@ -1,0 +1,794 @@
+symbol,sec_title,decision,semantic_type,confidence,reason
+DLR,"DIGITAL REALTY TRUST, INC.",include,reit_common_equity,high,Listed REIT common equity of an operating real estate company.
+NTRS,NORTHERN TRUST CORP,include,operating_company_common_equity,high,Ordinary common stock of a bank and trust company.
+ESS,"ESSEX PROPERTY TRUST, INC.",include,reit_common_equity,high,"Property REIT common equity, company-like listed issuer."
+CPT,CAMDEN PROPERTY TRUST,include,reit_common_equity,high,"Apartment REIT common equity, eligible operating issuer."
+FRT,FEDERAL REALTY INVESTMENT TRUST,include,reit_common_equity,high,"Retail REIT common equity, not a fund or derivative."
+FR,FIRST INDUSTRIAL REALTY TRUST INC,include,reit_common_equity,high,Industrial REIT common equity of an operating trust.
+PDI,PIMCO DYNAMIC INCOME FUND,exclude,closed_end_fund,high,"Income fund, clearly a packaged investment vehicle."
+HR,HEALTHCARE REALTY TRUST INC,include,reit_common_equity,high,"Healthcare REIT common equity, company-like issuer."
+EPRT,"ESSENTIAL PROPERTIES REALTY TRUST, INC.",include,reit_common_equity,high,Realty trust common equity of an operating REIT.
+STWD,"STARWOOD PROPERTY TRUST, INC.",include,reit_common_equity,high,"Mortgage REIT common equity, eligible listed issuer."
+VNO,VORNADO REALTY TRUST,include,reit_common_equity,high,"Realty trust common equity, not a fund."
+NSA,NATIONAL STORAGE AFFILIATES TRUST,include,reit_common_equity,high,Storage REIT common equity of an operating issuer.
+BXSL,BLACKSTONE SECURED LENDING FUND,exclude,closed_end_fund,high,"Lending fund, packaged investment vehicle."
+KRG,KITE REALTY GROUP TRUST,include,reit_common_equity,high,"Realty trust common equity, eligible operating issuer."
+DNP,DNP SELECT INCOME FUND INC,exclude,closed_end_fund,high,"Income fund, not operating company equity."
+COLD,AMERICOLD REALTY TRUST,include,reit_common_equity,high,Realty trust common equity of an operating REIT.
+IRT,"INDEPENDENCE REALTY TRUST, INC.",include,reit_common_equity,high,"Residential REIT common equity, eligible issuer."
+UTG,REAVES UTILITY INCOME FUND,exclude,closed_end_fund,high,"Utility income fund, clearly a closed-end fund."
+GBDC,"GOLUB CAPITAL BDC, INC.",include,bdc_common_equity,high,"BDC common equity, company-like listed lender."
+NEA,NUVEEN AMT-FREE QUALITY MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,"Municipal income fund, packaged investment vehicle."
+CSQ,CALAMOS STRATEGIC TOTAL RETURN FUND,exclude,closed_end_fund,high,"Strategic total return fund, closed-end fund."
+AKR,ACADIA REALTY TRUST,include,reit_common_equity,high,Realty trust common equity of an operating REIT.
+LXP,LXP INDUSTRIAL TRUST,include,reit_common_equity,high,"Industrial REIT common equity, eligible issuer."
+ADX,"ADAMS DIVERSIFIED EQUITY FUND, INC.",exclude,closed_end_fund,high,"Diversified equity fund, not operating company stock."
+BXMT,"BLACKSTONE MORTGAGE TRUST, INC.",include,reit_common_equity,high,"Mortgage REIT common equity, company-like issuer."
+MPT,MEDICAL PROPERTIES TRUST INC,include,reit_common_equity,high,"Medical properties REIT common equity, eligible issuer."
+UTF,COHEN & STEERS INFRASTRUCTURE FUND INC,exclude,closed_end_fund,high,"Infrastructure fund, not operating company equity."
+EXG,EATON VANCE TAX-MANAGED GLOBAL DIVERSIFIED EQUITY INCOME FUND,exclude,closed_end_fund,high,"Equity income fund, clearly a closed-end fund."
+FCPT,"FOUR CORNERS PROPERTY TRUST, INC.",include,reit_common_equity,high,Property trust common equity of an operating REIT.
+NAD,NUVEEN QUALITY MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,"Municipal income fund, packaged investment vehicle."
+NVG,NUVEEN AMT-FREE MUNICIPAL CREDIT INCOME FUND,exclude,closed_end_fund,high,"Municipal credit income fund, clearly a fund."
+GDV,GABELLI DIVIDEND & INCOME TRUST,exclude,closed_end_fund,high,"Dividend and income trust, packaged investment fund."
+PTY,PIMCO CORPORATE & INCOME OPPORTUNITY FUND,exclude,closed_end_fund,high,"Corporate income opportunity fund, not operating equity."
+KYN,"KAYNE ANDERSON ENERGY INFRASTRUCTURE FUND, INC.",exclude,closed_end_fund,high,"Energy infrastructure fund, a closed-end fund."
+NZF,NUVEEN MUNICIPAL CREDIT INCOME FUND,exclude,closed_end_fund,high,"Municipal credit income fund, clearly a fund."
+ETY,EATON VANCE TAX-MANAGED DIVERSIFIED EQUITY INCOME FUND,exclude,closed_end_fund,high,Tax-managed diversified equity income fund.
+GOF,GUGGENHEIM STRATEGIC OPPORTUNITIES FUND,exclude,closed_end_fund,high,"Strategic opportunities fund, not operating company stock."
+CLM,"CORNERSTONE STRATEGIC INVESTMENT FUND, INC.",exclude,closed_end_fund,high,"Cornerstone investment fund, clearly a closed-end fund."
+RVT,"ROYCE SMALL-CAP TRUST, INC.",exclude,closed_end_fund,high,"Small-cap trust is an investment fund, not issuer equity."
+DHC,DIVERSIFIED HEALTHCARE TRUST,include,reit_common_equity,high,"Healthcare trust common equity, eligible listed REIT."
+BXDC,BLACKSTONE DIGITAL INFRASTRUCTURE TRUST INC.,quarantine,ambiguous,low,Trust label suggests investment vehicle; structure unclear.
+EVT,EATON VANCE TAX-ADVANTAGED DIVIDEND INCOME FUND,exclude,closed_end_fund,high,"Dividend income fund, clearly a packaged fund."
+NUV,NUVEEN MUNICIPAL VALUE FUND INC,exclude,closed_end_fund,high,"Municipal value fund, not operating company equity."
+BSTZ,BLACKROCK SCIENCE & TECHNOLOGY TERM TRUST,exclude,closed_end_fund,high,"Term trust fund, packaged investment vehicle."
+NAC,NUVEEN CALIFORNIA QUALITY MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,"Municipal income fund, clearly a closed-end fund."
+PDO,PIMCO DYNAMIC INCOME OPPORTUNITIES FUND,exclude,closed_end_fund,high,"Dynamic income opportunities fund, not operating equity."
+RQI,COHEN & STEERS QUALITY INCOME REALTY FUND INC,exclude,closed_end_fund,high,"Realty fund, a packaged investment vehicle."
+USA,LIBERTY ALL STAR EQUITY FUND,exclude,closed_end_fund,high,"Equity fund, clearly a closed-end fund."
+GAB,GABELLI EQUITY TRUST INC,exclude,closed_end_fund,high,"Equity trust fund, not operating company stock."
+ETG,EATON VANCE TAX-ADVANTAGED GLOBAL DIVIDEND INCOME FUND,exclude,closed_end_fund,high,"Global dividend income fund, clearly a fund."
+STEW,"SRH TOTAL RETURN FUND, INC.",exclude,closed_end_fund,high,"Total return fund, not operating equity."
+SILA,"SILA REALTY TRUST, INC.",include,reit_common_equity,high,Realty trust common equity of an operating REIT.
+ETV,EATON VANCE TAX-MANAGED BUY-WRITE OPPORTUNITIES FUND,exclude,closed_end_fund,high,"Buy-write opportunities fund, clearly a fund."
+ESRT,"EMPIRE STATE REALTY TRUST, INC.",include,reit_common_equity,high,"Realty trust common equity, eligible listed REIT."
+AAT,"AMERICAN ASSETS TRUST, INC.",include,reit_common_equity,high,Real estate trust common equity of an operating REIT.
+PEB,PEBBLEBROOK HOTEL TRUST,include,reit_common_equity,high,"Hotel trust common equity, eligible listed REIT."
+BDJ,BLACKROCK ENHANCED EQUITY DIVIDEND TRUST,exclude,closed_end_fund,high,"Enhanced equity dividend trust, packaged fund."
+BCAT,BLACKROCK CAPITAL ALLOCATION TERM TRUST,exclude,closed_end_fund,high,"Capital allocation term trust, clearly a fund."
+BST,BLACKROCK SCIENCE & TECHNOLOGY TRUST,exclude,closed_end_fund,high,"Science and technology trust, packaged fund vehicle."
+ECAT,BLACKROCK ESG CAPITAL ALLOCATION TERM TRUST,exclude,closed_end_fund,high,"Capital allocation term trust, not operating equity."
+NXRT,"NEXPOINT RESIDENTIAL TRUST, INC.",include,reit_common_equity,high,"Residential REIT common equity, eligible listed issuer."
+QQQX,NUVEEN NASDAQ 100 DYNAMIC OVERWRITE FUND,exclude,closed_end_fund,high,"NASDAQ overwrite fund, clearly an investment fund."
+PBT,PERMIAN BASIN ROYALTY TRUST,include,royalty_trust,high,Royalty trust units behave like issuer equity.
+BTT,BLACKROCK MUNICIPAL 2030 TARGET TERM TRUST,exclude,closed_end_fund,high,"Municipal target term trust, packaged fund."
+RLJ,RLJ LODGING TRUST,include,reit_common_equity,high,"Lodging trust common equity, eligible REIT."
+RVI,ROBINHOOD VENTURES FUND I,exclude,closed_end_fund,medium,"Ventures fund indicates investment vehicle, not operating issuer."
+HYT,"BLACKROCK CORPORATE HIGH YIELD FUND, INC.",exclude,closed_end_fund,high,"High yield fund, clearly a closed-end fund."
+NFJ,"VIRTUS DIVIDEND, INTEREST & PREMIUM STRATEGY FUND",exclude,closed_end_fund,high,"Dividend and premium strategy fund, not operating equity."
+MSDL,MORGAN STANLEY DIRECT LENDING FUND,include,bdc_common_equity,high,Direct lending fund is BDC common equity issuer.
+DSL,DOUBLELINE INCOME SOLUTIONS FUND,exclude,closed_end_fund,high,"Income solutions fund, clearly a closed-end fund."
+ABR,ARBOR REALTY TRUST INC,include,reit_common_equity,high,"Mortgage/realty trust common equity, eligible issuer."
+JFR,NUVEEN FLOATING RATE INCOME FUND,exclude,closed_end_fund,high,"Floating rate income fund, packaged investment vehicle."
+NBXG,NEUBERGER NEXT GENERATION CONNECTIVITY FUND INC.,exclude,closed_end_fund,high,"Connectivity fund, clearly a closed-end fund."
+CTBI,COMMUNITY TRUST BANCORP INC /KY/,include,operating_company_common_equity,high,"Bank holding company common equity, eligible issuer."
+EOS,EATON VANCE ENHANCED EQUITY INCOME FUND II,exclude,closed_end_fund,high,"Enhanced equity income fund II, clearly a fund."
+NMZ,NUVEEN MUNICIPAL HIGH INCOME OPPORTUNITY FUND,exclude,closed_end_fund,high,"Municipal high income opportunity fund, packaged fund."
+CRF,CORNERSTONE TOTAL RETURN FUND INC,exclude,closed_end_fund,high,"Total return fund, clearly a closed-end fund."
+SBR,SABINE ROYALTY TRUST,include,royalty_trust,high,"Royalty trust units, eligible issuer-like equity."
+CMRF,"CIM REAL ESTATE FINANCE TRUST, INC.",include,reit_common_equity,medium,"Real estate finance trust appears company-like, likely REIT."
+AOD,ABRDN TOTAL DYNAMIC DIVIDEND FUND,exclude,closed_end_fund,high,"Total dynamic dividend fund, packaged investment vehicle."
+EVV,EATON VANCE LTD DURATION INCOME FUND,exclude,closed_end_fund,high,"Limited duration income fund, clearly a fund."
+SVC,SERVICE PROPERTIES TRUST,include,reit_common_equity,high,"Service properties trust common equity, eligible REIT."
+EMO,CLEARBRIDGE ENERGY MIDSTREAM OPPORTUNITY FUND INC.,exclude,closed_end_fund,high,"Energy midstream opportunity fund, not operating equity."
+CII,"BLACKROCK ENHANCED LARGE CAP CORE FUND, INC.",exclude,closed_end_fund,high,"Enhanced large cap core fund, clearly a fund."
+ETW,EATON VANCE TAX-MANAGED GLOBAL BUY-WRITE OPPORTUNITIES FUND,exclude,closed_end_fund,high,"Global buy-write opportunities fund, packaged vehicle."
+MUC,"BLACKROCK MUNIHOLDINGS CALIFORNIA QUALITY FUND, INC.",exclude,closed_end_fund,high,"Municipal quality fund, clearly a closed-end fund."
+GSBD,"GOLDMAN SACHS BDC, INC.",include,bdc_common_equity,high,"BDC common equity, company-like listed lender."
+PDM,"PIEDMONT REALTY TRUST, INC.",include,reit_common_equity,high,"Realty trust common equity, eligible listed REIT."
+BTX,BLACKROCK TECHNOLOGY & PRIVATE EQUITY TERM TRUST,exclude,closed_end_fund,high,"Technology and private equity term trust, packaged fund."
+CHY,CALAMOS CONVERTIBLE & HIGH INCOME FUND,exclude,closed_end_fund,high,"Convertible and high income fund, clearly a fund."
+KBDC,"KAYNE ANDERSON BDC, INC.",include,bdc_common_equity,high,"BDC common equity, eligible company-like issuer."
+PDX,PIMCO DYNAMIC INCOME STRATEGY FUND,exclude,closed_end_fund,high,"Dynamic income strategy fund, not operating equity."
+CHI,CALAMOS CONVERTIBLE OPPORTUNITIES & INCOME FUND,exclude,closed_end_fund,high,"Convertible opportunities fund, clearly a fund."
+BTZ,BLACKROCK CREDIT ALLOCATION INCOME TRUST,exclude,closed_end_fund,high,"Credit allocation income trust, packaged fund vehicle."
+BCX,BLACKROCK RESOURCES & COMMODITIES STRATEGY TRUST,exclude,closed_end_fund,high,"Resources and commodities strategy trust, clearly a fund."
+NRK,NUVEEN NEW YORK AMT-FREE QUALITY MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,"Municipal income fund, packaged investment vehicle."
+PMT,PENNYMAC MORTGAGE INVESTMENT TRUST,include,reit_common_equity,high,"Mortgage investment trust common equity, eligible issuer."
+HTD,JOHN HANCOCK TAX-ADVANTAGED DIVIDEND INCOME FUND,exclude,closed_end_fund,high,"Dividend income fund, clearly a closed-end fund."
+BBDC,"BARINGS BDC, INC.",include,bdc_common_equity,high,"BDC common equity, company-like listed lender."
+STK,"COLUMBIA SELIGMAN PREMIUM TECHNOLOGY GROWTH FUND, INC.",exclude,closed_end_fund,high,"Premium technology growth fund, clearly a fund."
+AIO,VIRTUS ARTIFICIAL INTELLIGENCE & TECHNOLOGY OPPORTUNITIES FUND,exclude,closed_end_fund,high,"Income fund, not operating company equity."
+BMEZ,BLACKROCK HEALTH SCIENCES TERM TRUST,exclude,closed_end_fund,high,"Term trust fund, not company-like common equity."
+AWF,ALLIANCEBERNSTEIN GLOBAL HIGH INCOME FUND INC,exclude,closed_end_fund,high,"Global high income fund, packaged investment vehicle."
+PCN,PIMCO CORPORATE & INCOME STRATEGY FUND,exclude,closed_end_fund,high,"PIMCO strategy fund, not an operating issuer."
+PHK,PIMCO HIGH INCOME FUND,exclude,closed_end_fund,high,"High income fund, clearly a closed-end fund."
+PSTL,"POSTAL REALTY TRUST, INC.",include,reit_common_equity,high,Realty trust common equity with operating property assets.
+EOI,EATON VANCE ENHANCED EQUITY INCOME FUND,exclude,closed_end_fund,high,"Enhanced equity income fund, not common stock."
+MQY,"BLACKROCK MUNIYIELD QUALITY FUND, INC.",exclude,closed_end_fund,high,"Municipal fund, packaged investment vehicle."
+MEGI,NYLI CBRE GLOBAL INFRASTRUCTURE MEGATRENDS TERM FUND,exclude,closed_end_fund,high,"Term fund, not an operating company."
+ADAM,"ADAMAS TRUST, INC.",include,reit_common_equity,high,Trust common equity; appears real-estate trust issuer.
+THQ,ABRDN HEALTHCARE OPPORTUNITIES FUND,exclude,closed_end_fund,high,"Healthcare opportunities fund, not operating equity."
+ASGI,ABRDN GLOBAL INFRASTRUCTURE INCOME FUND,exclude,closed_end_fund,high,"Global infrastructure income fund, packaged vehicle."
+PEO,"ADAMS NATURAL RESOURCES FUND, INC.",exclude,closed_end_fund,high,"Natural resources fund, not company-like equity."
+NIE,VIRTUS EQUITY & CONVERTIBLE INCOME FUND,exclude,closed_end_fund,high,"Equity and convertible income fund, not operating issuer."
+JQC,NUVEEN CREDIT STRATEGIES INCOME FUND,exclude,closed_end_fund,high,"Credit strategies income fund, not company equity."
+MYI,"BLACKROCK MUNIYIELD QUALITY FUND III, INC.",exclude,closed_end_fund,high,"Municipal fund, not eligible operating issuer."
+IGR,CBRE GLOBAL REAL ESTATE INCOME FUND,exclude,closed_end_fund,high,"Global real estate income fund, packaged vehicle."
+RMT,"ROYCE MICRO-CAP TRUST, INC.",exclude,closed_end_fund,high,"Micro-cap trust fund, not operating company equity."
+BIT,BLACKROCK MULTI-SECTOR INCOME TRUST,exclude,closed_end_fund,high,"Multi-sector income trust, not common stock."
+RA,BROOKFIELD REAL ASSETS INCOME FUND INC.,exclude,closed_end_fund,high,"Income fund, not a company-like issuer."
+WDI,WESTERN ASSET DIVERSIFIED INCOME FUND (WDI),exclude,closed_end_fund,high,"Diversified income fund, not operating equity."
+FBRT,"FRANKLIN BSP REALTY TRUST, INC.",include,reit_common_equity,high,Realty trust common equity eligible for strategy.
+TBLD,THORNBURG INCOME BUILDER OPPORTUNITIES TRUST,exclude,closed_end_fund,high,"Income builder trust fund, not operating company."
+BUI,"BLACKROCK UTILITIES, INFRASTRUCTURE & POWER OPPORTUNITIES TRUST",exclude,closed_end_fund,high,"Opportunities trust fund, not common equity."
+DLY,DOUBLELINE YIELD OPPORTUNITIES FUND,exclude,closed_end_fund,high,"Yield opportunities fund, packaged investment vehicle."
+PFN,PIMCO INCOME STRATEGY FUND II,exclude,closed_end_fund,high,"Income strategy fund, not operating issuer."
+ACP,ABRDN INCOME CREDIT STRATEGIES FUND,exclude,closed_end_fund,high,"Income credit strategies fund, not common stock."
+CCD,CALAMOS DYNAMIC CONVERTIBLE & INCOME FUND,exclude,closed_end_fund,high,"Convertible and income fund, not operating company."
+NKX,NUVEEN CALIFORNIA AMT-FREE QUALITY MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,"Municipal income fund, not eligible equity issuer."
+RWT,REDWOOD TRUST INC,include,reit_common_equity,high,"Real estate trust common equity, company-like issuer."
+PAXS,PIMCO ACCESS INCOME FUND,exclude,closed_end_fund,high,"Access income fund, packaged investment vehicle."
+ALSAF,ALPHA STAR ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC stage.
+BOE,BLACKROCK ENHANCED GLOBAL DIVIDEND TRUST,exclude,closed_end_fund,high,Enhanced global dividend trust fund.
+AHRT,"AH REALTY TRUST, INC.",include,reit_common_equity,high,"Realty trust common equity, eligible issuer."
+MUJ,"BLACKROCK MUNIHOLDINGS NEW JERSEY QUALITY FUND, INC.",exclude,closed_end_fund,high,"Municipal quality fund, not operating company."
+TRTX,"TPG RE FINANCE TRUST, INC.",include,reit_common_equity,high,"REIT common equity, company-like real estate issuer."
+PDT,JOHN HANCOCK PREMIUM DIVIDEND FUND,exclude,closed_end_fund,high,"Premium dividend fund, not common stock."
+DSU,"BLACKROCK DEBT STRATEGIES FUND, INC.",exclude,closed_end_fund,high,"Debt strategies fund, packaged investment vehicle."
+NDMO,NUVEEN DYNAMIC MUNICIPAL OPPORTUNITIES FUND,exclude,closed_end_fund,high,"Municipal opportunities fund, not operating issuer."
+WASH,WASHINGTON TRUST BANCORP INC,include,operating_company_common_equity,high,"Bancorp common equity, operating financial company."
+FAX,"ABRDN ASIA-PACIFIC INCOME FUND, INC.",exclude,closed_end_fund,high,"Asia-Pacific income fund, not eligible equity."
+EMD,WESTERN ASSET EMERGING MARKETS DEBT FUND INC.,exclude,closed_end_fund,high,"Emerging markets debt fund, packaged vehicle."
+NML,NEUBERGER ENERGY INFRASTRUCTURE & INCOME FUND INC.,exclude,closed_end_fund,high,"Energy infrastructure income fund, not operating company."
+EVAC,EQV VENTURES ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp II blank-check SPAC.
+NMCO,NUVEEN MUNICIPAL CREDIT OPPORTUNITIES FUND,exclude,closed_end_fund,high,Municipal credit opportunities fund.
+MHD,"BLACKROCK MUNIHOLDINGS FUND, INC.",exclude,closed_end_fund,high,"Muni holdings fund, not operating equity."
+AEXA,AMERICAN EXCEPTIONALISM ACQUISITION CORP. A,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+UHT,UNIVERSAL HEALTH REALTY INCOME TRUST,include,reit_common_equity,high,Realty income trust common equity.
+IIM,INVESCO VALUE MUNICIPAL INCOME TRUST,exclude,closed_end_fund,high,"Municipal income trust fund, not company equity."
+ETJ,EATON VANCE RISK-MANAGED DIVERSIFIED EQUITY INCOME FUND,exclude,closed_end_fund,high,Risk-managed equity income fund.
+GUT,GABELLI UTILITY TRUST,exclude,closed_end_fund,high,"Utility trust fund, not operating company."
+ILPT,INDUSTRIAL LOGISTICS PROPERTIES TRUST,include,reit_common_equity,high,Industrial logistics REIT common equity.
+MMU,WESTERN ASSET MANAGED MUNICIPALS FUND INC.,exclude,closed_end_fund,high,"Managed municipals fund, packaged investment vehicle."
+MSIF,"MSC INCOME FUND, INC.",include,bdc_common_equity,high,Income fund is company-like BDC equity.
+VGM,INVESCO TRUST FOR INVESTMENT GRADE MUNICIPALS,exclude,closed_end_fund,high,"Municipal trust fund, not operating issuer."
+AVK,ADVENT CONVERTIBLE & INCOME FUND,exclude,closed_end_fund,high,"Convertible income fund, not common equity."
+CHW,CALAMOS GLOBAL DYNAMIC INCOME FUND,exclude,closed_end_fund,high,Global dynamic income fund.
+DPG,DUFF & PHELPS UTILITY & INFRASTRUCTURE FUND INC.,exclude,closed_end_fund,high,"Utility and infrastructure fund, not operating company."
+VKQ,INVESCO MUNICIPAL TRUST,exclude,closed_end_fund,high,"Municipal trust fund, packaged vehicle."
+THW,ABRDN WORLD HEALTHCARE FUND,exclude,closed_end_fund,high,"World healthcare fund, not operating issuer."
+WIW,WESTERN ASSET INFLATION-LINKED OPPORTUNITIES & INCOME FUND,exclude,closed_end_fund,high,Inflation-linked opportunities fund.
+GUG,GUGGENHEIM ACTIVE ALLOCATION FUND,exclude,closed_end_fund,high,"Active allocation fund, packaged investment vehicle."
+TWN,TAIWAN FUND INC,exclude,closed_end_fund,high,"Taiwan fund, not operating company equity."
+BDN,BRANDYWINE REALTY TRUST,include,reit_common_equity,high,"Realty trust common equity, eligible issuer."
+BGY,BLACKROCK ENHANCED INTERNATIONAL DIVIDEND TRUST,exclude,closed_end_fund,high,International dividend trust fund.
+VCV,INVESCO CALIFORNIA VALUE MUNICIPAL INCOME TRUST,exclude,closed_end_fund,high,California municipal income trust.
+BGB,BLACKSTONE STRATEGIC CREDIT 2027 TERM FUND,exclude,closed_end_fund,high,"Strategic credit term fund, not operating company."
+IQI,INVESCO QUALITY MUNICIPAL INCOME TRUST,exclude,closed_end_fund,high,Municipal income trust fund.
+BME,BLACKROCK HEALTH SCIENCES TRUST,exclude,closed_end_fund,high,"Health sciences trust fund, not common equity."
+KRSP,RICE ACQUISITION CORP 3,exclude,spac_shell,high,Acquisition corp 3 blank-check SPAC.
+CLDT,CHATHAM LODGING TRUST,include,reit_common_equity,high,Hotel REIT common equity issuer.
+CHCT,COMMUNITY HEALTHCARE TRUST INC,include,reit_common_equity,high,Healthcare REIT common equity.
+FTHY,FIRST TRUST HIGH YIELD OPPORTUNITIES 2027 TERM FUND,exclude,closed_end_fund,high,"High yield term fund, not operating issuer."
+IFN,"ABERDEEN INDIA FUND, INC.",exclude,closed_end_fund,high,"India fund, packaged investment vehicle."
+ETO,EATON VANCE TAX-ADVANTAGED GLOBAL DIVIDEND OPPORTUNITIES FUND,exclude,closed_end_fund,high,Global dividend opportunities fund.
+PML,PIMCO MUNICIPAL INCOME FUND II,exclude,closed_end_fund,high,"Municipal income fund, not company equity."
+IGD,VOYA GLOBAL EQUITY DIVIDEND & PREMIUM OPPORTUNITY FUND,exclude,closed_end_fund,high,"Global equity dividend fund, not operating issuer."
+GHY,"PGIM GLOBAL HIGH YIELD FUND, INC.",exclude,closed_end_fund,high,"Global high yield fund, packaged vehicle."
+BLW,BLACKROCK LTD DURATION INCOME TRUST,exclude,closed_end_fund,high,LTD duration income trust fund.
+MEVO,M EVO GLOBAL ACQUISITION CORP II,exclude,spac_shell,high,Acquisition corp II blank-check SPAC.
+ANSC,AGRICULTURE & NATURAL SOLUTIONS ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+CRAN,CRANE HARBOR ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp II blank-check SPAC.
+GPAT,GP-ACT III ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp III blank-check SPAC.
+NMAI,NUVEEN MULTI-ASSET INCOME FUND,exclude,closed_end_fund,high,"Multi-asset income fund, not operating issuer."
+VVR,INVESCO SENIOR INCOME TRUST,exclude,closed_end_fund,high,Senior income trust fund.
+KIO,KKR INCOME OPPORTUNITIES FUND,exclude,closed_end_fund,high,"Income opportunities fund, packaged investment vehicle."
+NBB,NUVEEN TAXABLE MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,Taxable municipal income fund.
+FFA,FIRST TRUST ENHANCED EQUITY INCOME FUND,exclude,closed_end_fund,high,Enhanced equity income fund.
+ETB,EATON VANCE TAX-MANAGED BUY-WRITE INCOME FUND,exclude,closed_end_fund,high,"Buy-write income fund, not operating company."
+IEAG,INFINITE EAGLE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+IACO,IDEA ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+MESH,MESHFLOW ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+BGR,BLACKROCK ENERGY & RESOURCES TRUST,exclude,closed_end_fund,high,Energy and resources trust fund.
+PTOR,PRAETORIAN ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+FINS,ANGEL OAK FINANCIAL STRATEGIES INCOME TERM TRUST,exclude,closed_end_fund,high,Financial strategies income term trust.
+EVN,EATON VANCE MUNICIPAL INCOME TRUST,exclude,closed_end_fund,high,"Municipal income trust, not operating issuer."
+KFII,K&F GROWTH ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp II blank-check SPAC.
+CCAP,"CRESCENT CAPITAL BDC, INC.",include,bdc_common_equity,high,"BDC common equity, company-like lender."
+XRPN,ARMADA ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp II blank-check SPAC.
+CLBR,COLOMBIER ACQUISITION CORP. III,exclude,spac_shell,high,Acquisition corp III blank-check SPAC.
+MUA,"BLACKROCK MUNIASSETS FUND, INC.",exclude,closed_end_fund,high,"Municipal closed-end fund, not operating company equity."
+SAAQ,SPACE ASSET ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+CRAQ,CAL REDWOOD ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+KREF,KKR REAL ESTATE FINANCE TRUST INC.,include,reit_common_equity,high,"Real estate finance trust, company-like listed equity."
+RTAC,RENATUS TACTICAL ACQUISITION CORP I,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+NPAC,NEW PROVIDENCE ACQUISITION CORP. III/CAYMAN,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+BBCQ,BLEICHROEDER ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+TACO,BERTO ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+ALF,CENTURION ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+FRA,"BLACKROCK FLOATING RATE INCOME STRATEGIES FUND, INC.",exclude,closed_end_fund,high,"Floating-rate income fund, not operating company equity."
+SDHY,PGIM SHORT DURATION HIGH YIELD OPPORTUNITIES FUND,exclude,closed_end_fund,high,"High-yield opportunities fund, not operating company equity."
+PCAP,PROCAP ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+ZKP,LAFAYETTE DIGITAL ACQUISITION CORP. I,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+MTAL,METALS ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+RDAG,REPUBLIC DIGITAL ACQUISITION CO,exclude,spac_shell,high,"Acquisition company shell, not operating business."
+INRE,"INLAND REAL ESTATE INCOME TRUST, INC.",include,reit_common_equity,medium,"Real estate income trust, likely listed equity issuer."
+WENN,WEN ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+VKI,INVESCO ADVANTAGE MUNICIPAL INCOME TRUST II,exclude,closed_end_fund,high,"Municipal income trust fund, not operating company equity."
+PFL,PIMCO INCOME STRATEGY FUND,exclude,closed_end_fund,high,"Income strategy fund, not operating company equity."
+EAD,ALLSPRING INCOME OPPORTUNITIES FUND,exclude,closed_end_fund,high,"Income opportunities fund, not operating company equity."
+NCV,VIRTUS CONVERTIBLE & INCOME FUND,exclude,closed_end_fund,high,"Convertible and income fund, not operating company equity."
+FOF,"COHEN & STEERS CLOSED-END OPPORTUNITY FUND, INC.",exclude,closed_end_fund,high,"Closed-end opportunity fund, not operating company equity."
+HACQ,HCM IV ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+MZYX,MOZAYYX ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+MYN,"BLACKROCK MUNIYIELD NEW YORK QUALITY FUND, INC.",exclude,closed_end_fund,high,"Municipal quality fund, not operating company equity."
+FCRS,FUTURECREST ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+AEF,"ABRDN EMERGING MARKETS EX-CHINA FUND, INC.",exclude,closed_end_fund,high,"Emerging markets fund, not operating company equity."
+FVAV,FORTRESS VALUE ACQUISITION CORP. V,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+MSB,MESABI TRUST,include,royalty_trust,high,Mesabi Trust is a royalty trust-like listed equity.
+SDHI,SIDDHI ACQUISITION CORP (CAYMAN ISLANDS),exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+OIM,ONEIM ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+ALUB,ALUSSA ENERGY ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+AWP,ABRDN GLOBAL PREMIER PROPERTIES FUND,exclude,closed_end_fund,high,"Global properties fund, not operating company equity."
+TACH,TITAN ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+OTGA,OTG ACQUISITION CORP. I,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+DMAA,DRUGS MADE IN AMERICA ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+IPCX,INFLECTION POINT ACQUISITION CORP. III,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+CCII,COHEN CIRCLE ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+HIX,WESTERN ASSET HIGH INCOME FUND II INC.,exclude,closed_end_fund,high,"High income fund, not operating company equity."
+KCHV,KOCHAV DEFENSE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+SOUL,SOULPOWER ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+ARCI,ARCHIMEDES TECH SPAC PARTNERS III CO.,exclude,spac_shell,high,Special purpose acquisition company shell.
+PAII,PYROPHYTE ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+KTF,DWS MUNICIPAL INCOME TRUST,exclude,closed_end_fund,high,"Municipal income trust fund, not operating company equity."
+SCD,LMP CAPITAL & INCOME FUND INC.,exclude,closed_end_fund,high,"Capital and income fund, not operating company equity."
+OYSE,OYSTER ENTERPRISES II ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+JGH,NUVEEN GLOBAL HIGH INCOME FUND,exclude,closed_end_fund,high,"Global high income fund, not operating company equity."
+BLZR,TRAILBLAZER ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+AXIN,AXIOM INTELLIGENCE ACQUISITION CORP 1,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+ACAA,AVERIN CAPITAL ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+SORN,SOREN ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+MIY,"BLACKROCK MUNIYIELD MICHIGAN QUALITY FUND, INC.",exclude,closed_end_fund,high,"Municipal quality fund, not operating company equity."
+HFRO,HIGHLAND OPPORTUNITIES & INCOME FUND,exclude,closed_end_fund,high,"Opportunities and income fund, not operating company equity."
+JRI,NUVEEN REAL ASSET INCOME & GROWTH FUND,exclude,closed_end_fund,high,"Real asset income fund, not operating company equity."
+HCMA,HCM III ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+HIO,WESTERN ASSET HIGH INCOME OPPORTUNITY FUND INC.,exclude,closed_end_fund,high,"High income opportunity fund, not operating company equity."
+PINE,"ALPINE INCOME PROPERTY TRUST, INC.",include,reit_common_equity,high,Income property trust operating as listed REIT equity.
+DSAC,DAEDALUS SPECIAL ACQUISITION CORP.,exclude,spac_shell,high,Special acquisition corporation shell.
+AACI,ARMADA ACQUISITION CORP. III,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+IPFX,INFLECTION POINT ACQUISITION CORP. VI,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+VACH,VOYAGER ACQUISITION CORP./CAYMAN ISLANDS,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+PSBD,PALMER SQUARE CAPITAL BDC INC.,include,bdc_common_equity,high,"BDC common equity, company-like listed issuer."
+BLUW,BLUE WATER ACQUISITION CORP. III,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+BKT,"BLACKROCK INCOME TRUST, INC.",exclude,closed_end_fund,high,"Income trust fund, not operating company equity."
+BEAG,BOLD EAGLE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+CAF,"MORGAN STANLEY CHINA A SHARE FUND, INC.",exclude,closed_end_fund,high,"China A share fund, not operating company equity."
+SIMA,SIM ACQUISITION CORP. I,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+MLAC,MOUNTAIN LAKE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+PPT,PUTNAM PREMIER INCOME TRUST,exclude,closed_end_fund,high,"Premier income trust fund, not operating company equity."
+ATII,ARCHIMEDES TECH SPAC PARTNERS II CO.,exclude,spac_shell,high,Special purpose acquisition company shell.
+EMF,TEMPLETON EMERGING MARKETS FUND,exclude,closed_end_fund,high,"Emerging markets fund, not operating company equity."
+BGT,BLACKROCK FLOATING RATE INCOME TRUST,exclude,closed_end_fund,high,"Floating rate income trust, not operating company equity."
+FERA,FIFTH ERA ACQUISITION CORP I,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+DRDB,ROMAN DBDR ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+SZZL,SIZZLE ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+VACI,VIKING ACQUISITION CORP I,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+AGD,ABRDN GLOBAL DYNAMIC DIVIDEND FUND,exclude,closed_end_fund,high,"Dynamic dividend fund, not operating company equity."
+SVAC,SPRING VALLEY ACQUISITION CORP. III,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+JOF,JAPAN SMALLER CAPITALIZATION FUND INC,exclude,closed_end_fund,high,"Japan smaller capitalization fund, not operating company equity."
+EVOX,EVOLUTION GLOBAL ACQUISITION CORP,exclude,spac_shell,high,Global acquisition corp blank-check SPAC.
+NXG,NXG NEXTGEN INFRASTRUCTURE INCOME FUND,exclude,closed_end_fund,high,"Infrastructure income fund, not operating company equity."
+ASG,LIBERTY ALL STAR GROWTH FUND INC.,exclude,closed_end_fund,high,"Growth fund, not operating company equity."
+PMTR,PERIMETER ACQUISITION CORP. I,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+PTAC,PATRIOT ACQUISITION CORP./CI,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+KOYN,"CSLM DIGITAL ASSET ACQUISITION CORP III, LTD",exclude,spac_shell,high,Digital asset acquisition corp blank-check SPAC.
+SPXX,NUVEEN S&P 500 DYNAMIC OVERWRITE FUND,exclude,closed_end_fund,high,"Option income fund, not operating company equity."
+SAC,SAFEGUARD ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+RFMZ,"RIVERNORTH FLEXIBLE MUNICIPAL INCOME FUND II, INC.",exclude,closed_end_fund,high,"Municipal income fund, not operating company equity."
+POLE,ANDRETTI ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+RNGT,RANGE CAPITAL ACQUISITION CORP II,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+JACS,JACKSON ACQUISITION CO II,exclude,spac_shell,high,"Acquisition company shell, not operating business."
+MKLY,MCKINLEY ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+AFB,ALLIANCEBERNSTEIN NATIONAL MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,"Municipal income fund, not operating company equity."
+AEAQ,ACTIVATE ENERGY ACQUISITION CORP.,exclude,spac_shell,high,Energy acquisition corp blank-check SPAC.
+MXF,MEXICO FUND INC,exclude,closed_end_fund,high,"Mexico fund, not operating company equity."
+AACO,ABONY ACQUISITION CORP. I,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+NCA,NUVEEN CALIFORNIA MUNICIPAL VALUE FUND,exclude,closed_end_fund,high,"Municipal value fund, not operating company equity."
+LPAA,LAUNCH ONE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+RIV,"RIVERNORTH OPPORTUNITIES FUND, INC.",exclude,closed_end_fund,high,"Opportunities fund, not operating company equity."
+ILLU,ILLUMINATION ACQUISITION CORP. I,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+TMTS,SPARTACUS ACQUISITION CORP. II,exclude,spac_shell,high,"Acquisition corporation SPAC shell, not operating equity."
+CAQ,CAMBRIDGE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp SPAC shell.
+EFR,EATON VANCE SENIOR FLOATING-RATE TRUST,exclude,closed_end_fund,high,Senior floating-rate trust is a fund vehicle.
+LWAC,LIGHTWAVE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corporation SPAC shell.
+LPBB,LAUNCH TWO ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+SVIV,SPRING VALLEY ACQUISITION CORP. IV,exclude,spac_shell,high,Acquisition corporation IV is a SPAC shell.
+RAC,RITHM ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+ITHA,ITHAX ACQUISITION CORP III,exclude,spac_shell,high,Acquisition corp III is a SPAC shell.
+ARDC,"ARES DYNAMIC CREDIT ALLOCATION FUND, INC.",exclude,closed_end_fund,high,Dynamic credit allocation fund is a closed-end fund.
+GTERA,GLOBA TERRA ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+BIXI,BITCOIN INFRASTRUCTURE ACQUISITION CORP LTD,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+LOKV,LIVE OAK ACQUISITION CORP. V,exclude,spac_shell,high,Acquisition corp V is a SPAC shell.
+JENA,JENA ACQUISITION CORP II,exclude,spac_shell,high,Acquisition corp II is a SPAC shell.
+NBH,NEUBERGER MUNICIPAL FUND INC.,exclude,closed_end_fund,high,Municipal fund is an investment vehicle.
+RFI,COHEN & STEERS TOTAL RETURN REALTY FUND INC,exclude,closed_end_fund,high,"Realty fund is a closed-end fund, not operating equity."
+GSRF,GSR IV ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+CMTG,"CLAROS MORTGAGE TRUST, INC.",include,reit_common_equity,high,Mortgage trust is a REIT-like operating equity.
+FUND,SPROTT FOCUS TRUST INC.,exclude,closed_end_fund,high,Trust fund structure indicates a fund vehicle.
+GPAC,GENERAL PURPOSE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+SVAQ,SILICON VALLEY ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+HCAC,HALL CHADWICK ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+TEI,TEMPLETON EMERGING MARKETS INCOME FUND,exclude,closed_end_fund,high,Emerging markets income fund is a fund vehicle.
+BACC,BLUE ACQUISITION CORP/CAYMAN,exclude,spac_shell,high,Acquisition corp/Cayman indicates SPAC shell.
+AACB,ARTIUS II ACQUISITION INC.,exclude,spac_shell,high,Acquisition inc. is a blank-check shell.
+JWSMF,JAWS MUSTANG ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+EFT,EATON VANCE FLOATING-RATE INCOME TRUST,exclude,closed_end_fund,high,Floating-rate income trust is a fund vehicle.
+XFLT,XAI OCTAGON FLOATING RATE & ALTERNATIVE INCOME TRUST,exclude,closed_end_fund,high,Alternative income trust is a fund vehicle.
+BRW,SABA CAPITAL INCOME & OPPORTUNITIES FUND,exclude,closed_end_fund,high,Income and opportunities fund is a closed-end fund.
+OIA,INVESCO MUNICIPAL INCOME OPPORTUNITIES TRUST,exclude,closed_end_fund,high,Municipal income opportunities trust is a fund.
+PMO,PUTNAM MUNICIPAL OPPORTUNITIES TRUST,exclude,closed_end_fund,high,Municipal opportunities trust is a fund vehicle.
+LPCV,LAUNCHPAD CADENZA ACQUISITION CORP I,exclude,spac_shell,high,Acquisition corp I is a SPAC shell.
+ADAC,AMERICAN DRIVE ACQUISITION CO,exclude,spac_shell,high,Acquisition company is a SPAC shell.
+NCZ,VIRTUS CONVERTIBLE & INCOME FUND II,exclude,closed_end_fund,high,Convertible and income fund is a fund vehicle.
+FGII,FG IMPERII ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+NPCT,NUVEEN CORE PLUS IMPACT FUND,exclude,closed_end_fund,high,Core plus impact fund is a fund vehicle.
+IRAB,IRIS ACQUISITION CORP II,exclude,spac_shell,high,Acquisition corp II is a SPAC shell.
+TDF,TEMPLETON DRAGON FUND INC,exclude,closed_end_fund,high,Dragon fund is a fund vehicle.
+MMD,NYLI MACKAY DEFINEDTERM MUNI OPPORTUNITIES FUND,exclude,closed_end_fund,high,Defined-term muni opportunities fund is a fund.
+DBL,DOUBLELINE OPPORTUNISTIC CREDIT FUND,exclude,closed_end_fund,high,Opportunistic credit fund is a fund vehicle.
+TVAI,THAYER VENTURES ACQUISITION CORP II,exclude,spac_shell,high,Acquisition corp II is a SPAC shell.
+XCBE,X3 ACQUISITION CORP. LTD.,exclude,spac_shell,high,Acquisition corp LTD is a SPAC shell.
+RMM,"RIVERNORTH MANAGED DURATION MUNICIPAL INCOME FUND, INC.",exclude,closed_end_fund,high,Municipal income fund is a fund vehicle.
+BGH,BARINGS GLOBAL SHORT DURATION HIGH YIELD FUND,exclude,closed_end_fund,high,High yield fund is a closed-end fund.
+JCE,NUVEEN CORE EQUITY ALPHA FUND,exclude,closed_end_fund,high,Core equity alpha fund is a fund vehicle.
+MIN,MFS INTERMEDIATE INCOME TRUST,exclude,closed_end_fund,high,Intermediate income trust is a fund vehicle.
+XSLL,XSOLLA SPAC 1,exclude,spac_shell,high,SPAC 1 indicates blank-check shell.
+EOD,ALLSPRING GLOBAL DIVIDEND OPPORTUNITY FUND,exclude,closed_end_fund,high,Global dividend opportunity fund is a fund vehicle.
+MUZE,MUZERO ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+ACV,VIRTUS DIVERSIFIED INCOME & CONVERTIBLE FUND,exclude,closed_end_fund,high,Diversified income and convertible fund is a fund.
+KF,KOREA FUND INC,exclude,closed_end_fund,high,The Korea Fund is an investment fund.
+PMM,PUTNAM MANAGED MUNICIPAL INCOME TRUST,exclude,closed_end_fund,high,Managed municipal income trust is a fund vehicle.
+OACC,OAKTREE ACQUISITION CORP. III LIFE SCIENCES,exclude,spac_shell,high,Acquisition corp III indicates SPAC shell.
+EOT,EATON VANCE NATIONAL MUNICIPAL OPPORTUNITIES TRUST,exclude,closed_end_fund,high,Municipal opportunities trust is a fund.
+FACT,FACT II ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+RLTY,COHEN & STEERS REAL ESTATE OPPORTUNITIES & INCOME FUND,exclude,closed_end_fund,high,Real estate opportunities and income fund is a fund.
+PLMK,"PLUM ACQUISITION CORP, IV",exclude,spac_shell,high,Acquisition corp IV is a SPAC shell.
+NTWO,NEWBURY STREET II ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp II is a SPAC shell.
+WLII,WILLOW LANE ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp II is a SPAC shell.
+VNME,VENDOME ACQUISITION CORP I,exclude,spac_shell,high,Acquisition corp I is a SPAC shell.
+CPZ,CALAMOS LONG/SHORT EQUITY & DYNAMIC INCOME TRUST,exclude,closed_end_fund,high,Long/short equity and income trust is a fund.
+NXDT,NEXPOINT DIVERSIFIED REAL ESTATE TRUST,include,reit_common_equity,high,Diversified real estate trust is listed equity.
+FCT,FIRST TRUST SENIOR FLOATING RATE INCOME FUND II,exclude,closed_end_fund,high,Senior floating rate income fund is a fund.
+RAAQ,REAL ASSET ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+ERC,ALLSPRING MULTI-SECTOR INCOME FUND,exclude,closed_end_fund,high,Multi-sector income fund is a fund vehicle.
+RCS,"PIMCO STRATEGIC INCOME FUND, INC.",exclude,closed_end_fund,high,Strategic income fund is a closed-end fund.
+SCII,SC II ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp II is a SPAC shell.
+NUW,NUVEEN AMT-FREE MUNICIPAL VALUE FUND,exclude,closed_end_fund,high,Municipal value fund is a fund vehicle.
+GLO,CLOUGH GLOBAL OPPORTUNITIES FUND,exclude,closed_end_fund,high,Global opportunities fund is a closed-end fund.
+COPL,COPLEY ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+MCR,MFS CHARTER INCOME TRUST,exclude,closed_end_fund,high,Charter income trust is a fund vehicle.
+MMT,MFS MULTIMARKET INCOME TRUST,exclude,closed_end_fund,high,Multimarket income trust is a fund vehicle.
+MCGA,YORKVILLE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+SOCA,SOLARIUS CAPITAL ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+SSAC,SPACSPHERE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+IGAC,INVEST GREEN ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+DAAQ,DIGITAL ASSET ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+MITT,"TPG MORTGAGE INVESTMENT TRUST, INC.",include,reit_common_equity,high,Mortgage investment trust is REIT-like common equity.
+FTF,FRANKLIN LTD DURATION INCOME TRUST,exclude,closed_end_fund,high,Ltd duration income trust is a fund vehicle.
+TDWD,TAILWIND 2.0 ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+MACI,MELAR ACQUISITION CORP. I/CAYMAN,exclude,spac_shell,high,Acquisition corp I/Cayman indicates SPAC shell.
+TDAC,TRANSLATIONAL DEVELOPMENT ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+LATA,GALATA ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp II is a SPAC shell.
+SRV,NXG CUSHING MIDSTREAM ENERGY FUND,exclude,closed_end_fund,high,Midstream energy fund is a closed-end fund.
+JRS,NUVEEN REAL ESTATE INCOME FUND,exclude,closed_end_fund,high,Real estate income fund is a fund vehicle.
+SUMA,SUMA ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+BLRK,BLUEROCK ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+TPVG,TRIPLEPOINT VENTURE GROWTH BDC CORP.,include,bdc_common_equity,high,Business development company common equity.
+LGI,LAZARD GLOBAL TOTAL RETURN & INCOME FUND INC,exclude,closed_end_fund,high,Global total return and income fund is a fund.
+SABA,SABA CAPITAL INCOME & OPPORTUNITIES FUND II,exclude,closed_end_fund,high,Income and opportunities fund II is a fund.
+HLXC,HELIX ACQUISITION CORP. III,exclude,spac_shell,high,Acquisition corp III is a SPAC shell.
+LIEN,"CHICAGO ATLANTIC BDC, INC.",include,bdc_common_equity,high,"BDC common equity issuer, company-like security."
+CTAA,CLEARTHINK 1 ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+ONCH,1RT ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+MFM,MFS MUNICIPAL INCOME TRUST,exclude,closed_end_fund,high,Municipal income trust is a fund vehicle.
+TSI,TCW STRATEGIC INCOME FUND INC,exclude,closed_end_fund,high,Strategic income fund is a closed-end fund.
+CRAC,CROWN RESERVE ACQUISITION CORP. I,exclude,spac_shell,high,Acquisition corp I is a SPAC shell.
+NPV,NUVEEN VIRGINIA QUALITY MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,Virginia municipal income fund is a fund.
+GSHR,GESHER ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp II is a blank-check shell.
+EGHA,EGH ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+IPOD,COLLECTIVE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+BXSY,BEXIL INVESTMENT TRUST,exclude,closed_end_fund,high,"Investment trust, not operating company equity."
+HAVA,HARVARD AVE ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+PALO,PALOMA ACQUISITION CORP I,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+IDE,"VOYA INFRASTRUCTURE, INDUSTRIALS & MATERIALS FUND",exclude,closed_end_fund,high,"Listed fund, not company-like operating equity."
+ETX,EATON VANCE MUNICIPAL INCOME 2028 TERM TRUST,exclude,closed_end_fund,high,Municipal income term trust.
+IIF,"MORGAN STANLEY INDIA INVESTMENT FUND, INC.",exclude,closed_end_fund,high,"Investment fund, not operating company equity."
+KTWO,K2 CAPITAL ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+FT,FRANKLIN UNIVERSAL TRUST,exclude,closed_end_fund,high,"Trust/fund structure, not operating issuer."
+BRKH,BURTECH ACQUISITION CORP II,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+SJT,SAN JUAN BASIN ROYALTY TRUST,include,royalty_trust,high,Royalty trust with issuer-like equity behavior.
+FIGX,FIGX CAPITAL ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+LFAC,LEAPFROG ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+NHS,NEUBERGER HIGH YIELD STRATEGIES FUND INC.,exclude,closed_end_fund,high,"High yield strategies fund, not operating company."
+AIIA,AI INFRASTRUCTURE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+VPV,INVESCO PENNSYLVANIA VALUE MUNICIPAL INCOME TRUST,exclude,closed_end_fund,high,Municipal income trust fund.
+HGLB,HIGHLAND GLOBAL ALLOCATION FUND,exclude,closed_end_fund,high,"Global allocation fund, not operating company."
+GF,NEW GERMANY FUND INC,exclude,closed_end_fund,high,"Country fund, not operating issuer equity."
+OPP,"RIVERNORTH/DOUBLELINE STRATEGIC OPPORTUNITY FUND, INC.",exclude,closed_end_fund,high,"Strategic opportunity fund, not operating company."
+WIA,WESTERN ASSET INFLATION-LINKED INCOME FUND,exclude,closed_end_fund,high,Inflation-linked income fund.
+NRO,NEUBERGER REAL ESTATE SECURITIES INCOME FUND INC,exclude,closed_end_fund,high,Real estate securities income fund.
+SEVN,SEVEN HILLS REALTY TRUST,include,reit_common_equity,high,"Realty trust, eligible company-like equity."
+DHY,CREDIT SUISSE HIGH YIELD CREDIT FUND,exclude,closed_end_fund,high,High yield credit fund.
+PAAC,PROEM ACQUISITION CORP. I,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+BWIV,BLUE WATER ACQUISITION CORP. IV,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+EHI,WESTERN ASSET GLOBAL HIGH INCOME FUND INC.,exclude,closed_end_fund,high,Global high income fund.
+GGT,GABELLI MULTIMEDIA TRUST INC.,exclude,closed_end_fund,high,"Trust is a fund vehicle, not operating company."
+DHF,BNY MELLON HIGH YIELD STRATEGIES FUND,exclude,closed_end_fund,high,High yield strategies fund.
+FLC,FLAHERTY & CRUMRINE TOTAL RETURN FUND INC,exclude,closed_end_fund,high,"Total return fund, not operating issuer."
+BSL,BLACKSTONE SENIOR FLOATING RATE 2027 TERM FUND,exclude,closed_end_fund,high,"Term fund, not operating company equity."
+ECF,ELLSWORTH GROWTH & INCOME FUND LTD,exclude,closed_end_fund,high,Growth and income fund.
+RANG,RANGE CAPITAL ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+TAVI,TAVIA ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+BCAC,BROOKLINE CAPITAL ACQUISITION CORP II,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+EDF,VIRTUS STONE HARBOR EMERGING MARKETS INCOME FUND,exclude,closed_end_fund,high,Emerging markets income fund.
+FREVS,"FIRST REAL ESTATE INVESTMENT TRUST OF NEW JERSEY, INC.",include,reit_common_equity,high,Real estate investment trust equity.
+NMP,NMP ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+PCQ,PIMCO CALIFORNIA MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,Municipal income fund.
+NAZ,NUVEEN ARIZONA QUALITY MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,Municipal income fund.
+EMIS,EMMIS ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+QRED,QUASAREDGE ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+LKSP,LAKE SUPERIOR ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+NNY,NUVEEN NEW YORK MUNICIPAL VALUE FUND,exclude,closed_end_fund,high,Municipal value fund.
+GLED,GALAXYEDGE ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+LAFA,LAFAYETTE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+VTN,INVESCO TRUST FOR INVESTMENT GRADE NEW YORK MUNICIPALS,exclude,closed_end_fund,high,Municipal trust fund.
+BMN,BLACKROCK 2037 MUNICIPAL TARGET TERM TRUST,exclude,closed_end_fund,high,Municipal target term trust.
+SPEG,SILVER PEGASUS ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+WPAC,WHITE PEARL ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+GLQ,CLOUGH GLOBAL EQUITY FUND,exclude,closed_end_fund,high,Global equity fund.
+MHF,WESTERN ASSET MUNICIPAL HIGH INCOME FUND INC.,exclude,closed_end_fund,high,Municipal high income fund.
+INAC,INDIGO ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+PIM,PUTNAM MASTER INTERMEDIATE INCOME TRUST,exclude,closed_end_fund,high,Intermediate income trust fund.
+YCY,AA MISSION ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+IGA,VOYA GLOBAL ADVANTAGE & PREMIUM OPPORTUNITY FUND,exclude,closed_end_fund,high,"Global advantage fund, not operating company."
+SPE,"SPECIAL OPPORTUNITIES FUND, INC.",exclude,closed_end_fund,high,Special opportunities fund.
+MSD,MORGAN STANLEY EMERGING MARKETS DEBT FUND INC,exclude,closed_end_fund,high,Emerging markets debt fund.
+TRAD,APEX TECH ACQUISITION INC.,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+BHAV,BHAV ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+MPA,BLACKROCK MUNIYIELD PENNSYLVANIA QUALITY FUND,exclude,closed_end_fund,high,Municipal quality fund.
+BCV,BANCROFT FUND LTD,exclude,closed_end_fund,high,"Fund, not operating company equity."
+EVG,EATON VANCE SHORT DURATION DIVERSIFIED INCOME FUND,exclude,closed_end_fund,high,Short duration diversified income fund.
+HEQ,JOHN HANCOCK DIVERSIFIED INCOME FUND,exclude,closed_end_fund,high,Diversified income fund.
+BGX,BLACKSTONE LONG-SHORT CREDIT INCOME FUND,exclude,closed_end_fund,high,Long-short credit income fund.
+RFAM,RF ACQUISITION CORP III,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+CIK,"CREDIT SUISSE ASSET MANAGEMENT INCOME FUND, INC.",exclude,closed_end_fund,high,Asset management income fund.
+UAC,UNITED ACQUISITION CORP. I,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+HYI,WESTERN ASSET HIGH YIELD OPPORTUNITY FUND INC.,exclude,closed_end_fund,high,High yield opportunity fund.
+CEE,"CENTRAL & EASTERN EUROPE FUND, INC.",exclude,closed_end_fund,high,"Regional fund, not operating company."
+GRX,GABELLI HEALTHCARE & WELLNESSRX TRUST,exclude,closed_end_fund,high,Healthcare trust fund vehicle.
+BWG,BRANDYWINEGLOBAL-GLOBAL INCOME OPPORTUNITIES FUND INC,exclude,closed_end_fund,high,Global income opportunities fund.
+CGO,CALAMOS GLOBAL TOTAL RETURN FUND,exclude,closed_end_fund,high,Global total return fund.
+JHS,JOHN HANCOCK INCOME SECURITIES TRUST,exclude,closed_end_fund,high,Income securities trust fund.
+IHD,VOYA EMERGING MARKETS HIGH DIVIDEND EQUITY FUND,exclude,closed_end_fund,high,Emerging markets dividend equity fund.
+DMO,WESTERN ASSET MORTGAGE OPPORTUNITY FUND INC.,exclude,closed_end_fund,high,Mortgage opportunity fund.
+IPEX,INFLECTION POINT ACQUISITION CORP. V,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+RMMZ,"RIVERNORTH MANAGED DURATION MUNICIPAL INCOME FUND II, INC.",exclude,closed_end_fund,high,Managed duration municipal income fund.
+PHD,"PIONEER FLOATING RATE FUND, INC.",exclude,closed_end_fund,high,Floating rate fund.
+NMT,NUVEEN MASSACHUSETTS QUALITY MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,Municipal income fund.
+MCN,XAI MADISON EQUITY PREMIUM INCOME FUND,exclude,closed_end_fund,high,Equity premium income fund.
+VFL,ABRDN NATIONAL MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,National municipal income fund.
+IAF,"ABRDN AUSTRALIA EQUITY FUND, INC.",exclude,closed_end_fund,high,"Australia equity fund, not operating company."
+NMI,NUVEEN MUNICIPAL INCOME FUND INC,exclude,closed_end_fund,high,Municipal income fund.
+QSEA,QUARTZSEA ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+GGZ,GABELLI GLOBAL SMALL & MID CAP VALUE TRUST,exclude,closed_end_fund,high,Global small and mid cap value trust.
+CHAR,CHARLTON ARIA ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+QUMS,QUANTUMSPHERE ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+PGAC,PANTAGES CAPITAL ACQUISITION CORP,exclude,spac_shell,high,Capital acquisition corp blank-check SPAC.
+CXE,MFS HIGH INCOME MUNICIPAL TRUST,exclude,closed_end_fund,high,High income municipal trust.
+GLU,GABELLI GLOBAL UTILITY & INCOME TRUST,exclude,closed_end_fund,high,Utility and income trust fund.
+PAI,WESTERN ASSET INVESTMENT GRADE INCOME FUND INC.,exclude,closed_end_fund,high,Investment grade income fund.
+JHI,JOHN HANCOCK INVESTORS TRUST,exclude,closed_end_fund,high,"Investors trust fund, not operating company."
+NIM,NUVEEN SELECT MATURITIES MUNICIPAL FUND,exclude,closed_end_fund,high,"Municipal fund, not operating issuer."
+RPT,RITHM PROPERTY TRUST INC.,include,reit_common_equity,high,"Property trust, eligible real estate equity."
+SBI,WESTERN ASSET INTERMEDIATE MUNI FUND INC.,exclude,closed_end_fund,high,Intermediate muni fund.
+SUNS,"SUNRISE REALTY TRUST, INC.",include,reit_common_equity,high,Realty trust operating as listed equity.
+SPKL,SPARK I ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+PCF,HIGH INCOME SECURITIES FUND,exclude,closed_end_fund,high,High income securities fund.
+CHPG,CHAMPIONSGATE ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp blank-check SPAC.
+ERH,ALLSPRING UTILITIES & HIGH INCOME FUND,exclude,closed_end_fund,high,Utilities and high income fund.
+JLS,NUVEEN MORTGAGE & INCOME FUND/MA/,exclude,closed_end_fund,high,Mortgage and income fund.
+PGP,PIMCO GLOBAL STOCKSPLUS & INCOME FUND,exclude,closed_end_fund,high,"PIMCO fund; packaged investment vehicle, not operating equity."
+RMI,"RIVERNORTH OPPORTUNISTIC MUNICIPAL INCOME FUND, INC.",exclude,closed_end_fund,high,"Municipal income fund; investment vehicle, not company equity."
+IGI,WESTERN ASSET INVESTMENT GRADE OPPORTUNITY TRUST INC.,exclude,closed_end_fund,high,"Investment grade opportunity trust; fund structure, not operating issuer."
+GDL,GDL FUND,exclude,closed_end_fund,high,Fund title indicates closed-end investment vehicle.
+MGF,MFS GOVERNMENT MARKETS INCOME TRUST,exclude,closed_end_fund,high,"Income trust fund, not an operating company."
+RGT,"ROYCE GLOBAL TRUST, INC.",exclude,closed_end_fund,high,"Royce Global Trust is a fund, not operating equity."
+RFAI,RF ACQUISITION CORP II,exclude,spac_shell,high,Acquisition corp indicates blank-check SPAC.
+CSTAF,CONSTELLATION ACQUISITION CORP I,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+BYNO,BYNORDIC ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+EVF,EATON VANCE SENIOR INCOME TRUST,exclude,closed_end_fund,high,Senior income trust is a fund vehicle.
+MMTX,MILUNA ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+JATT,JATT II ACQUISITION CORP.,exclude,spac_shell,high,II acquisition corp is a SPAC shell.
+GCV,GABELLI CONVERTIBLE & INCOME SECURITIES FUND INC,exclude,closed_end_fund,high,Convertible and income securities fund; not operating equity.
+RFM,"RIVERNORTH FLEXIBLE MUNICIPAL INCOME FUND, INC.",exclude,closed_end_fund,high,"Municipal income fund structure, not company-like equity."
+IAE,VOYA ASIA PACIFIC HIGH DIVIDEND EQUITY INCOME FUND,exclude,closed_end_fund,high,Equity income fund is a portfolio vehicle.
+FMN,FEDERATED HERMES PREMIER MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,Municipal income fund; investment product.
+CMU,MFS HIGH YIELD MUNICIPAL TRUST,exclude,closed_end_fund,high,"Municipal trust fund, not operating issuer."
+ALIS,CALISA ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+VGI,VIRTUS GLOBAL MULTI-SECTOR INCOME FUND,exclude,closed_end_fund,high,Global multi-sector income fund; packaged portfolio.
+FVN,FUTURE VISION II ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+UYSC,UY SCUTI ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp indicates blank-check SPAC.
+WSTN,WESTIN ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+GDO,WESTERN ASSET GLOBAL CORPORATE OPPORTUNITY FUND INC.,exclude,closed_end_fund,high,Global corporate opportunity fund; closed-end fund.
+DTF,DTF TAX-FREE INCOME 2028 TERM FUND INC,exclude,closed_end_fund,high,Term fund is an investment vehicle.
+PLMJF,PLUM ACQUISITION CORP. III,exclude,spac_shell,high,Plum Acquisition Corp. III is a SPAC.
+BSAA,BEST SPAC I ACQUISITION CORP.,exclude,spac_shell,high,Best SPAC I Acquisition Corp. is a SPAC shell.
+IXAQF,IX ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp indicates blank-check SPAC.
+SSEA,STARRY SEA ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+PNI,PIMCO NEW YORK MUNICIPAL INCOME FUND II,exclude,closed_end_fund,high,Municipal income fund; not operating company equity.
+SWZ,TOTAL RETURN SECURITIES FUND,exclude,closed_end_fund,high,Total return securities fund is a portfolio fund.
+GLV,CLOUGH GLOBAL DIVIDEND & INCOME FUND,exclude,closed_end_fund,high,Global dividend fund; packaged investment vehicle.
+WTG,WINTERGREEN ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+NMS,NUVEEN MINNESOTA QUALITY MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,"Municipal income fund, not an operating issuer."
+AEAE,ALTENERGY ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+CNDA,CONCORD ACQUISITION CORP II,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+NRT,NORTH EUROPEAN OIL ROYALTY TRUST,include,royalty_trust,high,Royalty trust; eligible listed equity-like issuer.
+EEA,"EUROPEAN EQUITY FUND, INC / MD",exclude,closed_end_fund,high,"Equity fund; investment vehicle, not operating company."
+CEV,EATON VANCE CALIFORNIA MUNICIPAL INCOME TRUST,exclude,closed_end_fund,high,California municipal income trust is a fund.
+IMAQ,INTERNATIONAL MEDIA ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+PCM,"PCM FUND, INC.",exclude,closed_end_fund,high,"Fund, not company-like operating equity."
+CCIF,CARLYLE CREDIT INCOME FUND,exclude,closed_end_fund,high,Credit income fund; portfolio vehicle.
+KVAC,KEEN VISION ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+VLT,INVESCO HIGH INCOME TRUST II,exclude,closed_end_fund,high,High income trust is a fund vehicle.
+TLGYF,TLGY ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+PGZ,PRINCIPAL REAL ESTATE INCOME FUND,exclude,closed_end_fund,high,Real estate income fund; packaged investment vehicle.
+PVL,PERMIANVILLE ROYALTY TRUST,include,royalty_trust,high,Permianville Royalty Trust is eligible royalty trust.
+PMVC,PMV CONSUMER ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp indicates blank-check SPAC.
+CRT,CROSS TIMBERS ROYALTY TRUST,include,royalty_trust,high,Cross Timbers Royalty Trust is eligible royalty trust.
+CXH,MFS INVESTMENT GRADE MUNICIPAL TRUST,exclude,closed_end_fund,high,"Municipal trust fund, not operating equity."
+GPMT,GRANITE POINT MORTGAGE TRUST INC.,include,reit_common_equity,high,Mortgage trust common equity REIT.
+DMA,DESTRA MULTI-ALTERNATIVE FUND,exclude,closed_end_fund,high,Multi-alternative fund is a portfolio product.
+IBAC,IB ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+RSF,"RIVERNORTH CAPITAL & INCOME FUND, INC.",exclude,closed_end_fund,high,Capital and income fund is not operating equity.
+MXE,MEXICO EQUITY & INCOME FUND INC,exclude,closed_end_fund,high,Mexico equity and income fund; investment vehicle.
+CAPN,CAYSON ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+LFT,"LUMENT FINANCE TRUST, INC.",include,reit_common_equity,high,Finance trust common equity issuer.
+FSHP,FLAG SHIP ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp indicates blank-check SPAC.
+CDAQF,COMPASS DIGITAL ACQUISITION CORP.,exclude,spac_shell,high,Digital acquisition corp is a SPAC shell.
+EURK,EUREKA ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+JMM,NUVEEN MULTI-MARKET INCOME FUND,exclude,closed_end_fund,high,Multi-market income fund; portfolio vehicle.
+RDAC,RISING DRAGON ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+VOC,VOC ENERGY TRUST,include,royalty_trust,high,Energy trust; royalty-style issuer equity.
+RIBB,RIBBON ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp indicates blank-check SPAC.
+FWAC,FUTUREWAVE ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a SPAC shell.
+ALCYF,ALCHEMY INVESTMENTS ACQUISITION CORP 1,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+BKHA,BLACK HAWK ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp indicates blank-check SPAC.
+BREZ,BREEZE ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp II is a SPAC shell.
+COLA,COLUMBUS ACQUISITION CORP/CAYMAN ISLANDS,exclude,spac_shell,high,Acquisition corp/Cayman Islands indicates SPAC shell.
+FMY,FIRST TRUST MORTGAGE INCOME FUND,exclude,closed_end_fund,high,Mortgage income fund is a portfolio vehicle.
+QETA,QUETTA ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+BHM,"BLUEROCK HOMES TRUST, INC.",include,reit_common_equity,high,Homes trust common equity REIT.
+TETEF,TECHNOLOGY & TELECOMMUNICATION ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp indicates blank-check SPAC.
+DTSQ,DT CLOUD STAR ACQUISITION CORP,exclude,spac_shell,high,Cloud star acquisition corp is a SPAC shell.
+MSSAF,METAL SKY STAR ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp indicates blank-check SPAC.
+GRF,"EAGLE CAPITAL GROWTH FUND, INC.",exclude,closed_end_fund,high,Growth fund is an investment vehicle.
+MCAG,MOUNTAIN CREST ACQUISITION CORP. V,exclude,spac_shell,high,Mountain Crest Acquisition Corp. V is a SPAC.
+WELNF,INTEGRATED WELLNESS ACQUISITION CORP,exclude,spac_shell,high,Integrated Wellness Acquisition Corp is a SPAC shell.
+HERZ,"HERZFELD CREDIT INCOME FUND, INC",exclude,closed_end_fund,high,Credit income fund is a portfolio vehicle.
+BAYA,BAYVIEW ACQUISITION CORP,exclude,spac_shell,high,Bayview Acquisition Corp is a SPAC shell.
+WBQNL,WOODBRIDGE LIQUIDATION TRUST,exclude,liquidation_trust,medium,Liquidation trust is not operating equity.
+PRT,PERMROCK ROYALTY TRUST,include,royalty_trust,high,PermRock Royalty Trust is eligible royalty trust.
+CIF,MFS INTERMEDIATE HIGH INCOME FUND,exclude,closed_end_fund,high,Intermediate high income fund is a portfolio vehicle.
+EMCGF,EMBRACE CHANGE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+ASPC,ASPAC III ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp III indicates blank-check SPAC.
+MVO,MV OIL TRUST,include,royalty_trust,high,Oil trust; eligible royalty-style issuer.
+CFND,C1 FUND INC.,exclude,closed_end_fund,high,Fund Inc. indicates investment vehicle.
+SPEX,SPECTRE ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+ICMB,"INVESTCORP CREDIT MANAGEMENT BDC, INC.",include,bdc_common_equity,high,Credit management BDC common equity.
+AHT,ASHFORD HOSPITALITY TRUST INC,include,reit_common_equity,high,Hospitality trust common equity REIT.
+RCG,"RENN FUND, INC.",exclude,closed_end_fund,high,Fund Inc. indicates portfolio vehicle.
+CHKR,CHESAPEAKE GRANITE WASH TRUST,include,royalty_trust,high,Granite Wash Trust is royalty trust.
+TRXA,T-REX ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp indicates SPAC shell.
+CMCT,CREATIVE MEDIA & COMMUNITY TRUST CORP,include,reit_common_equity,high,Trust corp operates as listed real estate equity.
+IHT,INNSUITES HOSPITALITY TRUST,include,reit_common_equity,high,Hospitality trust common equity issuer.
+ECTM,ECA MARCELLUS TRUST I,include,royalty_trust,high,Marcellus Trust is eligible natural-resource trust.
+MARPS,MARINE PETROLEUM TRUST,include,royalty_trust,high,Petroleum trust; royalty-style issuer equity.
+MTR,MESA ROYALTY TRUST/TX,include,royalty_trust,high,Mesa Royalty Trust is eligible royalty trust.
+MMTRS,MILLS MUSIC TRUST,include,royalty_trust,high,Mills Music Trust is trust-like issuer equity.
+SQFT,"PRESIDIO PROPERTY TRUST, INC.",include,reit_common_equity,high,Property trust common equity issuer.
+DEFG,GRAYSCALE DECENTRALIZED FINANCE (DEFI) FUND LLC,exclude,closed_end_fund,medium,Grayscale DeFi fund is a packaged investment product.
+WHLR,"WHEELER REAL ESTATE INVESTMENT TRUST, INC.",include,reit_common_equity,high,Real estate investment trust common equity; eligible issuer-like listed shares.
+SVVC,"FIRSTHAND TECHNOLOGY VALUE FUND, INC.",exclude,closed_end_fund,high,"Technology value fund is an investment fund, not operating company equity."
+BID,TRIBECA STRATEGIC ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corp is a blank-check SPAC, not operating business equity."
+MLAA,MOUNTAIN LAKE ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corporation indicates SPAC shell stage.
+OTAI,STARLINK AI ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+AMAN,AMANAT ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+KEYY,KEYSTONE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+DGAC,DISCIPLINED GROWTH ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+AACP,APOGEE ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+FTHA,FOREFRONT TECH HOLDINGS ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+QLEP,QUANTUM LEAP ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+OHAC,OCEANHAWK ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+TEAC,TIDEWISE ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+ACGC,ACP HOLDINGS ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+CAII,COLLECTIVE ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp II is a blank-check shell.
+IACQ,IRENIC ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+FXAC,FORTUNEX ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+FDMM,FREEDOM METALS ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+GSRV,GSR V ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+VAII,VOYAGER ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp II is a blank-check shell.
+ALOG,ALBERT ORIGIN ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+QADR,QDRO ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+UNIU,"RIVERNORTH LONG PRIME UNICORN FUND 2028, INC.",exclude,fund,high,"Unicorn fund is an investment fund, not operating equity."
+GONYF,GO RESIDENTIAL REAL ESTATE INVESTMENT TRUST,include,reit_common_equity,high,Residential real estate investment trust common equity.
+PECE,PEACE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+RREV,RRE VENTURES ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+HCAX,HALL CHADWICK ACQUISITION CORP II,exclude,spac_shell,high,Acquisition corp II is a blank-check shell.
+MRCO,MERCATOR ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+EWAV,EAST WEST AVE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+PLUN,PLUTONIAN ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp II is a blank-check shell.
+PAXG,PINE TREE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+UNID,"RIVERNORTH SHORT PRIME UNICORN FUND 2028, INC",exclude,fund,high,"Short prime unicorn fund is an investment fund, not operating equity."
+FMAC,FUTURE MONEY ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+APMC,AMPERCAP ACQUISITION CO,exclude,spac_shell,high,Acquisition company indicates blank-check SPAC.
+FSSL,FS SPECIALTY LENDING FUND,include,bdc_common_equity,high,Specialty lending fund appears company-like closed-end lender equity.
+SBAQ,SUBVERSIVE BITCOIN ACQUISITION CORP.,exclude,spac_shell,high,Bitcoin acquisition corp is a blank-check shell.
+GUAC,BERTO ACQUISITION CORP. II,exclude,spac_shell,high,Acquisition corp II is a blank-check shell.
+VECA,VERNAL CAPITAL ACQUISITION CORP.,exclude,spac_shell,high,Capital acquisition corp is a blank-check shell.
+ARTC,ART TECHNOLOGY ACQUISITION CORP.,exclude,spac_shell,high,Technology acquisition corp is a blank-check shell.
+PDSRX,PRINCIPAL REAL ASSET FUND,exclude,fund,high,"Real asset fund is an investment fund, not operating equity."
+PLTM,GRANITESHARES PLATINUM TRUST,exclude,commodity_trust,high,"Platinum trust is a commodity trust, not operating equity."
+OSOL,OSPREY SOLANA TRUST,exclude,commodity_trust,high,"Solana trust is a crypto trust, not operating equity."
+BTCW,WISDOMTREE BITCOIN FUND,exclude,commodity_trust,high,"Bitcoin fund is a crypto investment product, not operating equity."
+OBNB,OSPREY BNB CHAIN TRUST,exclude,commodity_trust,high,"BNB chain trust is a crypto trust, not operating equity."
+FETH,FIDELITY ETHEREUM FUND,exclude,commodity_trust,high,"Ethereum fund is a crypto investment product, not operating equity."
+DEFI,HASHDEX COMMODITIES TRUST,exclude,commodity_trust,high,"Commodities trust is an investment product, not operating equity."
+EIIA,EAGLE POINT INSTITUTIONAL INCOME FUND,exclude,fund,high,"Institutional income fund is an investment fund, not operating equity."
+PGIM,PGIM PRIVATE CREDIT FUND,exclude,fund,high,"Private credit fund is an investment fund, not operating equity."
+ODOT,OSPREY POLKADOT TRUST,exclude,commodity_trust,high,"Polkadot trust is a crypto trust, not operating equity."
+FBTC,FIDELITY WISE ORIGIN BITCOIN FUND,exclude,commodity_trust,high,"Bitcoin fund is a crypto investment product, not operating equity."
+VCX,"FUNDRISE INNOVATION FUND, LLC",exclude,fund,high,"Innovation fund LLC is an investment fund, not operating equity."
+EZBC,FRANKLIN TEMPLETON DIGITAL HOLDINGS TRUST,exclude,commodity_trust,high,"Digital holdings trust is a crypto trust, not operating equity."
+SOEZ,FRANKLIN SOLANA TRUST,exclude,commodity_trust,high,"Solana trust is a crypto trust, not operating equity."
+BMOK,BM ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+EZPZ,FRANKLIN CRYPTO TRUST,exclude,commodity_trust,high,"Crypto trust is a digital asset product, not operating equity."
+OBNK,OSPREY BONK TRUST,exclude,commodity_trust,high,"Bonk trust is a crypto trust, not operating equity."
+MYX,MAYWOOD ACQUISITION CORP. 2,exclude,spac_shell,high,Acquisition corp 2 is a blank-check shell.
+XRPZ,FRANKLIN XRP TRUST,exclude,commodity_trust,high,"XRP trust is a crypto trust, not operating equity."
+FSOL,FIDELITY SOLANA FUND,exclude,commodity_trust,high,"Solana fund is a crypto investment product, not operating equity."
+SVIX,VS TRUST,exclude,commodity_trust,high,Trust product is an exchange-traded derivative instrument.
+DBO,INVESCO DB OIL FUND,exclude,commodity_trust,high,"Oil fund is a commodity fund, not operating equity."
+UUP,INVESCO DB US DOLLAR INDEX BULLISH FUND,exclude,commodity_trust,high,Dollar index fund is an exchange-traded currency product.
+GJT,"STRATS(SM) TRUST FOR ALLSTATE CORP SECURITIES, SERIES 2006-3",exclude,structured_trust,high,"STRATS trust is a structured security, not operating equity."
+FXF,INVESCO CURRENCYSHARES SWISS FRANC TRUST,exclude,currency_trust,high,Currency trust is an exchange-traded FX product.
+FXE,INVESCO CURRENCYSHARES EURO TRUST,exclude,currency_trust,high,Currency trust is an exchange-traded FX product.
+VCRDX,HARRISON STREET INFRASTRUCTURE INCOME FUND,exclude,fund,high,"Infrastructure income fund is an investment fund, not operating equity."
+FGDL,FRANKLIN TEMPLETON HOLDINGS TRUST,exclude,fund,high,Holdings trust appears to be a fund or trust product.
+GJP,"STRATS(SM) TRUST FOR DOMINION RESOURCES, INC. SECURITIES, SERIES 2005-6",exclude,structured_trust,high,"STRATS trust is a structured security, not operating equity."
+GJR,"STRATS(SM) TRUST FOR PROCTER & GAMBLE SECURITIES, SERIES 2006-1",exclude,structured_trust,high,"STRATS trust is a structured security, not operating equity."
+FXC,INVESCO CURRENCYSHARES CANADIAN DOLLAR TRUST,exclude,currency_trust,high,Currency trust is an exchange-traded FX product.
+GJS,"STRATS(SM) TRUST FOR GOLDMAN SACHS GROUP SECURITIES, SERIES 2006-2",exclude,structured_trust,high,"STRATS trust is a structured security, not operating equity."
+UNL,"UNITED STATES 12 MONTH NATURAL GAS FUND, LP",exclude,commodity_trust,high,"Natural gas fund is a commodity fund, not operating equity."
+UDN,INVESCO DB US DOLLAR INDEX BEARISH FUND,exclude,currency_trust,high,Dollar index bearish fund is an exchange-traded currency product.
+USL,"UNITED STATES 12 MONTH OIL FUND, LP",exclude,commodity_trust,high,"Oil fund is a commodity fund, not operating equity."
+EDD,"MORGAN STANLEY EMERGING MARKETS DOMESTIC DEBT FUND, INC.",exclude,closed_end_fund,high,Emerging markets debt fund is an investment fund.
+DBP,INVESCO DB PRECIOUS METALS FUND,exclude,commodity_trust,high,"Precious metals fund is a commodity fund, not operating equity."
+FXB,INVESCO CURRENCYSHARES BRITISH POUND STERLING TRUST,exclude,currency_trust,high,Currency trust is an exchange-traded FX product.
+FXY,INVESCO CURRENCYSHARES JAPANESE YEN TRUST,exclude,currency_trust,high,Currency trust is an exchange-traded FX product.
+GJO,"STRATS SM TRUST FOR WAL-MART STORES, INC. SECURITIES, SERIES 2005-4",exclude,structured_trust,high,"STRATS trust is a structured security, not operating equity."
+BPRE,BLUEROCK PRIVATE REAL ESTATE FUND,exclude,fund,high,Private real estate fund is an investment fund.
+DBA,INVESCO DB AGRICULTURE FUND,exclude,commodity_trust,high,"Agriculture fund is a commodity fund, not operating equity."
+DBB,INVESCO DB BASE METALS FUND,exclude,commodity_trust,high,"Base metals fund is a commodity fund, not operating equity."
+BNO,"UNITED STATES BRENT OIL FUND, LP",exclude,commodity_trust,high,"Brent oil fund is a commodity fund, not operating equity."
+FXA,INVESCO CURRENCYSHARES AUSTRALIAN DOLLAR TRUST,exclude,currency_trust,high,Currency trust is an exchange-traded FX product.
+UNG,"UNITED STATES NATURAL GAS FUND, LP",exclude,commodity_trust,high,"Natural gas fund is a commodity fund, not operating equity."
+DBE,INVESCO DB ENERGY FUND,exclude,commodity_trust,high,"Energy fund is a commodity fund, not operating equity."
+PYT,PPLUS TRUST SERIES GSC-2,exclude,structured_trust,high,"PPLUS trust is a structured security, not operating equity."
+IPB,MERRILL LYNCH DEPOSITOR INC INDEXPLUS TRUST SERIES 2003-1,exclude,structured_trust,high,"Indexplus trust is a structured security, not operating equity."
+GJH,STRATS SM TRUST FOR U S CELL CORP SEC SERIES 2004 6,exclude,structured_trust,high,"STRATS trust is a structured security, not operating equity."
+USO,"UNITED STATES OIL FUND, LP",exclude,commodity_trust,high,"Oil fund is a commodity fund, not operating equity."
+BTO,JOHN HANCOCK FINANCIAL OPPORTUNITIES FUND,exclude,closed_end_fund,high,Financial opportunities fund is an investment fund.
+UGA,"UNITED STATES GASOLINE FUND, LP",exclude,commodity_trust,high,"Gasoline fund is a commodity fund, not operating equity."
+DBC,INVESCO DB COMMODITY INDEX TRACKING FUND,exclude,commodity_trust,high,Commodity index tracking fund is an investment product.
+ZTR,VIRTUS TOTAL RETURN FUND INC.,exclude,closed_end_fund,high,"Total return fund is a closed-end fund, not operating equity."
+XSIAX,VOYA CREDIT INCOME FUND,exclude,closed_end_fund,high,Credit income fund is an investment fund.
+VMO,INVESCO MUNICIPAL OPPORTUNITY TRUST,exclude,closed_end_fund,high,Municipal opportunity trust is a municipal fund.
+WLAC,WILLOW LANE ACQUISITION CORP.,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+ATEK,ATHENA TECHNOLOGY ACQUISITION CORP. II,exclude,spac_shell,high,Technology acquisition corp II is a blank-check shell.
+KBSR,"KBS REAL ESTATE INVESTMENT TRUST III, INC.",include,reit_common_equity,high,Real estate investment trust common equity.
+CMCAF,PIERMONT VALLEY ACQUISITION CORP,exclude,spac_shell,high,Acquisition corp is a blank-check shell.
+ASCBF,ASPAC II ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+TRLC,TRILINC GLOBAL IMPACT FUND LLC,exclude,closed_end_fund,high,"Fund LLC; packaged investment vehicle, not operating company equity."
+ALCY,ALCHEMY INVESTMENTS ACQUISITION CORP 1,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+WINV,WINVEST ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+FCO,"ABRDN GLOBAL INCOME FUND, INC.",exclude,closed_end_fund,high,"Global income fund; investment vehicle, not company-like operating equity."
+WHLRD,"WHEELER REAL ESTATE INVESTMENT TRUST, INC.",include,reit_common_equity,high,"REIT common equity issuer, eligible operating-style listed equity."
+KACLF,KAIROUS ACQUISITION CORP. LTD,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+GRTUF,GRANITE REAL ESTATE INVESTMENT TRUST,include,reit_common_equity,high,"Real estate investment trust common equity, company-like issuer."
+ASCIX,ANGEL OAK STRATEGIC CREDIT FUND,exclude,closed_end_fund,high,"Strategic credit fund; packaged investment vehicle, not operating company."
+TPTA,"TERRA PROPERTY TRUST, INC.",include,reit_common_equity,high,"Property trust REIT, eligible listed equity issuer."
+STSR,"STRATEGIC STUDENT & SENIOR HOUSING TRUST, INC.",include,reit_common_equity,high,"Trust operating as real estate equity issuer, eligible."
+FCRX,"CRESCENT CAPITAL BDC, INC.",include,bdc_common_equity,high,"BDC common equity issuer, company-like listed equity."
+HCTPF,HUTCHISON PORT HOLDINGS TRUST/ADR,include,operating_company_common_equity,high,"ADR of operating trust-like port company, not a fund."
+UVIX,VS TRUST,exclude,fund_or_etp,high,"VS Trust exchange-traded product, not company equity."
+NRSAX,NEXPOINT REAL ESTATE STRATEGIES FUND,exclude,closed_end_fund,high,"Real estate strategies fund; investment vehicle, not operating company."
+WHLRL,"WHEELER REAL ESTATE INVESTMENT TRUST, INC.",include,reit_common_equity,high,"REIT common equity issuer, eligible operating-style listed equity."
+CCID,CARLYLE CREDIT INCOME FUND,exclude,closed_end_fund,high,"Credit income fund; packaged investment vehicle, not operating equity."
+HGIT,"HINES GLOBAL INCOME TRUST, INC.",exclude,closed_end_fund,high,"Global income trust fund; investment vehicle, not operating company."
+NICHX,VARIANT ALTERNATIVE INCOME FUND,exclude,closed_end_fund,high,"Alternative income fund; packaged investment vehicle, not operating equity."
+SWDR,"STARWOOD REAL ESTATE INCOME TRUST, INC.",include,reit_common_equity,high,"Real estate income trust common equity, eligible issuer."
+ALSUF,ALPHA STAR ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+ALSTF,ALPHA STAR ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+ALSWF,ALPHA STAR ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+SGST,"STRATEGIC STORAGE TRUST VI, INC.",include,reit_common_equity,high,"Storage trust REIT common equity, company-like issuer."
+PMFAX,PIMCO FLEXIBLE MUNICIPAL INCOME FUND,exclude,closed_end_fund,high,"Municipal income fund; packaged investment vehicle, not operating equity."
+ALCWF,ALCHEMY INVESTMENTS ACQUISITION CORP 1,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+ALCUF,ALCHEMY INVESTMENTS ACQUISITION CORP 1,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+TLGWF,TLGY ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+TLGUF,TLGY ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+PLMWF,PLUM ACQUISITION CORP. III,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+PLMUF,PLUM ACQUISITION CORP. III,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+OWSCX,1WS CREDIT INCOME FUND,exclude,closed_end_fund,high,"Credit income fund; investment vehicle, not operating company."
+PDSKX,PRINCIPAL REAL ASSET FUND,exclude,closed_end_fund,high,"Real asset fund; packaged investment vehicle, not operating equity."
+LARAX,LORD ABBETT CREDIT OPPORTUNITIES FUND,exclude,closed_end_fund,high,"Credit opportunities fund; investment vehicle, not operating company."
+TETUF,TECHNOLOGY & TELECOMMUNICATION ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+TETWF,TECHNOLOGY & TELECOMMUNICATION ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+ACQC,RELATIVITY ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+CDAUF,COMPASS DIGITAL ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+CDAWF,COMPASS DIGITAL ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+CPPTL,COPPER PROPERTY CTL PASS THROUGH TRUST,exclude,trust_or_pass_through,high,"Pass-through trust instrument, not operating company equity."
+IXQWF,IX ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+IXQUF,IX ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+CMCUF,PIERMONT VALLEY ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+CMCWF,PIERMONT VALLEY ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+EMCRF,EMBRACE CHANGE ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+EMCWF,EMBRACE CHANGE ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+JWSWF,JAWS MUSTANG ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+JWSUF,JAWS MUSTANG ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+CSTWF,CONSTELLATION ACQUISITION CORP I,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+CSTUF,CONSTELLATION ACQUISITION CORP I,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+ASUUF,ASPAC II ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+ASCWF,ASPAC II ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+ASCRF,ASPAC II ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+MSSWF,METAL SKY STAR ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+MSSUF,METAL SKY STAR ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+LENDX,STONE RIDGE TRUST V,exclude,fund_or_trust,high,"Trust V fund-like vehicle, not operating company equity."
+BSTT,"BLACKSTONE REAL ESTATE INCOME TRUST, INC.",include,reit_common_equity,high,"Real estate income trust common equity, eligible issuer."
+ZARE,ARES REAL ESTATE INCOME TRUST INC.,include,reit_common_equity,high,"Real estate income trust common equity, eligible issuer."
+PMTU,PENNYMAC MORTGAGE INVESTMENT TRUST,include,mreit_common_equity,high,"Mortgage investment trust common equity, eligible issuer."
+PMTW,PENNYMAC MORTGAGE INVESTMENT TRUST,include,mreit_common_equity,high,"Mortgage investment trust common equity, eligible issuer."
+PMTV,PENNYMAC MORTGAGE INVESTMENT TRUST,include,mreit_common_equity,high,"Mortgage investment trust common equity, eligible issuer."
+LTAFX,ALTERNATIVE STRATEGIES INCOME FUND,exclude,closed_end_fund,high,"Alternative strategies income fund; investment vehicle, not operating equity."
+LTCFX,ALTERNATIVE STRATEGIES INCOME FUND,exclude,closed_end_fund,high,"Alternative strategies income fund; investment vehicle, not operating equity."
+MITP,"TPG MORTGAGE INVESTMENT TRUST, INC.",include,mreit_common_equity,high,"Mortgage investment trust common equity, eligible issuer."
+MITN,"TPG MORTGAGE INVESTMENT TRUST, INC.",include,mreit_common_equity,high,"Mortgage investment trust common equity, eligible issuer."
+RWTN,REDWOOD TRUST INC,include,reit_common_equity,high,Redwood Trust common equity; eligible operating-style issuer.
+RWTP,REDWOOD TRUST INC,include,reit_common_equity,high,Redwood Trust common equity; eligible operating-style issuer.
+RWTQ,REDWOOD TRUST INC,include,reit_common_equity,high,Redwood Trust common equity; eligible operating-style issuer.
+RWTO,REDWOOD TRUST INC,include,reit_common_equity,high,Redwood Trust common equity; eligible operating-style issuer.
+TXEMF,TEMPLETON EMERGING MARKETS INCOME FUND,exclude,closed_end_fund,high,"Emerging markets income fund; packaged investment vehicle, not operating equity."
+DHCNI,DIVERSIFIED HEALTHCARE TRUST,include,reit_common_equity,high,"Diversified healthcare trust common equity, eligible issuer."
+DHCNL,DIVERSIFIED HEALTHCARE TRUST,include,reit_common_equity,high,"Diversified healthcare trust common equity, eligible issuer."
+ADAMM,"ADAMAS TRUST, INC.",include,reit_common_equity,high,Trust common equity issuer; eligible listed equity.
+ADAMH,"ADAMAS TRUST, INC.",include,reit_common_equity,high,Trust common equity issuer; eligible listed equity.
+ADAMO,"ADAMAS TRUST, INC.",include,reit_common_equity,high,Trust common equity issuer; eligible listed equity.
+ADAMI,"ADAMAS TRUST, INC.",include,reit_common_equity,high,Trust common equity issuer; eligible listed equity.
+ADAMN,"ADAMAS TRUST, INC.",include,reit_common_equity,high,Trust common equity issuer; eligible listed equity.
+ADAMG,"ADAMAS TRUST, INC.",include,reit_common_equity,high,Trust common equity issuer; eligible listed equity.
+ADAML,"ADAMAS TRUST, INC.",include,reit_common_equity,high,Trust common equity issuer; eligible listed equity.
+ADAMZ,"ADAMAS TRUST, INC.",include,reit_common_equity,high,Trust common equity issuer; eligible listed equity.
+NTRSO,NORTHERN TRUST CORP,include,operating_company_common_equity,high,"Northern Trust common equity issuer, eligible operating company."
+ABAKF,"ABRDN ASIA-PACIFIC INCOME FUND, INC.",exclude,closed_end_fund,high,"Asia-Pacific income fund; packaged investment vehicle, not operating equity."
+VECA.RI,VERNAL CAPITAL ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+SOUL.RI,SOULPOWER ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+WPAC.RI,WHITE PEARL ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+QRED.RI,QUASAREDGE ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+TRAD.RI,APEX TECH ACQUISITION INC.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+AIIA.RI,AI INFRASTRUCTURE ACQUISITION CORP.,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+JACS.RI,JACKSON ACQUISITION CO II,exclude,spac_shell,high,"Acquisition company blank-check SPAC, not operating equity."
+ZKPU,LAFAYETTE DIGITAL ACQUISITION CORP. I,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+ZKPW,LAFAYETTE DIGITAL ACQUISITION CORP. I,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+JENA.RI,JENA ACQUISITION CORP II,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."
+GLED.RI,GALAXYEDGE ACQUISITION CORP,exclude,spac_shell,high,"Acquisition corporation blank-check SPAC, not operating equity."

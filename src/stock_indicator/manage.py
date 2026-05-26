@@ -22,6 +22,7 @@ import yfinance  # TODO: review
 from pandas import DataFrame
 
 from . import data_loader, symbols, strategy, daily_job, multi_bucket_today
+from . import universe_pipeline
 from .simulator import calc_commission
 from .strategy_sets import load_strategy_set_mapping, load_strategy_entry_filters
 from .daily_job import determine_start_date
@@ -44,17 +45,17 @@ STOCK_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
 DATA_SOURCE_PATHS: dict[str, Path] = {
     "daily": DATA_DIRECTORY / "stock_data",
     "2010": DATA_DIRECTORY / "stock_data_2010_yf_clean",
+    "2010_yf_clean": DATA_DIRECTORY / "stock_data_2010_yf_clean",
     "2014": DATA_DIRECTORY / "stock_data_2014",
     "1994": DATA_DIRECTORY / "stock_data_1994",
     "1994_clean": DATA_DIRECTORY / "stock_data_1994_clean",
 }
 
 SYMBOL_LIST_PATHS: dict[str, Path] = {
-    "2010_safe": (
-        DATA_DIRECTORY
-        / "backtest_universe_alpha_vantage"
-        / "backtest_yf_safe_symbols_2010_2026.txt"
-    ),
+    "current_stock_universe": DATA_DIRECTORY / "symbols.txt",
+    "production_old": DATA_DIRECTORY / "production_old_symbols.txt",
+    "research_new": DATA_DIRECTORY / "research_new_symbols.txt",
+    "2010_safe": DATA_DIRECTORY / "production_old_symbols.txt",
 }
 
 
@@ -90,6 +91,20 @@ def load_symbol_list(symbol_list_name: str | None) -> set[str] | None:
         if symbol_name:
             symbols_to_keep.add(symbol_name)
     return symbols_to_keep
+
+
+def resolve_ff12_data_path(ff12_data_path_text: object | None) -> Path | None:
+    """Return the configured FF12 override path, if one was supplied."""
+
+    if not ff12_data_path_text:
+        return None
+    ff12_data_path = Path(str(ff12_data_path_text)).expanduser()
+    if not ff12_data_path.is_absolute():
+        repository_root = Path(__file__).resolve().parent.parent.parent
+        ff12_data_path = repository_root / ff12_data_path
+    if not ff12_data_path.exists():
+        raise ValueError(f"ff12_data_path not found: {ff12_data_path}")
+    return ff12_data_path
 
 
 def _resolve_strategy_choice(raw_name: str, allowed: dict) -> str:
@@ -433,16 +448,16 @@ class StockShell(cmd.Cmd):
 
     def do_update_symbols(self, argument_line: str) -> None:  # noqa: D401
         """update_symbols
-        Download the latest list of ticker symbols."""
+        Build the latest common-stock symbol cache from SEC tickers."""
         symbols.update_symbol_cache()
-        self.stdout.write("Symbol cache updated\n")
+        self.stdout.write("Common-stock symbol cache updated\n")
 
     # TODO: review
     def help_update_symbols(self) -> None:
         """Display help for the update_symbols command."""
         self.stdout.write(
             "update_symbols\n"
-            "Download the latest list of ticker symbols.\n"
+            "Download SEC company tickers and cache common-stock candidates.\n"
             "This command has no parameters.\n"
         )
 
@@ -536,6 +551,73 @@ class StockShell(cmd.Cmd):
             "  END: End date in YYYY-MM-DD format (inclusive).\n"
         )
 
+    def do_update_universe_pipeline(self, argument_line: str) -> None:  # noqa: D401
+        """update_universe_pipeline [--dry-run] [--maximum-drop-ratio RATIO]
+        Rebuild research-new symbol and FF12 sector data from the SEC pipeline."""
+
+        try:
+            argument_parts = shlex.split(argument_line)
+        except ValueError as error:
+            self.stdout.write(f"invalid arguments: {error}\n")
+            return
+        dry_run = False
+        maximum_symbol_drop_ratio: float | None = None
+        argument_position = 0
+        while argument_position < len(argument_parts):
+            argument_text = argument_parts[argument_position]
+            if argument_text == "--dry-run":
+                dry_run = True
+                argument_position += 1
+                continue
+            if argument_text == "--maximum-drop-ratio":
+                next_argument_position = argument_position + 1
+                if next_argument_position >= len(argument_parts):
+                    self.stdout.write(
+                        "usage: update_universe_pipeline [--dry-run] "
+                        "[--maximum-drop-ratio RATIO]\n"
+                    )
+                    return
+                maximum_drop_ratio_text = argument_parts[next_argument_position]
+                argument_position += 2
+            elif argument_text.startswith("--maximum-drop-ratio="):
+                maximum_drop_ratio_text = argument_text.split("=", maxsplit=1)[1]
+                argument_position += 1
+            else:
+                self.stdout.write(
+                    "usage: update_universe_pipeline [--dry-run] "
+                    "[--maximum-drop-ratio RATIO]\n"
+                )
+                return
+            try:
+                maximum_symbol_drop_ratio = float(maximum_drop_ratio_text)
+            except ValueError:
+                self.stdout.write("--maximum-drop-ratio must be a number\n")
+                return
+        try:
+            pipeline_options: dict[str, Any] = {"publish_outputs": not dry_run}
+            if maximum_symbol_drop_ratio is not None:
+                pipeline_options["maximum_symbol_drop_ratio"] = (
+                    maximum_symbol_drop_ratio
+                )
+            report = universe_pipeline.run_universe_pipeline(**pipeline_options)
+        except Exception as error:  # noqa: BLE001
+            self.stdout.write(f"Universe pipeline failed: {error}\n")
+            raise
+        self.stdout.write("\n".join(report.to_lines()) + "\n")
+
+    def help_update_universe_pipeline(self) -> None:
+        """Display help for the update_universe_pipeline command."""
+
+        self.stdout.write(
+            "update_universe_pipeline [--dry-run] [--maximum-drop-ratio RATIO]\n"
+            "Refresh the SEC-derived tradable universe, apply LLM/policy/quarantine layers, "
+            "and atomically rebuild research_new_symbols plus research_new_symbols_with_sector.\n"
+            "Parameters:\n"
+            "  --dry-run: validate and print symbol diff without publishing outputs.\n"
+            "  --maximum-drop-ratio RATIO: one-run safety threshold for controlled "
+            "large universe migrations.\n"
+        )
+
     def do_update_sector_data(self, argument_line: str) -> None:  # noqa: D401
         """update_sector_data [--ff-map-url=URL OUTPUT_PATH]
         Refresh the local sector classification data set."""
@@ -584,7 +666,7 @@ class StockShell(cmd.Cmd):
         self.stdout.write(
             "update_sector_data --ff-map-url=URL OUTPUT_PATH\n"
             "Refresh sector classification data from SEC and Fama-French sources.\n"
-            "The ticker universe is sourced from the SEC company tickers dataset.\n"
+            "The ticker universe is sourced from the curated symbols.txt cache.\n"
             "Without parameters, rebuilds data using the last saved configuration.\n"
             "Parameters:\n"
             "  --ff-map-url: URL or file path to SIC to Fama-French mapping.\n"
@@ -1419,6 +1501,14 @@ class StockShell(cmd.Cmd):
                         f"bucket {label}: max_positions must be positive\n"
                     )
                     return
+            try:
+                skipped_fama_french_groups = multi_bucket_today.parse_skip_ff12_groups(
+                    raw_bucket.get("skip_ff12_groups"),
+                    bucket_label=label,
+                )
+            except ValueError as error:
+                self.stdout.write(f"{error}\n")
+                return
 
             d_sma_range = None
             ema_range = None
@@ -1548,6 +1638,7 @@ class StockShell(cmd.Cmd):
                 entry_priority=entry_priority,
                 maximum_positions=bucket_maximum_positions,
                 fill_remaining=bool(raw_bucket.get("fill_remaining", False)),
+                skipped_fama_french_groups=skipped_fama_french_groups,
                 additional_above_ranges=(
                     [
                         (float(low), float(high))
@@ -1681,6 +1772,13 @@ class StockShell(cmd.Cmd):
             start_date_string = determine_start_date(DATA_DIRECTORY)
         start_timestamp = pandas.Timestamp(start_date_string)
         data_source_name = config_document.get("data_source")
+        if data_source_name == "daily":
+            self.stdout.write(
+                "multi_bucket_simulation rejects data_source='daily'; "
+                "use a non-daily backtest source such as '2010' so simulation "
+                "cannot read or mutate the production daily cache.\n"
+            )
+            return
         try:
             data_directory = resolve_data_source(data_source_name)
         except ValueError as source_error:
@@ -1699,6 +1797,18 @@ class StockShell(cmd.Cmd):
             return
         if allowed_symbols is not None:
             self.stdout.write(f"Symbol list: {len(allowed_symbols)} symbols\n")
+
+        ff12_data_path_text = (
+            config_document.get("ff12_data_path")
+            or config_document.get("sector_data_path")
+        )
+        try:
+            ff12_data_path = resolve_ff12_data_path(ff12_data_path_text)
+        except ValueError as ff12_path_error:
+            self.stdout.write(f"{ff12_path_error}\n")
+            return
+        if ff12_data_path is not None:
+            self.stdout.write(f"FF12 data: {ff12_data_path}\n")
 
         # Parse adaptive TP/SL configuration.
         adaptive_tp_sl_config: strategy.AdaptiveTPSLConfig | None = None
@@ -1847,28 +1957,29 @@ class StockShell(cmd.Cmd):
             )
 
         try:
-            simulation_metrics = strategy.run_complex_simulation(
-                data_directory,
-                bucket_definitions,
-                maximum_position_count=maximum_position_count,
-                starting_cash=starting_cash_value,
-                withdraw_amount=withdraw_amount,
-                start_date=start_timestamp,
-                margin_multiplier=margin_multiplier,
-                margin_interest_annual_rate=0.048,
-                use_confirmation_angle=use_confirmation_angle,
-                confirmation_entry_mode=confirmation_entry_mode,
-                minimum_holding_bars=minimum_holding_bars,
-                multi_bucket_mode=True,
-                confirmation_sma_angle_range=confirmation_sma_angle_range,
-                adaptive_tp_sl=adaptive_tp_sl_config,
-                max_same_symbol=int(config_document.get("max_same_symbol", 1)),
-                allowed_symbols=allowed_symbols,
-                export_state_at_date=export_state_at_date_ts,
-                exported_state=exported_state_holder,
-                risk_score_stop_months=risk_score_stop_months,
-                margin_overrides=margin_overrides,
-            )
+            with strategy.override_ff12_group_source_path(ff12_data_path):
+                simulation_metrics = strategy.run_complex_simulation(
+                    data_directory,
+                    bucket_definitions,
+                    maximum_position_count=maximum_position_count,
+                    starting_cash=starting_cash_value,
+                    withdraw_amount=withdraw_amount,
+                    start_date=start_timestamp,
+                    margin_multiplier=margin_multiplier,
+                    margin_interest_annual_rate=0.048,
+                    use_confirmation_angle=use_confirmation_angle,
+                    confirmation_entry_mode=confirmation_entry_mode,
+                    minimum_holding_bars=minimum_holding_bars,
+                    multi_bucket_mode=True,
+                    confirmation_sma_angle_range=confirmation_sma_angle_range,
+                    adaptive_tp_sl=adaptive_tp_sl_config,
+                    max_same_symbol=int(config_document.get("max_same_symbol", 1)),
+                    allowed_symbols=allowed_symbols,
+                    export_state_at_date=export_state_at_date_ts,
+                    exported_state=exported_state_holder,
+                    risk_score_stop_months=risk_score_stop_months,
+                    margin_overrides=margin_overrides,
+                )
         except ValueError as error:
             self.stdout.write(f"{error}\n")
             return
@@ -1896,6 +2007,15 @@ class StockShell(cmd.Cmd):
             f"Simulation start date: {start_date_string}\n"
             f"Buckets: {', '.join(bucket_definitions.keys())}\n"
         )
+        skipped_group_descriptions = [
+            f"{bucket_label}={sorted(bucket_definition.skipped_fama_french_groups)}"
+            for bucket_label, bucket_definition in bucket_definitions.items()
+            if bucket_definition.skipped_fama_french_groups
+        ]
+        if skipped_group_descriptions:
+            self.stdout.write(
+                f"Skipped FF12 groups: {'; '.join(skipped_group_descriptions)}\n"
+            )
 
         def format_summary_line(
             label: str, metrics: strategy.StrategyMetrics
@@ -2110,9 +2230,13 @@ class StockShell(cmd.Cmd):
             '}\n'
             "\n"
             "Notes:\n"
+            "  - data_source='daily' is rejected; simulations must use a "
+            "non-daily backtest cache such as '2010'\n"
             "  - confirmation_mode: 'market', 'limit', or null (no confirmation)\n"
             "  - priority: lower = higher; ties broken by within-bucket quality then insertion order\n"
             "  - max_positions per bucket is optional; null means no per-bucket cap\n"
+            "  - skip_ff12_groups per bucket is optional; values are positive FF group ids removed before ranking\n"
+            "  - ff12_data_path is optional; use it for frozen old-universe sector maps\n"
             "  - strategy_id must exist in data/strategy_sets.csv\n"
             "  - output CSV: logs/multi_bucket_simulation_result/multi_bucket_simulation_*.csv\n"
         )
@@ -2190,12 +2314,8 @@ class StockShell(cmd.Cmd):
                 except ValueError:
                     self.stdout.write("invalid group list\n")
                     return
-                # Disallow 12 (Other); all identifiers must be between 1 and 11.
-                if any(identifier < 1 or identifier > 11 for identifier in parsed_integers):
-                    self.stdout.write("group identifiers must be between 1 and 11\n")
-                    return
-                if 12 in parsed_integers:
-                    self.stdout.write("group list must not include 12 (Other)\n")
+                if any(identifier < 1 for identifier in parsed_integers):
+                    self.stdout.write("group identifiers must be positive integers\n")
                     return
                 allowed_group_identifiers = parsed_integers
                 continue
@@ -2237,11 +2357,8 @@ class StockShell(cmd.Cmd):
                 except ValueError:
                     self.stdout.write("invalid group list\n")
                     return
-                if any(identifier < 1 or identifier > 11 for identifier in parsed_integers):
-                    self.stdout.write("group identifiers must be between 1 and 11\n")
-                    return
-                if 12 in parsed_integers:
-                    self.stdout.write("group list must not include 12 (Other)\n")
+                if any(identifier < 1 for identifier in parsed_integers):
+                    self.stdout.write("group identifiers must be positive integers\n")
                     return
                 allowed_group_identifiers = parsed_integers
                 argument_parts.pop(post_scan_index)
@@ -2792,7 +2909,7 @@ class StockShell(cmd.Cmd):
             "    Defaults to 0.0 (disabled).\n"
             "  SHOW_DETAILS: 'True' to print individual trades, 'False' to suppress them. Defaults to True.\n"
             "  group: Optional comma-separated FF12 group ids (1-11) to restrict\n"
-            "    tradable symbols. Group 12 (Other) is not selectable. Example:\n"
+            "    tradable symbols. Group 12 (Other) is selectable. Example:\n"
             "    group=1,2,4,6,7,8,10,11\n"
             "Strategies may be suffixed with _N to set the window size to N; the default window size is 40 when no suffix is provided.\n"
             "Slope-aware strategies follow the ema_sma_signal_with_slope_n_k pattern and accept _LOWER_UPPER bounds after the optional window size; both bounds are floating-point numbers and may be negative.\n"
@@ -3384,11 +3501,8 @@ class StockShell(cmd.Cmd):
                 except ValueError:
                     self.stdout.write("invalid group list\n")
                     return
-                if any(identifier < 1 or identifier > 11 for identifier in parsed):
-                    self.stdout.write("group identifiers must be between 1 and 11\n")
-                    return
-                if 12 in parsed:
-                    self.stdout.write("group list must not include 12 (Other)\n")
+                if any(identifier < 1 for identifier in parsed):
+                    self.stdout.write("group identifiers must be positive integers\n")
                     return
                 allowed_group_identifiers = parsed
             elif token.startswith("strategy="):
@@ -3771,6 +3885,13 @@ class StockShell(cmd.Cmd):
         except ValueError as symbol_list_error:
             self.stdout.write(f"{symbol_list_error}\n")
             return
+        try:
+            ff12_data_path = resolve_ff12_data_path(config.ff12_data_path_text)
+        except ValueError as ff12_path_error:
+            self.stdout.write(f"{ff12_path_error}\n")
+            return
+        if ff12_data_path is not None:
+            self.stdout.write(f"FF12 data: {ff12_data_path}\n")
 
         if date_string is None:
             eval_date_string = daily_job.determine_latest_trading_date().isoformat()
@@ -3812,14 +3933,15 @@ class StockShell(cmd.Cmd):
             })
 
         try:
-            result = multi_bucket_today.compute_today_signals(
-                config=config,
-                eval_date=eval_date_timestamp,
-                held_positions=held_positions,
-                state=state,
-                data_directory=data_directory,
-                allowed_symbols=allowed_symbols,
-            )
+            with strategy.override_ff12_group_source_path(ff12_data_path):
+                result = multi_bucket_today.compute_today_signals(
+                    config=config,
+                    eval_date=eval_date_timestamp,
+                    held_positions=held_positions,
+                    state=state,
+                    data_directory=data_directory,
+                    allowed_symbols=allowed_symbols,
+                )
         except ValueError as run_error:
             self.stdout.write(f"compute_today_signals failed: {run_error}\n")
             return
@@ -3849,6 +3971,8 @@ class StockShell(cmd.Cmd):
             "is suffixed _shadow so the live cron path is untouched. Emits\n"
             "[ENTRY_SIGNAL], [EXIT_SIGNAL], [FROZEN_TP_SL], and\n"
             "[ROLLING_TP_SL_STATE] log lines for the dashboard/order layer.\n"
+            "Honors optional ff12_data_path from the JSON config so live "
+            "selection uses the same sector map as the matching simulation.\n"
         )
 
     def do_compute_adaptive_tp_sl(self, argument_line: str) -> None:  # noqa: D401

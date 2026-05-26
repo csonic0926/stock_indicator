@@ -1,0 +1,621 @@
+ticker,ff12,ff_label,ff12_source,classification_confidence,classification_issue,secondary_sector,secondary_industry,secondary_source,secondary_reason
+AAMTF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Capital Markets,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+AAUC,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+AAUGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ABCFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ADYYF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Infrastructure,yfinance,Yahoo sector indicates business equipment or technology.
+AEGXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Engineering & Construction,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+AGMRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Silver,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+AGXPF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+AIBRF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+AIKCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Conglomerates,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+AIQUF,5,Chems,secondary_yfinance,high,resolved_missing_sic,Basic Materials,Specialty Chemicals,yfinance,Yahoo industry indicates chemicals.
+AIRRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+AITTF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+ALEGF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Internet Retail,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+ALPIB,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+ALTUF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+AMEGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+AMRQF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+AMVOY,2,Durbl,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Auto Parts,yfinance,Yahoo industry indicates durable consumer goods.
+ANNSF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Airports & Air Services,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ANPCF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Diagnostics & Research,yfinance,Yahoo sector indicates healthcare.
+AOTVF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+APAAF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Energy,Uranium,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+APGOF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Silver,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+APMCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Energy,Thermal Coal,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ARCC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+ARNNY,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Insurance - Diversified,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+ARSMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ARZTF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Packaged Foods,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+ASBRF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Beverages - Brewers,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+ASRRF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Insurance - Diversified,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+ATALF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ATCMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ATDRF,6,BusEq,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Internet Content & Information,yfinance,"Yahoo industry indicates software, hardware, or online services."
+AUIAF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+AUXXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+AVVOF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Aerospace & Defense,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+AVVSY,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Aerospace & Defense,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+AWLIF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+AWTRF,5,Chems,secondary_yfinance,high,resolved_missing_sic,Basic Materials,Specialty Chemicals,yfinance,Yahoo industry indicates chemicals.
+AZASF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+AZZTF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BABYF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Packaged Foods,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+BAESF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Aerospace & Defense,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+BAESY,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Aerospace & Defense,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+BAFBF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Engineering & Construction,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BANX,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+BBBMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BBBXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BCIC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+BCKIF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Engineering & Construction,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BCSF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+BCUCF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Luxury Goods,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+BCUFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Copper,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BDCTF,6,BusEq,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Internet Content & Information,yfinance,"Yahoo industry indicates software, hardware, or online services."
+BELGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BEOB,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+BEWFF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Communication Equipment,yfinance,Yahoo sector indicates business equipment or technology.
+BFGFD,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Copper,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BFGFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Copper,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BGAVF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BHSIF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BIREF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+BITTF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BJGPY,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Application,yfinance,Yahoo sector indicates business equipment or technology.
+BKLPF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Internet Retail,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+BKPKF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+BKRRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BKUCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Energy,Uranium,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BKZHF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+BLFBY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Engineering & Construction,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BLHWF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Building Products & Equipment,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+BMM,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BMRPF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Defensive,Discount Stores,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+BMRRY,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Defensive,Discount Stores,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+BONXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BOT,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+BRELY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BRKCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BRVMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BTDPF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Residential Construction,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BTDPY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Residential Construction,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+BTQ,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Infrastructure,yfinance,Yahoo sector indicates business equipment or technology.
+BUDA,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Beverages - Non-Alcoholic,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+BVAXF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Biotechnology,yfinance,Yahoo sector indicates healthcare.
+BVENY,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+BWAGF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+BYCBF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Confectioners,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+BYDDF,2,Durbl,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Auto Manufacturers,yfinance,Yahoo industry indicates durable consumer goods.
+BYDIF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Electronic Components,yfinance,Yahoo sector indicates business equipment or technology.
+BZDLF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Copper,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CAHPF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CAMVF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CAZGF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Scientific & Technical Instruments,yfinance,Yahoo sector indicates business equipment or technology.
+CCOOF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CDGLF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Railroads,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CDPMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CEHCF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas Integrated,yfinance,Yahoo sector indicates energy.
+CGBD,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+CGDXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CHLSY,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Confectioners,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+CHPGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CHWRF,7,Telcm,secondary_yfinance,high,resolved_missing_sic,Communication Services,Telecom Services,yfinance,Yahoo industry indicates telecommunications.
+CIB,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+CION,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+CITAF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Aerospace & Defense,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+CIXPF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+CKHGF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+CLCHF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Steel,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+CLDVF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+CMCLF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CMGHF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Farm Products,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+CMGMF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Aerospace & Defense,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+CMHSF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Health Information Services,yfinance,Yahoo sector indicates healthcare.
+CMXHF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Biotechnology,yfinance,Yahoo sector indicates healthcare.
+CNDHF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Insurance - Reinsurance,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+CNRCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CNTMF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Drug Manufacturers - Specialty & Generic,yfinance,Yahoo sector indicates healthcare.
+CODGF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Building Products & Equipment,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+COGDF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+COPAF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CPCPF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Copper,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CPIVF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Drug Manufacturers - Specialty & Generic,yfinance,Yahoo sector indicates healthcare.
+CPNNF,11,Money,secondary_yfinance,high,resolved_missing_sic,Real Estate,Real Estate - Diversified,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+CPPKF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Copper,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CPXWF,8,Utils,secondary_yfinance,high,resolved_missing_sic,Utilities,Utilities - Independent Power Producers,yfinance,Yahoo sector indicates utilities.
+CRARF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+CRERF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Defensive,Grocery Stores,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+CRRFY,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Defensive,Grocery Stores,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+CRUCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CSCCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Copper,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CSLLY,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Biotechnology,yfinance,Yahoo sector indicates healthcare.
+CSWC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+CUAUF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CVCCF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+CYATY,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Electrical Equipment & Parts,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+CYDVF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+CYJBF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Farm & Heavy Construction Machinery,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+DETX,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Security & Protection Services,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+DGCOF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+DGMDF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Entertainment,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+DGTEF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+DINRF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Semiconductor Equipment & Materials,yfinance,Yahoo sector indicates business equipment or technology.
+DISPF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Semiconductor Equipment & Materials,yfinance,Yahoo sector indicates business equipment or technology.
+DKILF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Building Products & Equipment,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+DLAKF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Airlines,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+DLAKY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Airlines,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+DLMAF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Defensive,Discount Stores,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+DLMAY,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Defensive,Discount Stores,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+DNACF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Conglomerates,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+DNOPF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Defensive,Grocery Stores,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+DPCDF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Restaurants,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+DRRKF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Building Products & Equipment,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+DRSHF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Aerospace & Defense,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+DRYGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+DTREF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+DXR,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Medical Instruments & Supplies,yfinance,Yahoo sector indicates healthcare.
+DXYZ,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+EBOSF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Medical Distribution,yfinance,Yahoo sector indicates healthcare.
+EBOSY,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Medical Distribution,yfinance,Yahoo sector indicates healthcare.
+ECCC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+EDVR,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+EGTYF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Electrical Equipment & Parts,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+EIC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+EICA,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+EJTTF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Airlines,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ELECF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ELEEF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Rental & Leasing Services,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ELSSF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Specialty Business Services,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+EMBYF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+EMGDF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+EMRH,5,Chems,secondary_yfinance,high,resolved_missing_sic,Basic Materials,Agricultural Inputs,yfinance,Yahoo industry indicates chemicals.
+ENDMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+EQS,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+EQTRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ERELY,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Steel,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+ESAUF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ESHSF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Scientific & Technical Instruments,yfinance,Yahoo sector indicates business equipment or technology.
+ESYJY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Airlines,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ETUGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+EUEMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+EULIF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+EURBF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+EXOSF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Electrical Equipment & Parts,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+FASLF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+FCHDF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+FDUS,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+FDXTF,5,Chems,secondary_yfinance,high,resolved_missing_sic,Basic Materials,Specialty Chemicals,yfinance,Yahoo industry indicates chemicals.
+FINGF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Industrial Distribution,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+FKURF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Conglomerates,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+FLNCF,6,BusEq,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Internet Content & Information,yfinance,"Yahoo industry indicates software, hardware, or online services."
+FPRGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+FRBP,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+FRFAF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Packaged Foods,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+FSCO,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+FSK,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+FTZFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+FUEMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+FUUFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Energy,Uranium,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+FXBY,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+FXCNF,2,Durbl,secondary_yfinance,high,resolved_missing_sic,Technology,Consumer Electronics,yfinance,Yahoo industry indicates durable consumer goods.
+FXCNY,2,Durbl,secondary_yfinance,high,resolved_missing_sic,Technology,Consumer Electronics,yfinance,Yahoo industry indicates durable consumer goods.
+GAIN,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+GALDY,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Drug Manufacturers - Specialty & Generic,yfinance,Yahoo sector indicates healthcare.
+GARWF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GBNXF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas Midstream,yfinance,Yahoo sector indicates energy.
+GCUMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Copper,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GDERF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Drug Manufacturers - Specialty & Generic,yfinance,Yahoo sector indicates healthcare.
+GDSRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GECC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+GELHY,2,Durbl,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Auto Manufacturers,yfinance,Yahoo industry indicates durable consumer goods.
+GELYF,2,Durbl,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Auto Manufacturers,yfinance,Yahoo industry indicates durable consumer goods.
+GGAZF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GGLXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GGPSF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GLAD,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+GLATF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GLVHF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Residential Construction,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GMVMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GMWKF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Leisure,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GPGCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GPMTF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GPTGF,11,Money,secondary_yfinance,high,resolved_missing_sic,Real Estate,REIT - Diversified,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+GPUSD,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Application,yfinance,Yahoo sector indicates business equipment or technology.
+GPUSF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Application,yfinance,Yahoo sector indicates business equipment or technology.
+GRAPF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GRKZF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Gambling,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GRLMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GRXXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GSKRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GSVRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Silver,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GUYGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+GWKSY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Leisure,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+HACBF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+HACBY,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+HAMRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Silver,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+HAPVY,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Insurance - Life,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+HEXEY,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Financial Data & Stock Exchanges,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+HHLKF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Copper,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+HKHHF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Beverages - Brewers,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+HKHHY,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Beverages - Brewers,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+HLRTF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Electronic Components,yfinance,Yahoo sector indicates business equipment or technology.
+HMRZF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Apparel Manufacturing,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+HNSDF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Aerospace & Defense,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+HNSPF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Drug Manufacturers - Specialty & Generic,yfinance,Yahoo sector indicates healthcare.
+HPHTF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Electronic Components,yfinance,Yahoo sector indicates business equipment or technology.
+HPHTY,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Electronic Components,yfinance,Yahoo sector indicates business equipment or technology.
+HRIBF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Scientific & Technical Instruments,yfinance,Yahoo sector indicates business equipment or technology.
+HRZN,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+HSLV,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Silver,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+HTGC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+HVGDF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+HWAIF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Medical Care Facilities,yfinance,Yahoo sector indicates healthcare.
+HWAUF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+HYDTF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Health Information Services,yfinance,Yahoo sector indicates healthcare.
+HYPMY,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Drug Manufacturers - Specialty & Generic,yfinance,Yahoo sector indicates healthcare.
+IAALF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Metal Fabrication,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+IBIDF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Electronic Components,yfinance,Yahoo sector indicates business equipment or technology.
+IDEXF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Apparel Retail,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+IDPUF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Education & Training Services,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+IEGCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+IFCNF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Scientific & Technical Instruments,yfinance,Yahoo sector indicates business equipment or technology.
+IHICF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Specialty Industrial Machinery,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+IMIMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+INIKF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Advertising Agencies,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+INPOF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Integrated Freight & Logistics,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+IPSOF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Consulting Services,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+IPTND,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Application,yfinance,Yahoo sector indicates business equipment or technology.
+IPTNF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Application,yfinance,Yahoo sector indicates business equipment or technology.
+IQEPF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Semiconductor Equipment & Materials,yfinance,Yahoo sector indicates business equipment or technology.
+IRVRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ISFFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Specialty Business Services,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ISTKF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Infrastructure,yfinance,Yahoo sector indicates business equipment or technology.
+ITOCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Conglomerates,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ITRE,8,Utils,secondary_yfinance,high,resolved_missing_sic,Utilities,Utilities - Renewable,yfinance,Yahoo sector indicates utilities.
+IVBXF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Biotechnology,yfinance,Yahoo sector indicates healthcare.
+JBHIF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Specialty Retail,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+JELLF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Scientific & Technical Instruments,yfinance,Yahoo sector indicates business equipment or technology.
+JGLDF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+JHPCY,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Drug Manufacturers - Specialty & Generic,yfinance,Yahoo sector indicates healthcare.
+JPSTF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+KCCFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+KDDIF,7,Telcm,secondary_yfinance,high,resolved_missing_sic,Communication Services,Telecom Services,yfinance,Yahoo industry indicates telecommunications.
+KELRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Railroads,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+KGFMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+KLGDF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+KLSVF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Silver,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+KOKSF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Semiconductor Equipment & Materials,yfinance,Yahoo sector indicates business equipment or technology.
+KOSCF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Household & Personal Products,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+KRNGF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+KRNGY,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+KRTL,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Conglomerates,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+KTGDF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+KXIAY,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Semiconductors,yfinance,Yahoo sector indicates business equipment or technology.
+LABFF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Drug Manufacturers - Specialty & Generic,yfinance,Yahoo sector indicates healthcare.
+LBCMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LEEEF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Drug Manufacturers - Specialty & Generic,yfinance,Yahoo sector indicates healthcare.
+LFLRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LGCXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LGDTF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LILIF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LISMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LITSF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LKYRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LLYVA,12,Other,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Entertainment,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LLYVB,12,Other,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Entertainment,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LLYVK,12,Other,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Entertainment,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LMRMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LMRXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Energy,Uranium,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LNXSF,5,Chems,secondary_yfinance,high,resolved_missing_sic,Basic Materials,Specialty Chemicals,yfinance,Yahoo industry indicates chemicals.
+LNXSY,5,Chems,secondary_yfinance,high,resolved_missing_sic,Basic Materials,Specialty Chemicals,yfinance,Yahoo industry indicates chemicals.
+LOIMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Security & Protection Services,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LOMLF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LOTMY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Gambling,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LPGCY,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Luxury Goods,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+LPSIF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Electrical Equipment & Parts,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+LRRIF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LSEGY,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Financial Data & Stock Exchanges,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+LSRCF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Semiconductor Equipment & Materials,yfinance,Yahoo sector indicates business equipment or technology.
+LTGHF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Medical Care Facilities,yfinance,Yahoo sector indicates healthcare.
+LTGHY,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Medical Care Facilities,yfinance,Yahoo sector indicates healthcare.
+LTMGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Gambling,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+LWSCF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Medical Care Facilities,yfinance,Yahoo sector indicates healthcare.
+MAIN,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+MANDF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Financial Services,Financial Conglomerates,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+MAPPF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Application,yfinance,Yahoo sector indicates business equipment or technology.
+MAUTF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+MAUUF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+MAWAF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Electronic Components,yfinance,Yahoo sector indicates business equipment or technology.
+MBGCF,5,Chems,secondary_yfinance,high,resolved_missing_sic,Basic Materials,Specialty Chemicals,yfinance,Yahoo industry indicates chemicals.
+MBRFY,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Packaged Foods,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+MDCOY,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+MDDNF,8,Utils,secondary_yfinance,high,resolved_missing_sic,Utilities,Utilities - Renewable,yfinance,Yahoo sector indicates utilities.
+MECPF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Energy,Uranium,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+MEIUF,6,BusEq,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Internet Content & Information,yfinance,"Yahoo industry indicates software, hardware, or online services."
+MFIC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+MGCLY,2,Durbl,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,"Furnishings, Fixtures & Appliances",yfinance,Yahoo industry indicates durable consumer goods.
+MGHTF,8,Utils,secondary_yfinance,high,resolved_missing_sic,Utilities,Utilities - Renewable,yfinance,Yahoo sector indicates utilities.
+MGMNF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+MHUBF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Application,yfinance,Yahoo sector indicates business equipment or technology.
+MICLF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Specialty Industrial Machinery,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+MILIF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+MIMTF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+MINE,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+MITUF,5,Chems,secondary_yfinance,high,resolved_missing_sic,Basic Materials,Specialty Chemicals,yfinance,Yahoo industry indicates chemicals.
+MNSKY,6,BusEq,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Internet Content & Information,yfinance,"Yahoo industry indicates software, hardware, or online services."
+MONRF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Apparel Manufacturing,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+MPNGF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Internet Retail,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+MRCIF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Internet Retail,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+MRRDF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+MRZLF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+MSLE,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Biotechnology,yfinance,Yahoo sector indicates healthcare.
+MSUXF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Tools & Accessories,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+MTGRF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Steel,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+MTMCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+MTPLF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Restaurants,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+MTTAF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NBLXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Energy,Uranium,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NCAUF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NCDL,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+NCHEF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Packaged Foods,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+NCLTF,2,Durbl,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,"Furnishings, Fixtures & Appliances",yfinance,Yahoo industry indicates durable consumer goods.
+NCLTY,2,Durbl,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,"Furnishings, Fixtures & Appliances",yfinance,Yahoo industry indicates durable consumer goods.
+NGHLF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Health Information Services,yfinance,Yahoo sector indicates healthcare.
+NGSCF,5,Chems,secondary_yfinance,high,resolved_missing_sic,Basic Materials,Specialty Chemicals,yfinance,Yahoo industry indicates chemicals.
+NGXXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NHKGF,2,Durbl,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Auto Parts,yfinance,Yahoo industry indicates durable consumer goods.
+NIOMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NKGFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NMFC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+NNFSF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Beverages - Non-Alcoholic,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+NNWWF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Defensive,Grocery Stores,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+NOFCF,5,Chems,secondary_yfinance,high,resolved_missing_sic,Basic Materials,Specialty Chemicals,yfinance,Yahoo industry indicates chemicals.
+NPEHF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Integrated Freight & Logistics,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NPIFF,8,Utils,secondary_yfinance,high,resolved_missing_sic,Utilities,Utilities - Renewable,yfinance,Yahoo sector indicates utilities.
+NPRFF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Packaged Foods,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+NRRSF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NRRWF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Communication Equipment,yfinance,Yahoo sector indicates business equipment or technology.
+NULGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NVGLF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NVSGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NWSGY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Engineering & Construction,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NWSZF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Engineering & Construction,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NXPGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Railroads,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NXPGY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Railroads,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NZAUF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+NZEOF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+NZERF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+OBDC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+OBIBF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Information Technology Services,yfinance,Yahoo sector indicates business equipment or technology.
+OBICY,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Application,yfinance,Yahoo sector indicates business equipment or technology.
+OBIIF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Application,yfinance,Yahoo sector indicates business equipment or technology.
+OCCI,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+OCCIM,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+OCCIN,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+OCSL,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+ODERF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Railroads,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+OFS,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+OHCFF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Health Information Services,yfinance,Yahoo sector indicates healthcare.
+OILSF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+ONWRF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Biotechnology,yfinance,Yahoo sector indicates healthcare.
+OPPPF,11,Money,secondary_yfinance,high,resolved_missing_sic,Real Estate,Real Estate - Diversified,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+ORESF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ORRCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+OSCUF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Financial Data & Stock Exchanges,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+OTF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+OXLCN,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+OXLCO,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+OXSQ,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+OZK,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+PAEXY,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+PARXF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+PASTF,2,Durbl,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Auto Parts,yfinance,Yahoo industry indicates durable consumer goods.
+PBATF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Energy,Thermal Coal,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+PBNNF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+PCCOF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Household & Personal Products,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+PDCC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+PDPA,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+PFLT,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+PGZFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+PHNMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+PIAC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+PIFMF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Packaged Foods,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+PINWF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Application,yfinance,Yahoo sector indicates business equipment or technology.
+PIRBF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+PLCKF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Infrastructure,yfinance,Yahoo sector indicates business equipment or technology.
+PMCUF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Health Information Services,yfinance,Yahoo sector indicates healthcare.
+PMDIY,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Health Information Services,yfinance,Yahoo sector indicates healthcare.
+PMMCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+PNNT,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+POAHF,2,Durbl,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Auto Manufacturers,yfinance,Yahoo industry indicates durable consumer goods.
+PPRUF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Luxury Goods,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+PRBZF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Packaged Foods,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+PREKF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+PRYMF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Electrical Equipment & Parts,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+PSBAF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Defensive,Grocery Stores,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+PSEC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+PSKRF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Insurance - Specialty,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+PSRHF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+PSYCF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Packaged Foods,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+PTHRF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+PUIGF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Household & Personal Products,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+RAND,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+RDEXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+RDGMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+REDRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+REECF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Industrial Distribution,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+REVFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+RGCCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+RIOFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+RKGRY,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Aerospace & Defense,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+RKHNF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+RKWBF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Building Products & Equipment,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+RLMLF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+RMVEY,6,BusEq,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Internet Content & Information,yfinance,"Yahoo industry indicates software, hardware, or online services."
+RNKGF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Aerospace & Defense,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+ROIUF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Application,yfinance,Yahoo sector indicates business equipment or technology.
+ROMJF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Drug Manufacturers - Specialty & Generic,yfinance,Yahoo sector indicates healthcare.
+RSGLF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+RSHGY,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+RSMXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Silver,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+RSNHF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+RTMVF,6,BusEq,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Internet Content & Information,yfinance,"Yahoo industry indicates software, hardware, or online services."
+RVLGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+RWAY,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+RYKKF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Department Stores,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+RYOOF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SAABF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Aerospace & Defense,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+SABOF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Advertising Agencies,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SAGGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SAPIF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Packaged Foods,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+SAR,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SATLF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Internet Retail,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+SAXPF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Insurance - Diversified,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SBMFF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Biotechnology,yfinance,Yahoo sector indicates healthcare.
+SBOEF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas Equipment & Services,yfinance,Yahoo sector indicates energy.
+SCM,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SCTSF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SDMHF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Medical Instruments & Supplies,yfinance,Yahoo sector indicates healthcare.
+SEOVF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Biotechnology,yfinance,Yahoo sector indicates healthcare.
+SERPY,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+SFCO,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SFGYY,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Insurance - Life,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SHECF,5,Chems,secondary_yfinance,high,resolved_missing_sic,Basic Materials,Chemicals,yfinance,Yahoo industry indicates chemicals.
+SHLAF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Specialty Industrial Machinery,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+SHLRF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Specialty Industrial Machinery,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+SHMXY,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Scientific & Technical Instruments,yfinance,Yahoo sector indicates business equipment or technology.
+SHMZF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Scientific & Technical Instruments,yfinance,Yahoo sector indicates business equipment or technology.
+SIREF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SITKF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SLFPF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SLFPY,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SLRC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SMDRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SMEGF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Specialty Industrial Machinery,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+SMERY,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Specialty Industrial Machinery,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+SMFRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Residential Construction,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SMOFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SNIRF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Aerospace & Defense,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+SNNGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SNROF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Specialty Retail,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+SNROY,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Specialty Retail,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+SOAGY,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Medical Instruments & Supplies,yfinance,Yahoo sector indicates healthcare.
+SOHGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Security & Protection Services,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SOHGY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Security & Protection Services,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SPAUF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SPHXF,11,Money,secondary_yfinance,high,resolved_missing_sic,Real Estate,Real Estate - Diversified,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SPIIY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Engineering & Construction,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SPIWF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Engineering & Construction,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SPMA,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SPMC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SPME,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SPMEF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SRBEF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Application,yfinance,Yahoo sector indicates business equipment or technology.
+SRCRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SRGXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SRKZF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SRLZF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SSEBF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SSSS,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SSVFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+STKE,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Capital Markets,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+STLJF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Lumber & Wood Production,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+STLNF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+STLRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+STSBF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SUGRF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Confectioners,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+SURDF,11,Money,secondary_yfinance,high,resolved_missing_sic,Real Estate,Real Estate Services,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SVAUF,11,Money,secondary_yfinance,high,resolved_missing_sic,Real Estate,Real Estate Services,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+SVRSF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Silver,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SVYSF,5,Chems,secondary_yfinance,high,resolved_missing_sic,Basic Materials,Chemicals,yfinance,Yahoo industry indicates chemicals.
+SXGCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SYGCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SYHBF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+SYIN,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Health Information Services,yfinance,Yahoo sector indicates healthcare.
+TAKOF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Aerospace & Defense,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+TBLLF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TBNGY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Energy,Thermal Coal,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TBXXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TCLHF,2,Durbl,secondary_yfinance,high,resolved_missing_sic,Technology,Consumer Electronics,yfinance,Yahoo industry indicates durable consumer goods.
+TCPC,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+TDRRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TETOF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TGMPF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Electrical Equipment & Parts,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+TGOPF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+THQQF,6,BusEq,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Electronic Gaming & Multimedia,yfinance,"Yahoo industry indicates software, hardware, or online services."
+THSGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+THURF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TIGCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TINFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TKMTY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Railroads,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TKRFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TMTNF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Industrial Distribution,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+TMTNY,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Industrial Distribution,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+TNEYF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+TNYZF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+TOETF,11,Money,secondary_yfinance,high,resolved_missing_sic,Real Estate,Real Estate - Diversified,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+TOKCF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Electronic Components,yfinance,Yahoo sector indicates business equipment or technology.
+TOMYF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Leisure,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TPZEF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas Midstream,yfinance,Yahoo sector indicates energy.
+TRBMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TRGEF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TRGXF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TRIN,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+TRMLF,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+TRRFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TRUFF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Drug Manufacturers - Specialty & Generic,yfinance,Yahoo sector indicates healthcare.
+TSCFY,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+TSKFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TSLX,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+TTIPF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Biotechnology,yfinance,Yahoo sector indicates healthcare.
+TUNGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TWOSF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Copper,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TYHOF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Conglomerates,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+TYHOY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Conglomerates,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ULTHF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+UNBLF,11,Money,secondary_yfinance,high,resolved_missing_sic,Real Estate,REIT - Retail,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+URZEF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Energy,Uranium,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+USGDF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+UURAF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+UUUFD,12,Other,secondary_yfinance,medium,resolved_missing_sic,Energy,Uranium,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+UUUFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Energy,Uranium,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+VARRY,4,Enrgy,secondary_yfinance,high,resolved_missing_sic,Energy,Oil & Gas E&P,yfinance,Yahoo sector indicates energy.
+VAUCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+VCGMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+VCUFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Copper,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+VERTF,6,BusEq,secondary_yfinance,medium,resolved_missing_sic,Communication Services,Electronic Gaming & Multimedia,yfinance,"Yahoo industry indicates software, hardware, or online services."
+VIPRF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+VIZNF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+VLTLF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+VNTXF,1,NoDur,secondary_yfinance,medium,resolved_missing_sic,Consumer Defensive,Beverages - Non-Alcoholic,yfinance,Yahoo sector/industry indicates non-durable consumer goods.
+VRBCF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Drug Manufacturers - General,yfinance,Yahoo sector indicates healthcare.
+VROYF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+VRRCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+VSBGF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Application,yfinance,Yahoo sector indicates business equipment or technology.
+VTTGF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Specialty Industrial Machinery,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+WAMFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+WCUFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Copper,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+WEBJF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Travel Services,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+WHF,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Asset Management,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+WHGOF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+WIPKF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Consumer Cyclical,Packaging & Containers,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+WLFFF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Industrial Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+WOLTF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Specialty Business Services,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+WPGCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Other Precious Metals & Mining,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+WRIV,11,Money,secondary_yfinance,high,resolved_missing_sic,Financial Services,Banks - Regional,yfinance,Yahoo sector/industry indicates finance or real-estate equity.
+WRLGF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+WTHVF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+WTKWY,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Specialty Business Services,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+XTRAF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Software - Application,yfinance,Yahoo sector indicates business equipment or technology.
+XZJCF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Conglomerates,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+YMATF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Specialty Industrial Machinery,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+YMTKF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Steel,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+YSHLF,3,Manuf,secondary_yfinance,medium,resolved_missing_sic,Industrials,Aerospace & Defense,yfinance,Yahoo industry indicates manufacturing or industrial materials.
+ZCRMF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ZDCAF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Industrials,Security & Protection Services,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ZLDPF,10,Hlth,secondary_yfinance,high,resolved_missing_sic,Healthcare,Biotechnology,yfinance,Yahoo sector indicates healthcare.
+ZPHYF,12,Other,secondary_yfinance,medium,resolved_missing_sic,Basic Materials,Gold,yfinance,Yahoo industry maps to FF12 Other rather than a missing-SIC fallback.
+ZSHOF,9,Shops,secondary_yfinance,high,resolved_missing_sic,Consumer Cyclical,Restaurants,yfinance,"Yahoo industry indicates retail, restaurants, or wholesale shops."
+ZTSTF,6,BusEq,secondary_yfinance,high,resolved_missing_sic,Technology,Electronic Components,yfinance,Yahoo sector indicates business equipment or technology.

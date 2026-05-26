@@ -1,0 +1,50 @@
+match_field,match_value,override_decision,override_semantic_type,override_reason
+semantic_type,royalty_trust,exclude,commodity_pass_through_royalty_trust,Royalty trusts are mechanical royalty-income pass-through vehicles rather than operating-company equity.
+semantic_type,bdc_common_equity,exclude,private_credit_or_bdc_vehicle,BDC and private-credit style vehicles are NAV/yield/credit-portfolio driven until strategy evidence promotes them.
+symbol,BXDC,exclude,private_credit_or_bdc_vehicle,Blackstone Digital Infrastructure Trust is treated as a private-credit/infrastructure fund vehicle.
+symbol,BEBE,exclude,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+symbol,CEPV,exclude,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+symbol,CFSU,exclude,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+symbol,CICB,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,CICC,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,DNMX,exclude,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+symbol,ECCU,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,ECCV,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,GAING,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,GAINI,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,GAINZ,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,GARLF,exclude,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+symbol,GECCG,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,GECCH,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,GECCI,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,GECCO,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,GIW,exclude,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+symbol,HCXY,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,HTFC,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,MFICL,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,NMFCZ,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,OFSSH,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,OFSSO,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,OXLCG,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,OXLCI,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,OXLCL,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,OXLCM,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,OXLCZ,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,OXSQG,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,OXSQH,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,PFXNZ,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,RACC,exclude,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+symbol,RWAYI,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,RWAYL,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,SAJ,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,SAT,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,SAV,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,SAY,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,SAZ,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,SBXE,exclude,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.
+symbol,SSSSL,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,TRINI,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,TRINZ,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,TY.P,exclude,fund_or_preferred_security,"Ticker is a fund/preferred-style security rather than operating-company common equity, so no trusted FF12 is assigned."
+symbol,WHFCL,exclude,baby_bond_or_note,"Ticker appears to be an exchange-traded note, baby bond, or preferred series rather than operating-company common equity."
+symbol,ZHDM,exclude,shell_company,Yahoo industry or issuer name indicates a shell/SPAC-style issuer with no operating industry to map.

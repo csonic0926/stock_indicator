@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 import heapq
+import inspect
 import logging
 import math
 from math import ceil
@@ -17,7 +19,7 @@ import re
 import numpy
 import pandas
 
-from .indicators import bsv, ema, kalman_filter, sma
+from .indicators import bsv, ema, ftd, kalman_filter, rsi, sma
 from .chip_filter import calculate_chip_concentration_metrics
 from .simulator import (
     SimulationResult,
@@ -32,6 +34,40 @@ from .simulator import (
 from .symbols import SP500_SYMBOL
 
 LOGGER = logging.getLogger(__name__)
+
+_FF12_GROUP_SOURCE_PATH_OVERRIDE: Path | None = None
+
+
+def _call_with_supported_keyword_arguments(
+    callable_object: Callable[..., Any],
+    *positional_arguments: Any,
+    **keyword_arguments: Any,
+) -> Any:
+    """Call ``callable_object`` without unsupported keyword arguments.
+
+    Several tests monkeypatch strategy helpers with intentionally small fake
+    functions. Filtering optional keyword arguments keeps compatibility while
+    production helpers can still accept the full keyword set.
+    """
+
+    try:
+        callable_signature = inspect.signature(callable_object)
+    except (TypeError, ValueError):
+        return callable_object(*positional_arguments, **keyword_arguments)
+
+    accepts_arbitrary_keywords = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in callable_signature.parameters.values()
+    )
+    if accepts_arbitrary_keywords:
+        return callable_object(*positional_arguments, **keyword_arguments)
+
+    supported_keyword_arguments = {
+        keyword_name: keyword_value
+        for keyword_name, keyword_value in keyword_arguments.items()
+        if keyword_name in callable_signature.parameters
+    }
+    return callable_object(*positional_arguments, **supported_keyword_arguments)
 
 
 DEFAULT_SMA_ANGLE_RANGE: tuple[float, float] = (
@@ -215,108 +251,115 @@ def _expand_symbols_with_lookup_aliases(symbol_names: set[str]) -> set[str]:
     return expanded_symbols
 
 
-def load_symbols_excluded_by_industry() -> set[str]:
-    """Return symbols that should be excluded as non-stock instruments.
+@contextmanager
+def override_ff12_group_source_path(
+    sector_data_path: Path | None,
+) -> Iterable[None]:
+    """Temporarily load FF12 groups from a simulation-specific data file.
 
-    When the sector classification dataset is available (``data/symbols_with_sector``),
-    exclude known non-common-stock SIC codes.  FF12 group 12 ("Other") is not
-    excluded by itself because many valid common stocks map outside the 11
-    Fama–French operating-industry buckets.
+    The default FF12 source is the current production sector file. Backtest
+    comparisons may need a frozen universe-specific sector file so old and new
+    universes do not accidentally share the same runtime classification output.
     """
-    excluded_symbols: set[str] = set()
+
+    global _FF12_GROUP_SOURCE_PATH_OVERRIDE
+    previous_source_path = _FF12_GROUP_SOURCE_PATH_OVERRIDE
+    _FF12_GROUP_SOURCE_PATH_OVERRIDE = sector_data_path
     try:
-        # Import lazily to avoid hard dependency at import time if unused.
-        from stock_indicator.sector_pipeline.config import (
-            DEFAULT_OUTPUT_PARQUET_PATH,
-            DEFAULT_OUTPUT_CSV_PATH,
-        )
-        from stock_indicator.sector_pipeline.overrides import (
-            SECTOR_OVERRIDES_CSV_PATH,
-        )
-    except Exception:  # noqa: BLE001
-        return excluded_symbols
-    # Prefer Parquet for speed, fall back to CSV if needed.
-    try:
-        if DEFAULT_OUTPUT_PARQUET_PATH.exists():
-            sector_frame = pandas.read_parquet(DEFAULT_OUTPUT_PARQUET_PATH)
-        elif DEFAULT_OUTPUT_CSV_PATH is not None and DEFAULT_OUTPUT_CSV_PATH.exists():
-            sector_frame = pandas.read_csv(DEFAULT_OUTPUT_CSV_PATH)
-        else:
-            return excluded_symbols
-    except Exception:  # noqa: BLE001
-        return excluded_symbols
-    # Normalize expected columns and filter non-stock SIC codes.
-    sector_frame.columns = [str(c).strip().lower() for c in sector_frame.columns]
-    if "ticker" not in sector_frame.columns:
-        excluded_symbols = set()
+        yield
+    finally:
+        _FF12_GROUP_SOURCE_PATH_OVERRIDE = previous_source_path
+
+
+def _read_ff12_source_frame(sector_data_path: Path) -> pandas.DataFrame:
+    """Read a CSV or parquet FF12 source into a normalized DataFrame."""
+
+    if sector_data_path.suffix.lower() == ".parquet":
+        sector_frame = pandas.read_parquet(sector_data_path)
     else:
-        # Exclude SIC codes that represent non-stock instruments:
-        # 6221 = Commodity/crypto ETFs (GLD, SLV, USO, IBIT, GBTC, ...)
-        # 6770 = SPACs / blank-check companies
-        _excluded_sic_codes = {6221, 6770}
-        if "sic" in sector_frame.columns:
-            mask_non_stock = sector_frame["sic"].isin(_excluded_sic_codes)
-            tickers_series = (
-                sector_frame.loc[mask_non_stock, "ticker"].dropna().astype(str)
-            )
-            excluded_symbols = _expand_symbols_with_lookup_aliases(
-                set(tickers_series.str.upper().tolist())
-            )
-        else:
-            excluded_symbols = set()
-
-    # Merge in any manual overrides that mark symbols as FF12=12
-    try:
-        import pandas as pd
-
-        if SECTOR_OVERRIDES_CSV_PATH.exists():
-            overrides = pd.read_csv(SECTOR_OVERRIDES_CSV_PATH)
-            overrides.columns = [str(c).strip().lower() for c in overrides.columns]
-            if "ticker" in overrides.columns and "ff12" in overrides.columns:
-                other_overrides = overrides[overrides["ff12"] == 12]
-                override_symbols = (
-                    other_overrides["ticker"].dropna().astype(str).str.upper().tolist()
-                )
-                excluded_symbols.update(
-                    _expand_symbols_with_lookup_aliases(set(override_symbols))
-                )
-    except Exception:  # noqa: BLE001
-        # If overrides cannot be read, proceed with what we have
-        pass
-    return excluded_symbols
+        sector_frame = pandas.read_csv(sector_data_path)
+    sector_frame.columns = [
+        str(column_name).strip().lower()
+        for column_name in sector_frame.columns
+    ]
+    if "ticker" not in sector_frame.columns and "symbol" in sector_frame.columns:
+        sector_frame = sector_frame.rename(columns={"symbol": "ticker"})
+    if "ff12" not in sector_frame.columns and "ff12_numeric" in sector_frame.columns:
+        sector_frame = sector_frame.rename(columns={"ff12_numeric": "ff12"})
+    return sector_frame
 
 
-def load_ff12_groups_by_symbol() -> dict[str, int]:
+def load_symbols_excluded_by_industry() -> set[str]:
+    """Return legacy industry-based non-stock exclusions.
+
+    The tradable stock universe is now decided upstream by ``symbols.txt`` and
+    its auditable SEC hard-filter, LLM-review, policy-override, and quarantine
+    layers.  Runtime strategy code must not silently reject symbols again based
+    on SIC, FF12 group, or stale listing metadata, because those hidden filters
+    previously removed valid common stocks.  The function remains as a
+    backwards-compatible no-op for older call sites.
+    """
+
+    return set()
+
+
+def load_ff12_groups_by_symbol(
+    sector_data_path: Path | None = None,
+) -> dict[str, int]:
     """Return a lookup mapping ticker symbol (uppercased) to FF12 group id.
 
-    Only returns mappings for symbols explicitly tagged with an FF12 group in
-    the sector classification output. Symbols labeled as ``Other`` (12) are
-    excluded from the mapping since they are not considered for trading.
+    Returns mappings for symbols explicitly tagged with an FF12 group in the
+    sector classification output, including group 12 (``Other``).  Group 12 is
+    a valid Fama-French bucket for operating companies outside the first eleven
+    industry buckets; non-stock exclusions are handled separately by
+    :func:`load_symbols_excluded_by_industry`. Low-confidence rows where
+    FF12=12 only means "missing SEC SIC" are excluded until another industry
+    source supplies a real classification.
 
     If the sector dataset is unavailable or lacks expected columns, an empty
     mapping is returned and the caller should fall back to non-grouped logic.
     """
+    source_path = sector_data_path or _FF12_GROUP_SOURCE_PATH_OVERRIDE
     try:
-        from stock_indicator.sector_pipeline.config import (
-            DEFAULT_OUTPUT_PARQUET_PATH,
-            DEFAULT_OUTPUT_CSV_PATH,
-        )
-    except Exception:  # noqa: BLE001
-        return {}
-    try:
-        if DEFAULT_OUTPUT_PARQUET_PATH.exists():
-            sector_frame = pandas.read_parquet(DEFAULT_OUTPUT_PARQUET_PATH)
-        elif DEFAULT_OUTPUT_CSV_PATH is not None and DEFAULT_OUTPUT_CSV_PATH.exists():
-            sector_frame = pandas.read_csv(DEFAULT_OUTPUT_CSV_PATH)
+        if source_path is not None:
+            if not source_path.exists():
+                return {}
+            sector_frame = _read_ff12_source_frame(source_path)
         else:
-            return {}
+            try:
+                from stock_indicator.sector_pipeline.config import (
+                    DEFAULT_OUTPUT_PARQUET_PATH,
+                    DEFAULT_OUTPUT_CSV_PATH,
+                )
+            except Exception:  # noqa: BLE001
+                return {}
+            if DEFAULT_OUTPUT_PARQUET_PATH.exists():
+                sector_frame = _read_ff12_source_frame(DEFAULT_OUTPUT_PARQUET_PATH)
+            elif (
+                DEFAULT_OUTPUT_CSV_PATH is not None
+                and DEFAULT_OUTPUT_CSV_PATH.exists()
+            ):
+                sector_frame = _read_ff12_source_frame(DEFAULT_OUTPUT_CSV_PATH)
+            else:
+                return {}
     except Exception:  # noqa: BLE001
         return {}
-    sector_frame.columns = [str(c).strip().lower() for c in sector_frame.columns]
     if "ticker" not in sector_frame.columns or "ff12" not in sector_frame.columns:
         return {}
     sector_frame = sector_frame.dropna(subset=["ticker", "ff12"])  # type: ignore[arg-type]
-    sector_frame = sector_frame[sector_frame["ff12"] != 12]
+    if "classification_confidence" in sector_frame.columns:
+        confidence_series = (
+            sector_frame["classification_confidence"]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+        )
+        sector_frame = sector_frame.loc[confidence_series != "low"]
+    if "ff12_source" in sector_frame.columns:
+        source_series = (
+            sector_frame["ff12_source"].astype(str).str.strip().str.lower()
+        )
+        sector_frame = sector_frame.loc[source_series != "missing_sic_fallback"]
     symbol_to_group: dict[str, int] = {}
     for sector_row in sector_frame.itertuples(index=False):
         _add_symbol_aliases_to_group_lookup(
@@ -393,9 +436,15 @@ def _build_eligibility_mask(
             group_id_to_symbol_columns.setdefault(group_identifier, []).append(
                 column_name
             )
+    grouped_symbol_count = sum(
+        len(column_list) for column_list in group_id_to_symbol_columns.values()
+    )
+    has_complete_group_mapping = grouped_symbol_count == len(
+        merged_volume_frame.columns
+    )
 
     if minimum_average_dollar_volume_ratio is not None:
-        if group_id_to_symbol_columns:
+        if has_complete_group_mapping:
             ratio_eligibility_mask = pandas.DataFrame(
                 False,
                 index=merged_volume_frame.index,
@@ -431,15 +480,18 @@ def _build_eligibility_mask(
             eligibility_mask &= ratio_frame >= minimum_average_dollar_volume_ratio
 
     if top_dollar_volume_rank is not None:
-        if group_id_to_symbol_columns:
+        if has_complete_group_mapping:
             selected_mask = pandas.DataFrame(
                 False,
                 index=merged_volume_frame.index,
                 columns=merged_volume_frame.columns,
             )
-            symbol_to_group_lookup = {
-                symbol: symbol_to_fama_french_group_id.get(symbol.upper())
-                for symbol in merged_volume_frame.columns
+            symbol_to_group_lookup: dict[str, int | str] = {
+                symbol_name: symbol_to_fama_french_group_id.get(
+                    symbol_name.upper(),
+                    f"ungrouped:{symbol_name}",
+                )
+                for symbol_name in merged_volume_frame.columns
             }
             for current_date in merged_volume_frame.index:
                 candidate_values = merged_volume_frame.loc[current_date].where(
@@ -451,11 +503,9 @@ def _build_eligibility_mask(
                     ascending=False
                 ).index.tolist()
                 chosen_symbols: list[str] = []
-                group_counts: dict[int, int] = {}
+                group_counts: dict[int | str, int] = {}
                 for symbol_name in sorted_symbols:
                     group_identifier = symbol_to_group_lookup.get(symbol_name)
-                    if group_identifier is None:
-                        continue
                     current_count = group_counts.get(group_identifier, 0)
                     if current_count >= maximum_symbols_per_group:
                         continue
@@ -478,6 +528,7 @@ def _build_eligibility_mask(
 # Number of days used for moving averages.
 LONG_TERM_SMA_WINDOW: int = 150
 DOLLAR_VOLUME_SMA_WINDOW: int = 50
+MAXIMUM_REASONABLE_PRICE: float = 1_000_000.0
 
 
 @dataclass
@@ -751,6 +802,10 @@ class ComplexStrategySetDefinition:
     # detector self-mutes during stress months and produces near-zero
     # P&L from the few entries that fire).
     gate_enabled: bool = True
+    # Per-bucket FF12 group exclusions. When non-empty, symbols in these
+    # groups are removed before dollar-volume ranking, so freed TopN/PickN
+    # slots can be taken by surviving groups instead of becoming dead slots.
+    skipped_fama_french_groups: set[int] = field(default_factory=set)
 
 
 @dataclass
@@ -1275,6 +1330,7 @@ def run_complex_simulation(
             start_date=start_date,
             maximum_position_count=maximum_positions_for_set,
             allowed_fama_french_groups=None,
+            skipped_fama_french_groups=definition.skipped_fama_french_groups,
             allowed_symbols=allowed_symbols,
             exclude_other_ff12=True,
             stop_loss_percentage=(
@@ -2697,6 +2753,7 @@ def compute_signals_for_date(
     top_dollar_volume_rank: int | None = None,
     minimum_average_dollar_volume_ratio: float | None = None,
     allowed_fama_french_groups: set[int] | None = None,
+    skipped_fama_french_groups: set[int] | None = None,
     allowed_symbols: set[str] | None = None,
     exclude_other_ff12: bool = True,
     maximum_symbols_per_group: int = 1,
@@ -2739,13 +2796,16 @@ def compute_signals_for_date(
         avoid bias toward larger groups.
     allowed_fama_french_groups:
         Restrict the tradable universe to the specified FF12 group identifiers
-        (1–11). Group 12 ("Other") is not used for group-aware sector
-        selection.
+        (1–12). Group 12 ("Other") is a valid selectable group.
+    skipped_fama_french_groups:
+        Remove the specified FF12 group identifiers before dollar-volume
+        ranking, allowing other groups to backfill the freed TopN/PickN slots.
     allowed_symbols:
         Optional whitelist of symbols (CSV stems) to consider.
     exclude_other_ff12:
-        When True, known non-stock instruments are skipped using SIC/override
-        data. FF12 group 12 common stocks are not excluded by this flag.
+        Legacy compatibility flag. Stock eligibility is resolved upstream by
+        the symbol cache, so this no longer applies hidden SIC/override
+        exclusions. FF12 group 12 common stocks are valid.
     maximum_symbols_per_group:
         Maximum number of symbols to select per group when
         ``top_dollar_volume_rank`` is provided.
@@ -2790,8 +2850,9 @@ def compute_signals_for_date(
         load_symbols_excluded_by_industry() if exclude_other_ff12 else set()
     )
     symbol_to_group_map = load_ff12_groups_by_symbol()
+    skipped_group_identifiers = set(skipped_fama_french_groups or set())
     symbol_to_group_map_for_filtering: dict[str, int] | None = None
-    if allowed_fama_french_groups is not None:
+    if allowed_fama_french_groups is not None or skipped_group_identifiers:
         symbol_to_group_map_for_filtering = symbol_to_group_map
     for csv_file_path in data_directory.glob("*.csv"):
         if csv_file_path.stem == SP500_SYMBOL:
@@ -2805,8 +2866,16 @@ def compute_signals_for_date(
                 csv_file_path.stem.upper()
             )
             if (
-                group_identifier is None
-                or group_identifier not in allowed_fama_french_groups
+                allowed_fama_french_groups is not None
+                and (
+                    group_identifier is None
+                    or group_identifier not in allowed_fama_french_groups
+                )
+            ):
+                continue
+            if (
+                group_identifier is not None
+                and group_identifier in skipped_group_identifiers
             ):
                 continue
         price_data_frame = load_price_data(csv_file_path)
@@ -3198,6 +3267,60 @@ def load_price_data(csv_file_path: Path) -> pandas.DataFrame:
         raise ValueError(
             f"Missing required columns: {missing_columns_string} in file {csv_file_path.name}"
         )
+    price_column_names = [
+        column_name
+        for column_name in ("open", "high", "low", "close")
+        if column_name in price_data_frame.columns
+    ]
+    numeric_price_frame = price_data_frame[price_column_names].apply(
+        pandas.to_numeric,
+        errors="coerce",
+    )
+    finite_price_mask = pandas.DataFrame(
+        numpy.isfinite(
+            numeric_price_frame.to_numpy(dtype=float, na_value=numpy.nan)
+        ),
+        index=price_data_frame.index,
+        columns=price_column_names,
+    ).all(axis=1)
+    positive_price_mask = numeric_price_frame.gt(0).all(axis=1)
+    reasonable_price_mask = numeric_price_frame.le(
+        MAXIMUM_REASONABLE_PRICE
+    ).all(axis=1)
+    valid_row_mask = (
+        finite_price_mask
+        & positive_price_mask
+        & reasonable_price_mask
+    )
+    for column_name in price_column_names:
+        price_data_frame[column_name] = numeric_price_frame[column_name]
+
+    if "volume" in price_data_frame.columns:
+        numeric_volume_series = pandas.to_numeric(
+            price_data_frame["volume"],
+            errors="coerce",
+        )
+        finite_volume_mask = pandas.Series(
+            numpy.isfinite(
+                numeric_volume_series.to_numpy(dtype=float, na_value=numpy.nan)
+            ),
+            index=price_data_frame.index,
+        )
+        valid_volume_mask = finite_volume_mask & numeric_volume_series.ge(0)
+        valid_row_mask &= valid_volume_mask
+        price_data_frame["volume"] = numeric_volume_series
+
+    invalid_row_count = int((~valid_row_mask).sum())
+    if invalid_row_count:
+        LOGGER.debug(
+            "Dropped %d invalid open/high/low/close/volume rows from %s; "
+            "prices must be finite, positive, and <= %.0f, with finite "
+            "non-negative volume.",
+            invalid_row_count,
+            csv_file_path.name,
+            MAXIMUM_REASONABLE_PRICE,
+        )
+        price_data_frame = price_data_frame.loc[valid_row_mask].copy()
     return price_data_frame
 
 
@@ -3344,7 +3467,59 @@ def attach_20_50_sma_cross_signals(
         )
 
 
-## Removed deprecated strategies: ema_sma_cross_and_rsi, ftd_ema_sma_cross
+def attach_ema_sma_cross_and_rsi_signals(
+    price_data_frame: pandas.DataFrame,
+    window_size: int = 40,
+    rsi_window_size: int = 14,
+    maximum_entry_rsi: float = 40.0,
+) -> None:
+    """Attach EMA/SMA cross signals gated by a maximum RSI value."""
+
+    _call_with_supported_keyword_arguments(
+        attach_ema_sma_cross_signals,
+        price_data_frame,
+        window_size=window_size,
+        require_close_above_long_term_sma=True,
+    )
+    rsi_series = rsi(price_data_frame["close"], rsi_window_size)
+    price_data_frame["ema_sma_cross_and_rsi_entry_signal"] = (
+        price_data_frame["ema_sma_cross_entry_signal"]
+        & rsi_series.le(maximum_entry_rsi).fillna(False)
+    )
+    price_data_frame["ema_sma_cross_and_rsi_exit_signal"] = price_data_frame[
+        "ema_sma_cross_exit_signal"
+    ]
+
+
+def attach_ftd_ema_sma_cross_signals(
+    price_data_frame: pandas.DataFrame,
+    window_size: int = 40,
+    ftd_lookback_bars: int = 5,
+) -> None:
+    """Attach EMA/SMA cross signals gated by a recent follow-through day."""
+
+    _call_with_supported_keyword_arguments(
+        attach_ema_sma_cross_signals,
+        price_data_frame,
+        window_size=window_size,
+        require_close_above_long_term_sma=True,
+    )
+    ftd_signal_values: list[bool] = []
+    for row_position in range(len(price_data_frame)):
+        historical_frame = price_data_frame.iloc[: row_position + 1]
+        ftd_signal_values.append(bool(ftd(historical_frame, row_position)))
+    ftd_recent_series = (
+        pandas.Series(ftd_signal_values, index=price_data_frame.index)
+        .rolling(window=ftd_lookback_bars, min_periods=1)
+        .max()
+        .astype(bool)
+    )
+    price_data_frame["ftd_ema_sma_cross_entry_signal"] = (
+        price_data_frame["ema_sma_cross_entry_signal"] & ftd_recent_series
+    )
+    price_data_frame["ftd_ema_sma_cross_exit_signal"] = price_data_frame[
+        "ema_sma_cross_exit_signal"
+    ]
 
 
 def attach_ema_sma_cross_with_slope_signals(
@@ -3402,9 +3577,10 @@ def attach_ema_sma_cross_with_slope_signals(
             "Invalid angle_range: lower bound cannot exceed upper bound"
         )
 
-    attach_ema_sma_cross_signals(
+    _call_with_supported_keyword_arguments(
+        attach_ema_sma_cross_signals,
         price_data_frame,
-        window_size,
+        window_size=window_size,
         require_close_above_long_term_sma=True,
         sma_window_factor=sma_window_factor,
         include_raw_signals=include_raw_signals,
@@ -3513,9 +3689,10 @@ def attach_ema_sma_cross_testing_signals(
             "Invalid angle_range: lower bound cannot exceed upper bound"
         )
 
-    attach_ema_sma_cross_signals(
+    _call_with_supported_keyword_arguments(
+        attach_ema_sma_cross_signals,
         price_data_frame,
-        window_size,
+        window_size=window_size,
         require_close_above_long_term_sma=False,
         sma_window_factor=sma_window_factor,
         include_raw_signals=include_raw_signals,
@@ -3535,10 +3712,10 @@ def attach_ema_sma_cross_testing_signals(
             lookback_window_size=60,
             include_volume_profile=False,
         )
-        near_ratios.append(chip_metrics["near_price_volume_ratio"])
-        above_ratios.append(chip_metrics["above_price_volume_ratio"])
-        below_ratios.append(chip_metrics["below_price_volume_ratio"])
-        price_scores.append(chip_metrics["price_score"])
+        near_ratios.append(chip_metrics.get("near_price_volume_ratio"))
+        above_ratios.append(chip_metrics.get("above_price_volume_ratio"))
+        below_ratios.append(chip_metrics.get("below_price_volume_ratio", 0.0))
+        price_scores.append(chip_metrics.get("price_score"))
     price_data_frame["near_price_volume_ratio"] = pandas.Series(
         near_ratios, index=price_data_frame.index
     )
@@ -3964,26 +4141,134 @@ def attach_ema_shift_cross_with_slope_signals(
             crosses_down
         )
 
-## Removed deprecated strategy: ema_sma_cross_with_slope_and_volume
+def attach_ema_sma_cross_with_slope_and_volume_signals(
+    price_data_frame: pandas.DataFrame,
+    window_size: int = 40,
+    angle_range: tuple[float, float] = DEFAULT_SMA_ANGLE_RANGE,
+    bounds_as_tangent: bool = False,
+    include_raw_signals: bool = False,
+) -> None:
+    """Attach slope-filtered EMA/SMA signals gated by dollar-volume trend."""
+
+    angle_lower_bound, angle_upper_bound = angle_range
+    if bounds_as_tangent:
+        angle_lower_bound = math.degrees(math.atan(angle_lower_bound))
+        angle_upper_bound = math.degrees(math.atan(angle_upper_bound))
+    if angle_lower_bound > angle_upper_bound:
+        raise ValueError(
+            "Invalid angle_range: lower bound cannot exceed upper bound"
+        )
+
+    _call_with_supported_keyword_arguments(
+        attach_ema_sma_cross_with_slope_signals,
+        price_data_frame,
+        window_size=window_size,
+        angle_range=(angle_lower_bound, angle_upper_bound),
+        include_raw_signals=include_raw_signals,
+    )
+    dollar_volume_series = price_data_frame["close"] * price_data_frame["volume"]
+    dollar_volume_ema = ema(dollar_volume_series, window_size)
+    dollar_volume_sma = sma(dollar_volume_series, window_size)
+    volume_condition = dollar_volume_ema > dollar_volume_sma
+    price_data_frame["ema_sma_cross_with_slope_and_volume_entry_signal"] = (
+        price_data_frame["ema_sma_cross_with_slope_entry_signal"]
+        & volume_condition.fillna(False)
+    )
+    price_data_frame["ema_sma_cross_with_slope_and_volume_exit_signal"] = (
+        price_data_frame["ema_sma_cross_with_slope_exit_signal"]
+    )
+    if include_raw_signals and "ema_sma_cross_with_slope_raw_entry_signal" in price_data_frame:
+        price_data_frame[
+            "ema_sma_cross_with_slope_and_volume_raw_entry_signal"
+        ] = (
+            price_data_frame["ema_sma_cross_with_slope_raw_entry_signal"]
+            & volume_condition.fillna(False)
+        )
+        price_data_frame[
+            "ema_sma_cross_with_slope_and_volume_raw_exit_signal"
+        ] = price_data_frame["ema_sma_cross_with_slope_raw_exit_signal"]
 
 
-## Removed deprecated strategy: ema_sma_double_cross
+def attach_ema_sma_double_cross_signals(
+    price_data_frame: pandas.DataFrame,
+    window_size: int = 40,
+) -> None:
+    """Attach EMA/SMA cross signals gated by long-term EMA trend."""
+
+    _call_with_supported_keyword_arguments(
+        attach_ema_sma_cross_signals,
+        price_data_frame,
+        window_size=window_size,
+        require_close_above_long_term_sma=False,
+    )
+    long_term_ema_series = ema(price_data_frame["close"], LONG_TERM_SMA_WINDOW)
+    long_term_ema_previous = long_term_ema_series.shift(1)
+    price_data_frame["ema_sma_double_cross_entry_signal"] = (
+        price_data_frame["ema_sma_cross_entry_signal"]
+        & (
+            long_term_ema_previous
+            > price_data_frame["long_term_sma_previous"]
+        ).fillna(False)
+    )
+    price_data_frame["ema_sma_double_cross_exit_signal"] = price_data_frame[
+        "ema_sma_cross_exit_signal"
+    ]
 
 
-## Removed deprecated strategy: kalman_filtering
+def attach_kalman_filtering_signals(
+    price_data_frame: pandas.DataFrame,
+    process_variance: float = 1e-5,
+    observation_variance: float = 1.0,
+) -> None:
+    """Attach Kalman channel breakout entry and exit signals."""
+
+    kalman_data_frame = kalman_filter(
+        price_data_frame["close"],
+        process_variance,
+        observation_variance,
+    )
+    price_data_frame["kalman_estimate"] = kalman_data_frame["estimate"]
+    price_data_frame["kalman_upper"] = kalman_data_frame["upper_bound"]
+    price_data_frame["kalman_lower"] = kalman_data_frame["lower_bound"]
+    close_previous = price_data_frame["close"].shift(1)
+    upper_previous = price_data_frame["kalman_upper"].shift(1)
+    lower_previous = price_data_frame["kalman_lower"].shift(1)
+    breaks_upper = (
+        (close_previous <= upper_previous)
+        & (price_data_frame["close"] > price_data_frame["kalman_upper"])
+    )
+    breaks_lower = (
+        (close_previous >= lower_previous)
+        & (price_data_frame["close"] < price_data_frame["kalman_lower"])
+    )
+    price_data_frame["kalman_filtering_entry_signal"] = breaks_upper.shift(
+        1,
+        fill_value=False,
+    )
+    price_data_frame["kalman_filtering_exit_signal"] = breaks_lower.shift(
+        1,
+        fill_value=False,
+    )
 
 # TODO: review
 BUY_STRATEGIES: Dict[str, Callable[..., None]] = {
     "ema_sma_cross": attach_ema_sma_cross_signals,
     "20_50_sma_cross": attach_20_50_sma_cross_signals,
+    "ema_sma_cross_and_rsi": attach_ema_sma_cross_and_rsi_signals,
+    "ftd_ema_sma_cross": attach_ftd_ema_sma_cross_signals,
     "ema_sma_cross_with_slope": attach_ema_sma_cross_with_slope_signals,
     "ema_sma_cross_testing": attach_ema_sma_cross_testing_signals,
+    "ema_sma_cross_with_slope_and_volume": (
+        attach_ema_sma_cross_with_slope_and_volume_signals
+    ),
+    "ema_sma_double_cross": attach_ema_sma_double_cross_signals,
     "ema_shift_cross_with_slope": attach_ema_shift_cross_with_slope_signals,
 }
 
 # TODO: review
 SELL_STRATEGIES: Dict[str, Callable[..., None]] = {
     **BUY_STRATEGIES,
+    "kalman_filtering": attach_kalman_filtering_signals,
 }
 
 # TODO: review
@@ -4331,6 +4616,7 @@ def _generate_strategy_evaluation_artifacts(
     start_date: pandas.Timestamp | None = None,
     maximum_position_count: int = 3,
     allowed_fama_french_groups: set[int] | None = None,
+    skipped_fama_french_groups: set[int] | None = None,
     allowed_symbols: set[str] | None = None,
     exclude_other_ff12: bool = True,
     stop_loss_percentage: float = 1.0,
@@ -4408,8 +4694,9 @@ def _generate_strategy_evaluation_artifacts(
     symbols_excluded_by_industry = (
         load_symbols_excluded_by_industry() if exclude_other_ff12 else set()
     )
+    skipped_group_identifiers = set(skipped_fama_french_groups or set())
     symbol_to_group_map_for_filtering: dict[str, int] | None = None
-    if allowed_fama_french_groups is not None:
+    if allowed_fama_french_groups is not None or skipped_group_identifiers:
         symbol_to_group_map_for_filtering = load_ff12_groups_by_symbol()
     for csv_file_path in data_directory.glob("*.csv"):
         if csv_file_path.stem == SP500_SYMBOL:
@@ -4422,7 +4709,18 @@ def _generate_strategy_evaluation_artifacts(
             group_identifier = symbol_to_group_map_for_filtering.get(
                 csv_file_path.stem.upper()
             )
-            if group_identifier is None or group_identifier not in allowed_fama_french_groups:
+            if (
+                allowed_fama_french_groups is not None
+                and (
+                    group_identifier is None
+                    or group_identifier not in allowed_fama_french_groups
+                )
+            ):
+                continue
+            if (
+                group_identifier is not None
+                and group_identifier in skipped_group_identifiers
+            ):
                 continue
         price_data_frame = load_price_data(csv_file_path)
         if price_data_frame.empty:
@@ -4692,7 +4990,9 @@ def _generate_strategy_evaluation_artifacts(
             price_data_frame["_combined_sell_exit"] = False
 
         def entry_rule(current_row: pandas.Series) -> bool:
-            symbol_is_eligible = bool(symbol_mask.shift(1, fill_value=False).loc[current_row.name])
+            symbol_is_eligible = bool(
+                symbol_mask.shift(1, fill_value=False).loc[current_row.name]
+            )
             return bool(current_row["_combined_buy_entry"]) and symbol_is_eligible
 
         def exit_rule(current_row: pandas.Series, entry_row: pandas.Series) -> bool:
@@ -4895,13 +5195,16 @@ def _generate_strategy_evaluation_artifacts(
                 simple_moving_average_dollar_volume_ratio=entry_volume_ratio,
                 group_total_simple_moving_average_dollar_volume=group_entry_total,
                 group_simple_moving_average_dollar_volume_ratio=group_entry_ratio,
-                price_concentration_score=chip_metrics["price_score"],
-                near_price_volume_ratio=chip_metrics["near_price_volume_ratio"],
-                above_price_volume_ratio=chip_metrics["above_price_volume_ratio"],
-                below_price_volume_ratio=chip_metrics["below_price_volume_ratio"],
+                price_concentration_score=chip_metrics.get("price_score"),
+                near_price_volume_ratio=chip_metrics.get("near_price_volume_ratio"),
+                above_price_volume_ratio=chip_metrics.get("above_price_volume_ratio"),
+                below_price_volume_ratio=chip_metrics.get(
+                    "below_price_volume_ratio",
+                    0.0,
+                ),
                 near_delta=_lookup_signal_value("near_delta"),
                 price_tightness=_lookup_signal_value("price_tightness"),
-                histogram_node_count=chip_metrics["histogram_node_count"],
+                histogram_node_count=chip_metrics.get("histogram_node_count"),
                 sma_angle=sma_angle_for_signal,
                 d_sma_angle=d_sma_angle_for_signal,
                 ema_angle=ema_angle_for_signal,
@@ -5112,6 +5415,9 @@ def evaluate_combined_strategy(
     simulation_start_date = artifacts.simulation_start_date
     if simulation_start_date is None:
         simulation_start_date = pandas.Timestamp.now()
+    effective_margin_interest_annual_rate = (
+        margin_interest_annual_rate if margin_multiplier > 1.0 else 0.0
+    )
     annual_returns = calculate_annual_returns(
         filtered_trades,
         starting_cash,
@@ -5119,21 +5425,23 @@ def evaluate_combined_strategy(
         simulation_start_date,
         withdraw_amount,
         margin_multiplier=margin_multiplier,
-        margin_interest_annual_rate=margin_interest_annual_rate,
+        margin_interest_annual_rate=effective_margin_interest_annual_rate,
         trade_symbol_lookup=artifacts.trade_symbol_lookup,
         closing_price_series_by_symbol=artifacts.closing_price_series_by_symbol,
         settlement_lag_days=1,
     )
     annual_trade_counts = calculate_annual_trade_counts(filtered_trades)
-    final_balance = simulate_portfolio_balance(
+    final_balance = _call_with_supported_keyword_arguments(
+        simulate_portfolio_balance,
         filtered_trades,
         starting_cash,
         maximum_position_count,
         withdraw_amount,
         margin_multiplier=margin_multiplier,
-        margin_interest_annual_rate=margin_interest_annual_rate,
+        margin_interest_annual_rate=effective_margin_interest_annual_rate,
     )
-    maximum_drawdown = calculate_max_drawdown(
+    maximum_drawdown = _call_with_supported_keyword_arguments(
+        calculate_max_drawdown,
         filtered_trades,
         starting_cash,
         maximum_position_count,
@@ -5141,7 +5449,7 @@ def evaluate_combined_strategy(
         artifacts.closing_price_series_by_symbol,
         withdraw_amount,
         margin_multiplier=margin_multiplier,
-        margin_interest_annual_rate=margin_interest_annual_rate,
+        margin_interest_annual_rate=effective_margin_interest_annual_rate,
     )
     if filtered_trades:
         last_trade_exit_date = max(
@@ -5173,6 +5481,82 @@ def evaluate_combined_strategy(
         annual_returns,
         annual_trade_counts,
         trade_details_by_year,
+    )
+
+
+def evaluate_ema_sma_cross_strategy(
+    data_directory: Path,
+    window_size: int = 40,
+    require_close_above_long_term_sma: bool = True,
+) -> StrategyMetrics:
+    """Evaluate the basic EMA/SMA cross strategy across CSV price files.
+
+    This compatibility wrapper keeps the legacy public API used by tests and
+    scripts while delegating signal construction to
+    :func:`attach_ema_sma_cross_signals`. Entries and exits execute at the next
+    bar's open because the signal columns are already shifted by the signal
+    attachment function.
+    """
+
+    trade_profit_list: List[float] = []
+    profit_percentage_list: List[float] = []
+    loss_percentage_list: List[float] = []
+    holding_period_list: List[int] = []
+    simulation_results: List[SimulationResult] = []
+
+    for csv_file_path in data_directory.glob("*.csv"):
+        if csv_file_path.stem == SP500_SYMBOL:
+            continue
+        price_data_frame = load_price_data(csv_file_path)
+        if price_data_frame.empty:
+            continue
+        attach_ema_sma_cross_signals(
+            price_data_frame,
+            window_size=window_size,
+            require_close_above_long_term_sma=require_close_above_long_term_sma,
+        )
+
+        def entry_rule(current_row: pandas.Series) -> bool:
+            """Return whether the current row opens an EMA/SMA trade."""
+
+            return bool(current_row["ema_sma_cross_entry_signal"])
+
+        def exit_rule(
+            current_row: pandas.Series,
+            entry_row: pandas.Series,
+        ) -> bool:
+            """Return whether the current row closes an EMA/SMA trade."""
+
+            return bool(current_row["ema_sma_cross_exit_signal"])
+
+        simulation_result = simulate_trades(
+            data=price_data_frame,
+            entry_rule=entry_rule,
+            exit_rule=exit_rule,
+            entry_price_column="open",
+            exit_price_column="open",
+        )
+        simulation_results.append(simulation_result)
+        for completed_trade in simulation_result.trades:
+            trade_profit_list.append(completed_trade.profit)
+            holding_period_list.append(completed_trade.holding_period)
+            percentage_change = (
+                completed_trade.profit / completed_trade.entry_price
+            )
+            if percentage_change > 0:
+                profit_percentage_list.append(percentage_change)
+            elif percentage_change < 0:
+                loss_percentage_list.append(abs(percentage_change))
+
+    maximum_concurrent_positions = calculate_maximum_concurrent_positions(
+        simulation_results
+    )
+    return calculate_metrics(
+        trade_profit_list,
+        profit_percentage_list,
+        loss_percentage_list,
+        holding_period_list,
+        maximum_concurrent_positions=maximum_concurrent_positions,
     )
 
 

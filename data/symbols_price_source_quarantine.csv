@@ -1,0 +1,538 @@
+symbol,status,latest_date,row_count,futu_basic_available,futu_stock_type,futu_exchange_type,futu_name,final_futu_history_status,final_futu_latest_date,final_futu_history_rows,final_futu_error
+AADX,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+AAS,empty_csv,,0,True,STOCK,US_NASDAQ,Antharas,history_empty,,0.0,
+ADBT,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ADDTF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ADIG,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ADZCF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+AEBMF,stale_csv,2026-02-02,1,False,,,,not_in_futu_basicinfo,,0.0,
+AEBMY,empty_csv,,0,True,STOCK,US_PINK,ANADOLU EFES BIRACILIK VE MALT SANA ADR REP 0.2 ORD TRY1 '144A',history_error,,0.0,Do not support OTC market data AEBMY
+AEHGS,stale_csv,2026-03-13,3,True,STOCK,US_PINK,ARRIVED HOMES 5 LLC,history_error,,0.0,Do not support OTC market data AEHGS
+AELKY,empty_csv,,0,True,STOCK,US_PINK,ASELSAN ELEKTRONIK SANAYI VE TICARE UNSPON ADS EACH REP 2 ORD,history_error,,0.0,Do not support OTC market data AELKY
+AESP,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+AFA,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+AFNDY,empty_csv,,0,True,STOCK,US_PINK,ALLFUNDS GP PLC UNSPON ADS EACH REPS 2 ORD,history_error,,0.0,Do not support OTC market data AFNDY
+AFNX,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+AGMWF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+AGNPD,stale_csv,2026-05-19,78,True,STOCK,US_PINK,GREY MATTERS HEALTH INC,history_error,,0.0,Do not support OTC market data AGNPD
+AGNPF,stale_csv,2026-05-19,138,True,STOCK,US_PINK,GREY MATTERS HEALTH INC,history_error,,0.0,Do not support OTC market data AGNPF
+AIBZ,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+AIOK,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+AIST,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+AKCLY,empty_csv,,0,True,STOCK,US_PINK,AICA KOGYO CO SPON ADS EACH REP 0.5 ORD,history_error,,0.0,Do not support OTC market data AKCLY
+AKPPS,empty_csv,,0,True,STOCK,US_PINK,ARK7 PPTYS PLUS LLC,history_error,,0.0,Do not support OTC market data AKPPS
+ALGRF,stale_csv,2026-05-06,13,False,,,,not_in_futu_basicinfo,,0.0,
+ALOIS,stale_csv,2025-11-11,1,True,STOCK,US_PINK,ARRIVED HOMES 5 LLC,history_error,,0.0,Do not support OTC market data ALOIS
+ALPWF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+AMBWQ,stale_csv,2026-05-14,2,True,WARRANT,US_PINK,AMBIPAR EMERGENCY RESPONSE C/WTS 06/03/2028( TO PUR COM),history_error,,0.0,Do not support OTC market data AMBWQ
+AMPM,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+AMPWF,empty_csv,,0,True,WARRANT,US_PINK,ARDAGH METAL PACKAGING SA C/WTS 04/08/2026 (TO PUR COM),history_error,,0.0,Do not support OTC market data AMPWF
+AMTU,empty_csv,,0,True,STOCK,US_NASDAQ,Amatuhi Holdings,history_empty,,0.0,
+AMVIF,stale_csv,2026-05-20,51,False,,,,not_in_futu_basicinfo,,0.0,
+ANJFY,empty_csv,,0,True,STOCK,US_PINK,ANJOY FOODS GROUP CO LTD UNSPON ADS EACH REP 1 ORD H,history_error,,0.0,Do not support OTC market data ANJFY
+APAD,stale_csv,2026-05-07,130,True,STOCK,US_NASDAQ,AParadise Acquisition,history_stale,2026-05-07,115.0,
+APAT,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+APEX,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+APLS,stale_csv,2026-05-15,136,True,STOCK,US_NASDAQ,Apellis Pharmaceuticals,history_stale,2026-05-13,120.0,
+APNA,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+APTN,stale_csv,2026-05-20,2,True,STOCK,US_PINK,ADAPTIN BIO INC.,history_error,,0.0,Do not support OTC market data APTN
+APUR,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ARCL,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ARSTY,stale_csv,2026-05-11,17,True,STOCK,US_PINK,ARISTON HLDG NV USPN ADS EACH REP 4 ORD,history_error,,0.0,Do not support OTC market data ARSTY
+ASBHY,empty_csv,,0,True,STOCK,US_PINK,ASAHI GROUP HLDGS,history_error,,0.0,Do not support OTC market data ASBHY
+ASKRY,empty_csv,,0,True,STOCK,US_PINK,ASKER HEALTHCARE GROUP AB UNSPON ADS EACH REP ONE ORD SHS,history_error,,0.0,Do not support OTC market data ASKRY
+ATAYY,missing_csv,,0,True,STOCK,US_PINK,AMERICAN TUNGSTEN AND ANTIMONY LTD. SPON ADS EACH REP 100 ORD SHS,history_error,,0.0,Do not support OTC market data ATAYY
+ATVK,stale_csv,2026-05-20,27,True,STOCK,US_PINK,Ameritek Ventures,history_error,,0.0,Do not support OTC market data ATVK
+AUIWF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+AVPKS,empty_csv,,0,True,STOCK,US_PINK,ARRIVED HOMES 5 LLC,history_error,,0.0,Do not support OTC market data AVPKS
+AVSBS,stale_csv,2026-05-11,2,True,STOCK,US_PINK,ARRIVED HOMES 5 LLC,history_error,,0.0,Do not support OTC market data AVSBS
+AWATY,stale_csv,2025-11-19,2,True,STOCK,US_PINK,AIR WATER INC UNSPON ADS EACH REP 1 COM,history_error,,0.0,Do not support OTC market data AWATY
+AYR,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+AZBLY,stale_csv,2026-05-13,4,True,STOCK,US_PINK,AZBIL CORP UNSPON ADS EA REP 2 COM,history_error,,0.0,Do not support OTC market data AZBLY
+AZUXY,empty_csv,,0,True,STOCK,US_PINK,AZUL SA SPON ADS EACH REP 2 ORD,history_error,,0.0,Do not support OTC market data AZUXY
+BBAAY,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BCAEF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BCEIF,stale_csv,2026-03-27,3,False,,,,not_in_futu_basicinfo,,0.0,
+BCENF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BCLGY,missing_csv,,0,True,STOCK,US_PINK,BALTIC CLASSIFIEDS GROUP PLC SPONSORED ADS EACH REP 4 ORD SHS,history_error,,0.0,Do not support OTC market data BCLGY
+BDTB,stale_csv,2026-03-11,1,True,STOCK,US_PINK,BODHI TREE BIOTECHNOLOGY INC,history_error,,0.0,Do not support OTC market data BDTB
+BGFR,empty_csv,,0,True,STOCK,US_PINK,BESTGOFER INC,history_error,,0.0,Do not support OTC market data BGFR
+BGHL,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BGTCF,stale_csv,2026-02-26,3,False,,,,not_in_futu_basicinfo,,0.0,
+BHTGY,missing_csv,,0,True,STOCK,US_PINK,BEIJING HAIZHI TECH GROUP CO LTD UNSPON ADS EACH REP 1 ORD H,history_error,,0.0,Do not support OTC market data BHTGY
+BIOT,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BIREY,empty_csv,,0,True,STOCK,US_PINK,BIRCHCLIFF ENERGY UNSPON ADS EACH REP 3 COM,history_error,,0.0,Do not support OTC market data BIREY
+BKFDF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BKPA,empty_csv,,0,True,STOCK,US_PINK,BROOKFIELD CORPORATION PREF SHS CL A SER 4,history_error,,0.0,Do not support OTC market data BKPA
+BKPOY,empty_csv,,0,True,STOCK,US_PINK,BANK POLSKA KASA OPIEKI SA UNSPON ADS EACH REP 0.25 ORD,history_error,,0.0,Do not support OTC market data BKPOY
+BLDC,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BLMOY,stale_csv,2026-05-20,48,True,STOCK,US_PINK,BELIMO HOLDING AG UNSPON ADS EACH REP 0.01 ORD,history_error,,0.0,Do not support OTC market data BLMOY
+BLNH,stale_csv,2026-05-01,11,True,STOCK,US_PINK,BLUE LINE HLDGS INC,history_error,,0.0,Do not support OTC market data BLNH
+BLTG,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BORAY,stale_csv,2026-05-19,29,True,STOCK,US_PINK,BORA PHARMACEUTICALS CO LTD SPON ADS EACH REP 0.2 ORD,history_error,,0.0,Do not support OTC market data BORAY
+BPPFF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BRBF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BRETF,stale_csv,2026-05-19,48,False,,,,not_in_futu_basicinfo,,0.0,
+BRFAF,stale_csv,2026-04-17,2,False,,,,not_in_futu_basicinfo,,0.0,
+BRFCF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BRGX,stale_csv,2026-05-20,70,True,STOCK,US_PINK,BIOREGENX INC,history_error,,0.0,Do not support OTC market data BRGX
+BROXF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BSTR,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BSTT,empty_csv,,0,True,STOCK,US_PINK,BLACKSTONE REIT INC,history_error,,0.0,Do not support OTC market data BSTT
+BTLWF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BUHHF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BUHPY,empty_csv,,0,True,STOCK,US_PINK,BUHPY,history_error,,0.0,Do not support OTC market data BUHPY
+BVGLY,missing_csv,,0,True,STOCK,US_PINK,BELLEVUE GOLD LTD,history_error,,0.0,Do not support OTC market data BVGLY
+BWGC,empty_csv,,0,True,STOCK,US_NASDAQ,BW Industrial Holdings,history_empty,,0.0,
+BXDIF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+BXRLY,empty_csv,,0,True,STOCK,US_PINK,BXRLY,history_error,,0.0,Do not support OTC market data BXRLY
+CAEP,stale_csv,2026-05-15,136,True,STOCK,US_NASDAQ,"Cantor Equity Partners III, Inc.",history_stale,2026-05-15,122.0,
+CAPI,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+CBPHF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+CBRGF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+CCIL,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+CCLV,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+CDTHY,empty_csv,,0,True,STOCK,US_PINK,CONDUIT HLDGS LTD UNSPON ADS EACH REP 4 ORD SHS,history_error,,0.0,Do not support OTC market data CDTHY
+CGL,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+CILFY,empty_csv,,0,True,STOCK,US_PINK,CHINA LIFE INSURANCE CO LTD UNSPON ADS EACH REP 0.5 ORD,history_error,,0.0,Do not support OTC market data CILFY
+CLBZ,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+CLRLY,empty_csv,,0,True,STOCK,US_PINK,CENTRAL RETAIL COR SPON ADS EACH REP 10 ORD,history_error,,0.0,Do not support OTC market data CLRLY
+CLRRF,stale_csv,2026-05-07,2,True,STOCK,US_PINK,CLIMATEROCK ORD USD0.0001 (31/10/2028 SUB/RIGHTS),history_error,,0.0,Do not support OTC market data CLRRF
+CLYD,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+CMLS,stale_csv,2026-05-12,133,False,,,,not_in_futu_basicinfo,,0.0,
+CMPLY,empty_csv,,0,True,STOCK,US_PINK,COM7 PUBLIC CO LTD UNSPON ADS EACH REPS 10 ORD,history_error,,0.0,Do not support OTC market data CMPLY
+CMRF,stale_csv,2026-05-18,41,True,STOCK,US_PINK,CIM REAL ESTATE FIN TR INC,history_error,,0.0,Do not support OTC market data CMRF
+CONE,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+COPR,stale_csv,2026-05-20,64,True,STOCK,US_PINK,IDAHO COPPER CORP,history_error,,0.0,Do not support OTC market data COPR
+CPPBY,empty_csv,,0,True,STOCK,US_PINK,CPPBY,history_error,,0.0,Do not support OTC market data CPPBY
+CPXXY,empty_csv,,0,True,STOCK,US_PINK,CAPITAL POWER CORPORATION ADS EACH REP 0.5 COM,history_error,,0.0,Do not support OTC market data CPXXY
+CRAUY,empty_csv,,0,True,STOCK,US_PINK,CHERY AUTOMOBILE UNSPON ADS EACH REP 4 ORD SHS H,history_error,,0.0,Do not support OTC market data CRAUY
+CRGT,empty_csv,,0,True,STOCK,US_AMEX,Cortigent,history_empty,,0.0,
+CRYAF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+CSCCY,empty_csv,,0,True,STOCK,US_PINK,CAPSTONE COPPER CORP UNSPON ADS EACH REP 2 COM,history_error,,0.0,Do not support OTC market data CSCCY
+CSGS,stale_csv,2026-05-15,136,True,STOCK,US_NASDAQ,CSG International(Delisted),history_stale,2026-05-14,121.0,
+CTATF,stale_csv,2026-05-20,90,False,,,,not_in_futu_basicinfo,,0.0,
+CTLP,stale_csv,2026-05-15,133,True,STOCK,US_NASDAQ,Cantaloupe(Delisted),history_stale,2026-05-07,116.0,
+CTPUF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+CTTRF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+CVCPY,empty_csv,,0,True,STOCK,US_PINK,CVC CAPITAL PARTNERS PLC UNSPON ADS EA REP 0.5 ORD,history_error,,0.0,Do not support OTC market data CVCPY
+CWLXF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+CXII,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+DAVI,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+DCFBS,empty_csv,,0,True,STOCK,US_PINK,DCFC HOLDINGS LLC,history_error,,0.0,Do not support OTC market data DCFBS
+DDHLY,stale_csv,2026-01-05,1,True,STOCK,US_PINK,DIGITAL DOMAIN HOLDINGS LIMITED SPON ADS EACH REP 500 ORD SHS,history_error,,0.0,Do not support OTC market data DDHLY
+DEENF,stale_csv,2026-04-02,1,False,,,,not_in_futu_basicinfo,,0.0,
+DFSLY,stale_csv,2026-05-15,109,True,STOCK,US_PINK,DFSLY DEFENG SOLIFE HLDGS,history_error,,0.0,Do not support OTC market data DFSLY
+DFUKF,stale_csv,2026-05-08,3,False,,,,not_in_futu_basicinfo,,0.0,
+DMNT,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+DNCLY,empty_csv,,0,True,STOCK,US_PINK,DENA CO LTD UNSPON ADS EACH REP ORD,history_error,,0.0,Do not support OTC market data DNCLY
+DPDSY,empty_csv,,0,True,STOCK,US_PINK,DPDSY,history_error,,0.0,Do not support OTC market data DPDSY
+DRIL,missing_csv,,0,True,STOCK,US_NYSE,Lannister Mining,history_empty,,0.0,
+DSRNY,empty_csv,,0,True,STOCK,US_PINK,DIASORIN SPA UNSPON ADS EACH REP 0.1 ORD,history_error,,0.0,Do not support OTC market data DSRNY
+DTRSY,missing_csv,,0,True,STOCK,US_PINK,DATELINE RESOURCES SPON ADS EACH REP 10 ORD SHS,history_error,,0.0,Do not support OTC market data DTRSY
+DUTBF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+DYBTY,empty_csv,,0,True,STOCK,US_PINK,DUALITY BIOTHERAPEUTICS INC UNSPON ADS EACH REP 0.33 ORD SHS,history_error,,0.0,Do not support OTC market data DYBTY
+EBGCY,missing_csv,,0,True,STOCK,US_PINK,EASTROC BEVERAGE GROUP CO LTD UNSPONS ADS EACH REP 0.5 H SHS,history_error,,0.0,Do not support OTC market data EBGCY
+ECR,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+EHAB,stale_csv,2026-05-14,135,True,STOCK,US_NYSE,Enhabit,history_stale,2026-05-14,121.0,
+ELFTY,empty_csv,,0,True,STOCK,US_PINK,ELEMENT FLEET MANAGEMENT CORP UNSPON ADS EACH REP 1 COM,history_error,,0.0,Do not support OTC market data ELFTY
+ELVG,stale_csv,2026-05-12,8,True,STOCK,US_PINK,ELVICTOR GROUP INC,history_error,,0.0,Do not support OTC market data ELVG
+EMI,empty_csv,,0,True,STOCK,US_NYSE,"Encore Medical, Inc.",history_empty,,0.0,
+EMRJF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ENBSF,stale_csv,2026-02-02,1,False,,,,not_in_futu_basicinfo,,0.0,
+ENFFF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ENRD,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+EPDU,empty_csv,,0,True,STOCK,US_PINK,ENTERPRISE PRODS PARTNERS L P PFD UNIT SER A,history_error,,0.0,Do not support OTC market data EPDU
+ERBGF,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+EROC,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ESMR,empty_csv,,0,True,STOCK,US_PINK,E SMART CORP,history_error,,0.0,Do not support OTC market data ESMR
+ETSS,missing_csv,,0,True,STOCK,US_NYSE,Energy Transition Special Opportunities,history_empty,,0.0,
+EUBG,stale_csv,2026-04-29,80,True,STOCK,US_PINK,ENTREPRENEUR UNIVERSE BRIGHT GROUP,history_error,,0.0,Do not support OTC market data EUBG
+EUEV,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+EULLY,missing_csv,,0,True,STOCK,US_PINK,EUROPEAN LITHIUM LTD UNSPON ADS EACH REP 10 ORD,history_error,,0.0,Do not support OTC market data EULLY
+EVAWF,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+EVBWF,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+EVON,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+EVTWF,stale_csv,2026-05-11,124,False,,,,not_in_futu_basicinfo,,0.0,
+EVVO,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+EWCZ,stale_csv,2026-05-15,133,True,STOCK,US_NASDAQ,European Wax Center,history_stale,2026-05-07,116.0,
+EXCBF,stale_csv,2026-05-15,3,False,,,,not_in_futu_basicinfo,,0.0,
+EYUBY,empty_csv,,0,True,STOCK,US_PINK,ELECTRICITY GENERATING PUBLIC CO UNSP ADR EACH REP 4 ORD SHS,history_error,,0.0,Do not support OTC market data EYUBY
+FBDT,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+FDXF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+FFGG,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+FGO,empty_csv,,0,True,STOCK,US_NASDAQ,FG HOLDINGS LTD,history_empty,,0.0,
+FGRS,empty_csv,,0,True,STOCK,US_PINK,FIGURE TECHNOLOGY SOLUTIONS INC,history_error,,0.0,Do not support OTC market data FGRS
+FHFFY,empty_csv,,0,True,STOCK,US_PINK,FOSHAN HAITIAN FLAVOURING AND FOOD UNSPON ADS EACH REP 3 ORD H SHARES,history_error,,0.0,Do not support OTC market data FHFFY
+FINCF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+FNIGY,empty_csv,,0,True,STOCK,US_PINK,FINNING INTERNATIONAL INC UNSPON ADS EACH REP 1 COM,history_error,,0.0,Do not support OTC market data FNIGY
+FORA,stale_csv,2026-05-15,136,True,STOCK,US_NASDAQ,Forian(Delisted),history_stale,2026-05-14,121.0,
+FRBT,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+FRLCY,stale_csv,2025-12-10,1,True,STOCK,US_PINK,FREELANCER LTD SPON ADS EACH REP 100 ORD,history_error,,0.0,Do not support OTC market data FRLCY
+FRTJF,stale_csv,2026-05-20,40,False,,,,not_in_futu_basicinfo,,0.0,
+FRTRY,empty_csv,,0,True,STOCK,US_PINK,FORTIOR TECH SHENZHEN CO LTD UNSPON ADS EACH REP 1 ORD H SHS,history_error,,0.0,Do not support OTC market data FRTRY
+FRTT,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+FSTWF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+FTPSF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+FVGPY,empty_csv,,0,True,STOCK,US_PINK,FINVOLUTION GROUP,history_error,,0.0,Do not support OTC market data FVGPY
+GAFC,stale_csv,2026-03-24,1,True,STOCK,US_PINK,GURU APP FACTORY CORP,history_error,,0.0,Do not support OTC market data GAFC
+GAMG,stale_csv,2026-05-14,55,True,STOCK,US_PINK,GLOBAL ASSET MGMT GROUP INC,history_error,,0.0,Do not support OTC market data GAMG
+GBH,empty_csv,,0,True,STOCK,US_NASDAQ,Gigabit,history_empty,,0.0,
+GBNXY,empty_csv,,0,True,STOCK,US_PINK,GIBSON ENERGY INC UNSPON ADS EACH REP 1 COM,history_error,,0.0,Do not support OTC market data GBNXY
+GCGJ,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+GCGR,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+GDGIF,stale_csv,2026-05-15,8,False,,,,not_in_futu_basicinfo,,0.0,
+GDHLF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+GDNT,empty_csv,,0,True,STOCK,US_NASDAQ,Guident,history_empty,,0.0,
+GEHDF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+GFRWF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+GFSAY,empty_csv,,0,True,STOCK,US_PINK,GAFISA SA SPON GDR EACH REP 2 ORD SHS (POST REV SP,history_error,,0.0,Do not support OTC market data GFSAY
+GFTFF,stale_csv,2026-04-30,48,False,,,,not_in_futu_basicinfo,,0.0,
+GGBY,stale_csv,2026-03-24,1,True,STOCK,US_PINK,GO GO BUYERS INC.,history_error,,0.0,Do not support OTC market data GGBY
+GGRPY,empty_csv,,0,True,STOCK,US_PINK,GPT GROUP ADS EACH REP 4 ORD,history_error,,0.0,Do not support OTC market data GGRPY
+GGTKY,empty_csv,,0,True,STOCK,US_PINK,GOTO GOJEK TOKOPEDIA TBK UNSPON ADS EACH REP 0.00025 SHS,history_error,,0.0,Do not support OTC market data GGTKY
+GIVE,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+GLEI,empty_csv,,0,True,STOCK,US_PINK,GLEI,history_error,,0.0,Do not support OTC market data GLEI
+GLVPY,empty_csv,,0,True,STOCK,US_PINK,GLENVEAGH PROPERTIES PLC UNSPON ADS EACH REP 5 ORD,history_error,,0.0,Do not support OTC market data GLVPY
+GMBLZ,stale_csv,2026-03-13,1,True,WARRANT,US_PINK,ESPORTS ENTERTAINMENT GROUP INC C/WTS 02/03/2027 (TO PUR COM),history_error,,0.0,Do not support OTC market data GMBLZ
+GOW,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+GRCPY,empty_csv,,0,True,STOCK,US_PINK,CANAL PLUS SA UNSPON ADR EACH REP 5 ORD,history_error,,0.0,Do not support OTC market data GRCPY
+GRVT,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+GRWFF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+GSMT,empty_csv,,0,True,STOCK,US_PINK,GLOBAL SMART TECH INC,history_error,,0.0,Do not support OTC market data GSMT
+GTLRY,empty_csv,,0,True,STOCK,US_PINK,GREATLAND RESOURCES LIMITED UNSPON ADS EACH REP 4 ORD,history_error,,0.0,Do not support OTC market data GTLRY
+GYGLF,stale_csv,2026-04-20,4,False,,,,not_in_futu_basicinfo,,0.0,
+HAMA,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+HEMNF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+HGZDY,missing_csv,,0,True,STOCK,US_PINK,HANGZHOU DIAGENS BIO CO LTD UNSPON ADS EACH REP 0.3333 ORD,history_error,,0.0,Do not support OTC market data HGZDY
+HIFI,empty_csv,,0,True,STOCK,US_NASDAQ,Hillhouse Frontier Holdings,history_empty,,0.0,
+HNIT,empty_csv,,0,True,STOCK,US_PINK,HUINENG TECHNOLOGY CORP,history_error,,0.0,Do not support OTC market data HNIT
+HNPHY,empty_csv,,0,True,STOCK,US_PINK,HANSOH PHARMACEUTICAL GROUP CO LTD UNSPON ADS EACH REP 5 ORD,history_error,,0.0,Do not support OTC market data HNPHY
+HONA,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+HRBAY,empty_csv,,0,True,STOCK,US_PINK,HORIBA LTD UNSPON ADS EACH REP 0.2 ORD,history_error,,0.0,Do not support OTC market data HRBAY
+HRZRF,stale_csv,2026-05-20,91,False,,,,not_in_futu_basicinfo,,0.0,
+HSIGF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+HSPWF,stale_csv,2026-04-17,1,False,,,,not_in_futu_basicinfo,,0.0,
+HUSIF,stale_csv,2026-05-20,137,False,,,,not_in_futu_basicinfo,,0.0,
+HWLDF,stale_csv,2026-02-25,4,False,,,,not_in_futu_basicinfo,,0.0,
+HYNLY,empty_csv,,0,True,STOCK,US_PINK,HYDRO ONE LTD UNSPON ADS EACH REP 0.3 COM,history_error,,0.0,Do not support OTC market data HYNLY
+HYRD,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+HZRBY,empty_csv,,0,True,STOCK,US_PINK,HORIZON ROBOTICS UNSPON ADS EACH REP 10 ORD,history_error,,0.0,Do not support OTC market data HZRBY
+IBL,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ICRL,empty_csv,,0,True,STOCK,US_PINK,INPOINT COML REAL ESTATE INCOME INC,history_error,,0.0,Do not support OTC market data ICRL
+IDAC,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+IDPEY,empty_csv,,0,True,STOCK,US_PINK,IDP EDUCATION LIMITED SPON ADS EACH REP 2 ORD,history_error,,0.0,Do not support OTC market data IDPEY
+IFHLY,stale_csv,2026-02-12,1,True,STOCK,US_PINK,INFICON HOLDING AG,history_error,,0.0,Do not support OTC market data IFHLY
+ILPLF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+IMAA,stale_csv,2026-05-15,30,True,STOCK,US_PINK,IMA TECH,history_error,,0.0,Do not support OTC market data IMAA
+INHI,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+INIO,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+INNP,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+INRE,stale_csv,2026-05-19,15,True,STOCK,US_PINK,INLAND REAL ESTATE INCOME TRUST INC,history_error,,0.0,Do not support OTC market data INRE
+IPSAY,empty_csv,,0,True,STOCK,US_PINK,IPSOS,history_error,,0.0,Do not support OTC market data IPSAY
+IPV,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+IQMX,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ISADY,empty_csv,,0,True,STOCK,US_PINK,ISS A/S UNSPON ADS EACH REP 0.25 ORD,history_error,,0.0,Do not support OTC market data ISADY
+ITXP,empty_csv,,0,True,STOCK,US_PINK,Independence Power Holdings,history_error,,0.0,Do not support OTC market data ITXP
+JNGDY,empty_csv,,0,True,STOCK,US_PINK,JINGDONG INDUSTRIALS INC UNSPON ADS EACH REP 5 ORD,history_error,,0.0,Do not support OTC market data JNGDY
+JNGHF,stale_csv,2026-03-03,2,False,,,,not_in_futu_basicinfo,,0.0,
+JONE,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+JOSS,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+JTGEY,empty_csv,,0,True,STOCK,US_PINK,J&T GLOBAL EXPRESS LIMITED,history_error,,0.0,Do not support OTC market data JTGEY
+JTGLF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+JXADF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+JXAMY,stale_csv,2026-05-19,46,True,STOCK,US_PINK,JX ADVANCED METALS CORPORATION,history_error,,0.0,Do not support OTC market data JXAMY
+JXIRY,missing_csv,,0,True,STOCK,US_PINK,JIAXIN INTERNATIONAL RES INVT LTD UNSPON ADS EACH REP 1 ORD SHS,history_error,,0.0,Do not support OTC market data JXIRY
+KATJF,stale_csv,2026-04-14,1,False,,,,not_in_futu_basicinfo,,0.0,
+KERCY,stale_csv,2026-03-26,9,True,STOCK,US_PINK,KEISEI ELECTRIC RAILWAY CO UNSPON ADS EA REP 2 COM,history_error,,0.0,Do not support OTC market data KERCY
+KKSIY,empty_csv,,0,True,STOCK,US_PINK,KKSIY,history_error,,0.0,Do not support OTC market data KKSIY
+KMCM,empty_csv,,0,True,STOCK,US_AMEX,Key Mining,history_empty,,0.0,
+KMYGY,empty_csv,,0,True,STOCK,US_PINK,KUM YANG SPON ADS EACH REP 0.25 ORD,history_error,,0.0,Do not support OTC market data KMYGY
+KNWAY,empty_csv,,0,True,STOCK,US_PINK,KNOWLEDGE ATLAS TECHNOLOGY JOINT ST UNSPON ADS EACH REP 0.5 ORD H,history_error,,0.0,Do not support OTC market data KNWAY
+KOGDF,stale_csv,2026-05-20,13,False,,,,not_in_futu_basicinfo,,0.0,
+KYFGF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+KYTFY,empty_csv,,0,True,STOCK,US_PINK,KYOTO FINANCIAL GROUP INC UNSPON ADS EACH REP 1 ORD SHS,history_error,,0.0,Do not support OTC market data KYTFY
+KZR,stale_csv,2026-05-11,132,True,STOCK,US_NASDAQ,Kezar Life Sciences,history_stale,2026-05-08,117.0,
+LACHF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+LAWIL,stale_csv,2026-03-20,2,True,STOCK,US_PINK,LIGHT & WONDER INC CDI 1:1 FOREIGN EXEMPT XNGS,history_error,,0.0,Do not support OTC market data LAWIL
+LBRJ,empty_csv,,0,True,STOCK,US_NASDAQ,Libera Gaming Operations,history_empty,,0.0,
+LBZZ,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+LDXC,stale_csv,2026-04-08,7,True,STOCK,US_PINK,LONDAX CORP,history_error,,0.0,Do not support OTC market data LDXC
+LFTO,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+LGNDZ,stale_csv,2026-05-11,2,True,STOCK,US_PINK,LIGAND PHARMACEUTICAL INC ROCHE CONTINGENT VALUE RTS,history_error,,0.0,Do not support OTC market data LGNDZ
+LGNXZ,stale_csv,2026-04-15,1,True,STOCK,US_PINK,LIGAND PHARMACEUTICAL INC GLUCAGON CONTINGENT VALUE RTS,history_error,,0.0,Do not support OTC market data LGNXZ
+LHI,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+LILW,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+LIME,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+LKYLY,stale_csv,2026-03-20,17,True,STOCK,US_PINK,LOCKSLEY RESOURCES LIMITED SPON ADS EACH REP 20 ORD,history_error,,0.0,Do not support OTC market data LKYLY
+LNTCY,empty_csv,,0,True,STOCK,US_PINK,LENS TECHNOLOGY CO LTD SPON ADS EACH REPS 4 H SHS,history_error,,0.0,Do not support OTC market data LNTCY
+LOMWF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+LPCHY,empty_csv,,0,True,STOCK,US_PINK,LAPCO HOLDINGS LTD SPON ADR EACH REP 100 ORD SHS,history_error,,0.0,Do not support OTC market data LPCHY
+LPUGF,stale_csv,2026-05-08,3,False,,,,not_in_futu_basicinfo,,0.0,
+LRVIY,empty_csv,,0,True,STOCK,US_PINK,LRVIY,history_error,,0.0,Do not support OTC market data LRVIY
+LSBA,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+LSBWF,stale_csv,2026-04-23,1,True,WARRANT,US_PINK,LAKESHORE BIOPHARMA CO LTD C/WTS 15/03/2028 (TO PUR ORD),history_error,,0.0,Do not support OTC market data LSBWF
+LSHGF,stale_csv,2026-05-11,28,False,,,,not_in_futu_basicinfo,,0.0,
+LSHGY,empty_csv,,0,True,STOCK,US_PINK,LOUIS HACHETTE GROUP UNSPON ADR EACH REP ORD,history_error,,0.0,Do not support OTC market data LSHGY
+LTAFF,stale_csv,2026-05-20,7,False,,,,not_in_futu_basicinfo,,0.0,
+LTGR,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+LTSV,stale_csv,2026-04-30,5,True,STOCK,US_PINK,LIGHTSTONE VALUE PLUS REIT IV INC,history_error,,0.0,Do not support OTC market data LTSV
+LVRWF,stale_csv,2026-05-18,3,True,WARRANT,US_PINK,LAVORO LIMITED C/WTS 27/02/2028 (TO PUR ORD),history_error,,0.0,Do not support OTC market data LVRWF
+MADL,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+MARH,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+MBGL,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+MBSHY,stale_csv,2026-02-13,8,True,STOCK,US_PINK,MITSUBISHI GAS CHEMICAL CO INC,history_error,,0.0,Do not support OTC market data MBSHY
+MCAH,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+MCFN,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+MCL,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+MDAT,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+MDDTY,empty_csv,,0,True,STOCK,US_PINK,MANDATUM OYJ UNSPON ADS EACH REP 2 ORD,history_error,,0.0,Do not support OTC market data MDDTY
+MDKGY,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+MEDG,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+METRY,empty_csv,,0,True,STOCK,US_PINK,METRO INC UNSPON ADS EACH REP 0.2 COM,history_error,,0.0,Do not support OTC market data METRY
+MFP,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+MGNC,stale_csv,2026-05-20,104,True,STOCK,US_PINK,MAG MAGNA CORP,history_error,,0.0,Do not support OTC market data MGNC
+MGNO,stale_csv,2026-05-20,82,True,STOCK,US_PINK,MAGNOLIA BANCORP INC,history_error,,0.0,Do not support OTC market data MGNO
+MGSD,stale_csv,2026-05-20,2,True,STOCK,US_PINK,MAITONG SUNSHINE CULTRL DVLPMNT CO,history_error,,0.0,Do not support OTC market data MGSD
+MIBE,empty_csv,,0,True,STOCK,US_PINK,MIAMI BREEZE CAR CARE INC,history_error,,0.0,Do not support OTC market data MIBE
+MINBY,stale_csv,2026-05-20,104,True,STOCK,US_PINK,MINEBEA MITSUMI INC UNSPON ADR EACH REP 1 COM,history_error,,0.0,Do not support OTC market data MINBY
+MMXGY,empty_csv,,0,True,STOCK,US_PINK,MINIMAX GROUP INC UNSPON ADS EA REP 0.2 ORD,history_error,,0.0,Do not support OTC market data MMXGY
+MNMXF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+MNTCF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+MNTGY,empty_csv,,0,True,STOCK,US_PINK,MONTAGE TECHNOLOGY CO LTD UNSPON ADS EACH REP 0.5 H SHS,history_error,,0.0,Do not support OTC market data MNTGY
+MNUPF,stale_csv,2025-12-19,5,False,,,,not_in_futu_basicinfo,,0.0,
+MNZLY,empty_csv,,0,True,STOCK,US_PINK,MERCURY NZ LTD UNSPON ADS EACH REP 5 ORD,history_error,,0.0,Do not support OTC market data MNZLY
+MOT,missing_csv,,0,True,STOCK,US_NASDAQ,MetaOptics,history_empty,,0.0,
+MOVAA,stale_csv,2026-04-27,1,True,STOCK,US_PINK,MOVADO GROUP INC,history_error,,0.0,Do not support OTC market data MOVAA
+MPX,stale_csv,2026-05-14,135,True,STOCK,US_NYSE,Marine Products(Delisted),history_stale,2026-05-14,121.0,
+MREGY,empty_csv,,0,True,STOCK,US_PINK,MERIDIAN ENERGY LIMITED,history_error,,0.0,Do not support OTC market data MREGY
+MROSY,empty_csv,,0,True,STOCK,US_PINK,MELROSE INDUSTRIES PLC USPN ADS EACH REP 2 COM,history_error,,0.0,Do not support OTC market data MROSY
+MSOGF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+MSOKF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+MSPRZ,stale_csv,2026-05-15,2,True,WARRANT,US_PINK,MSP RECOVERY INC C/WTS 23/05/2027 (TO PUR COM),history_error,,0.0,Do not support OTC market data MSPRZ
+MSSHY,stale_csv,2026-05-08,2,True,STOCK,US_PINK,MITSUI-SOKO HOLDINGS CO LTD UNSPON ADS EACH REP 0.5 ORD,history_error,,0.0,Do not support OTC market data MSSHY
+MSTKY,empty_csv,,0,True,STOCK,US_PINK,MSTKY,history_error,,0.0,Do not support OTC market data MSTKY
+MSYND,missing_csv,,0,True,STOCK,US_PINK,MSYND,history_error,,0.0,Do not support OTC market data MSYND
+MTGLY,missing_csv,,0,True,STOCK,US_PINK,MININGLAMP TECHNOLOGY GROUP LTD. UNSPON ADS EACH REP 0.5 ORD,history_error,,0.0,Do not support OTC market data MTGLY
+MTLPF,stale_csv,2026-05-20,49,False,,,,not_in_futu_basicinfo,,0.0,
+MTMTY,empty_csv,,0,True,STOCK,US_PINK,METLEN ENERGY & METALS PLC UNSPON ADS EACH REP 0.2 ORD,history_error,,0.0,Do not support OTC market data MTMTY
+MTNE,missing_csv,,0,True,STOCK,US_NYSE,C4 Natural Solutions,history_empty,,0.0,
+MUYNY,missing_csv,,0,True,STOCK,US_PINK,MUYUAN FOODS CO LTD UNSPON ADS EACH REP 2 ORD,history_error,,0.0,Do not support OTC market data MUYNY
+MXUGF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+MYCRY,empty_csv,,0,True,STOCK,US_PINK,MYCRONIC AB UNSPON ADR EACH REP 0.5 ORD,history_error,,0.0,Do not support OTC market data MYCRY
+NAFS,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+NANO,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+NATNF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+NBKBY,empty_csv,,0,True,STOCK,US_PINK,NOBA BANK GROUP AB (PUBL) UNSPON ADS EACH REP 1 ORD,history_error,,0.0,Do not support OTC market data NBKBY
+NCLA,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+NELR,missing_csv,,0,True,STOCK,US_PINK,NEOLARA CORP,history_error,,0.0,Do not support OTC market data NELR
+NEUT,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+NGCOY,empty_csv,,0,True,STOCK,US_PINK,NAGASE & CO,history_error,,0.0,Do not support OTC market data NGCOY
+NHFLF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+NHIV,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+NHKSY,empty_csv,,0,True,STOCK,US_PINK,NHK SPRING CO LTD UNSPON ADS EACH REP 1 ORD,history_error,,0.0,Do not support OTC market data NHKSY
+NMCPF,stale_csv,2026-05-06,17,False,,,,not_in_futu_basicinfo,,0.0,
+NNBXF,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+NOWG,stale_csv,2026-05-01,7,True,STOCK,US_PINK,Nowigence,history_error,,0.0,Do not support OTC market data NOWG
+NPIXY,empty_csv,,0,True,STOCK,US_PINK,NORTHLAND POWER INC ADS EACH REP 1 COM SHS,history_error,,0.0,Do not support OTC market data NPIXY
+NRGFF,stale_csv,2026-05-12,8,False,,,,not_in_futu_basicinfo,,0.0,
+NSNFY,empty_csv,,0,True,STOCK,US_PINK,NSNFY,history_error,,0.0,Do not support OTC market data NSNFY
+NTCMY,missing_csv,,0,True,STOCK,US_PINK,NATURA COSMETICOS SA UNSPON ADS EACH REP 10 ORD,history_error,,0.0,Do not support OTC market data NTCMY
+NTCS,empty_csv,,0,True,STOCK,US_PINK,NATICS CORP,history_error,,0.0,Do not support OTC market data NTCS
+NWCYY,empty_csv,,0,True,STOCK,US_PINK,NORTH WEST COMPANY INC UNSPON ADS EACH REP 0.5 ORD,history_error,,0.0,Do not support OTC market data NWCYY
+NWSLL,empty_csv,,0,True,STOCK,US_PINK,NEWS CORP NEW CDI NPV CLASS A (NEW),history_error,,0.0,Do not support OTC market data NWSLL
+NXNT,stale_csv,2026-05-05,36,True,STOCK,US_PINK,NEXSCIENT INC,history_error,,0.0,Do not support OTC market data NXNT
+NYB,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+NZEOY,empty_csv,,0,True,STOCK,US_PINK,ECHELON RESOURCES LTD UNSP ADR EACH REP 5 ORD SHS(POST SPLIT),history_error,,0.0,Do not support OTC market data NZEOY
+OBBCY,empty_csv,,0,True,STOCK,US_PINK,OBIC BUSINESS CONSULTANT UNSPON ADS EACH REP 0.25 ORD,history_error,,0.0,Do not support OTC market data OBBCY
+OBCKF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+OBOCY,stale_csv,2026-04-20,1,True,STOCK,US_PINK,OTTOBOCK SE & CO. KGAA UNSPON ADS EACH REP 0.2 COM,history_error,,0.0,Do not support OTC market data OBOCY
+OBULF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+OBX,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+OCTV,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ODKUY,empty_csv,,0,True,STOCK,US_PINK,ODAKYU ELECTRIC RAILWAY CO UNSPON ADS EACH REP 1 ORD,history_error,,0.0,Do not support OTC market data ODKUY
+ODRS,empty_csv,,0,True,STOCK,US_PINK,OUTDOOR SPECIALTY PRODS INC,history_error,,0.0,Do not support OTC market data ODRS
+OPNHY,missing_csv,,0,True,STOCK,US_PINK,OPEN HOUSE GROUP CO LTD UNSPONS ADS EACH REP 0.25 ORD SHS,history_error,,0.0,Do not support OTC market data OPNHY
+OPTHF,stale_csv,2026-05-19,138,True,STOCK,US_PINK,Optimi Health,history_error,,0.0,Do not support OTC market data OPTHF
+OPTN,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ORIB,stale_csv,2026-02-20,3,True,STOCK,US_PINK,ORION BLISS CORP,history_error,,0.0,Do not support OTC market data ORIB
+ORNJY,missing_csv,,0,True,STOCK,US_PINK,ORANJEBTC SA EDUCACAO E INVESTIMENT SPON ADS EACH REP 2 ORD,history_error,,0.0,Do not support OTC market data ORNJY
+OSDVF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+OYCG,empty_csv,,0,True,STOCK,US_PINK,OYOCAR GROUP INC,history_error,,0.0,Do not support OTC market data OYCG
+PALX,stale_csv,2026-04-15,2,True,STOCK,US_PINK,PALOMINO LABORATORIES INC,history_error,,0.0,Do not support OTC market data PALX
+PASTY,empty_csv,,0,True,STOCK,US_PINK,PASTY,history_error,,0.0,Do not support OTC market data PASTY
+PBPRF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+PBRRY,empty_csv,,0,True,STOCK,US_PINK,PBRRY,history_error,,0.0,Do not support OTC market data PBRRY
+PCPGY,empty_csv,,0,True,STOCK,US_PINK,PC PARTNER GROUP LTD UNSPON ADS EACH REP 20 COM,history_error,,0.0,Do not support OTC market data PCPGY
+PDYTY,empty_csv,,0,True,STOCK,US_PINK,PDYTY,history_error,,0.0,Do not support OTC market data PDYTY
+PERFF,missing_csv,,0,True,WARRANT,US_PINK,PERFECT CORP C/WTS 28/10/2027 (TO PUR COM),history_error,,0.0,Do not support OTC market data PERFF
+PFSEF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+PFSTY,stale_csv,2026-05-20,2,True,STOCK,US_PINK,PFISTERER HOLDING SE UNSPON ADS EACH REP 0.1,history_error,,0.0,Do not support OTC market data PFSTY
+PLAI,empty_csv,,0,True,STOCK,US_NASDAQ,PressLogic,history_empty,,0.0,
+PLSAY,empty_csv,,0,True,STOCK,US_PINK,POLESTAR AUTOMOTIVE HOLDING UK PLC SPON ADS CL C2 EACH REP 30 ORD CL A(P/S),history_error,,0.0,Do not support OTC market data PLSAY
+PMHMY,empty_csv,,0,True,STOCK,US_PINK,PMHMY,history_error,,0.0,Do not support OTC market data PMHMY
+PNIG,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+POCH,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+PPLOF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+PRBRY,empty_csv,,0,True,STOCK,US_PINK,PREMIUM BRANDS HLDGS CORP UNPSON ADS EACH REP 0.3 COM,history_error,,0.0,Do not support OTC market data PRBRY
+PRHIZ,stale_csv,2026-05-18,47,True,STOCK,US_NASDAQ,PRESURANCE HOLDINGS INC. 9.75% NTS 30/09/28 USD25,history_stale,2026-05-19,100.0,
+PRIAF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+PRSKY,empty_csv,,0,True,STOCK,US_PINK,PRAIRIESKY ROYALTY LTD ADS EACH REP 1 COM,history_error,,0.0,Do not support OTC market data PRSKY
+PRXA,empty_csv,,0,True,STOCK,US_PINK,PROCACCIANTI HOTEL REIT INC,history_error,,0.0,Do not support OTC market data PRXA
+PSBTY,empty_csv,,0,True,STOCK,US_PINK,SUMBER ALFARIA TRIJAYA TBK SPON ADS EACH REP 100 ORD,history_error,,0.0,Do not support OTC market data PSBTY
+PTAXY,empty_csv,,0,True,STOCK,US_PINK,PALTAC CORP UNSPON ADS EACH REP 0.333,history_error,,0.0,Do not support OTC market data PTAXY
+PTCCY,empty_csv,,0,True,STOCK,US_PINK,PETROCHINA CO UNSPON ADS EACH REP 20 ORD,history_error,,0.0,Do not support OTC market data PTCCY
+PTMSY,missing_csv,,0,True,STOCK,US_PINK,MDS RETAILING TBK PT UNSPON ADR EA REPR 10 ORD IDR0.00,history_error,,0.0,Do not support OTC market data PTMSY
+PTXAF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+PUGBY,stale_csv,2026-05-20,134,True,STOCK,US_PINK,PUIG BRANDS SA UNSPON ADS EACH REP 0.5 ORD,history_error,,0.0,Do not support OTC market data PUGBY
+PVOZ,stale_csv,2026-04-28,5,True,STOCK,US_PINK,PARK VIEW OZ REIT,history_error,,0.0,Do not support OTC market data PVOZ
+PWRL,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+PWRU,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+PYAIF,stale_csv,2026-05-07,2,False,,,,not_in_futu_basicinfo,,0.0,
+QFNHF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+QLUNF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+QMLS,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+QNT,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+QTZM,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+RADB,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+RCWBY,empty_csv,,0,True,STOCK,US_PINK,ROCKWOOL A/S SPON ADS EACH REP 0.1 CL B SHS,history_error,,0.0,Do not support OTC market data RCWBY
+RDCT,stale_csv,2026-05-20,129,True,STOCK,US_PINK,REDACTED INDUSTRIES INC.,history_error,,0.0,Do not support OTC market data RDCT
+RECCY,empty_csv,,0,True,STOCK,US_PINK,REECE LIMITED UNSPON ADS EACH REP 1 ORD,history_error,,0.0,Do not support OTC market data RECCY
+REEWF,stale_csv,2026-04-02,1,False,,,,not_in_futu_basicinfo,,0.0,
+RENGY,empty_csv,,0,True,STOCK,US_PINK,RENGO CO UNSPON ADS EACH REP 2 COM,history_error,,0.0,Do not support OTC market data RENGY
+RGPX,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+RIKU,empty_csv,,0,True,STOCK,US_NASDAQ,Riku Dining,history_empty,,0.0,
+RKAM,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+RLNDF,stale_csv,2026-03-11,9,False,,,,not_in_futu_basicinfo,,0.0,
+RMGL,stale_csv,2026-05-04,2,True,STOCK,US_PINK,ROCKY MOUNTAINS GROUP LTD,history_error,,0.0,Do not support OTC market data RMGL
+RNGOF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+RONE,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ROZE,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+RSMIY,empty_csv,,0,True,STOCK,US_PINK,RESOLUTION MINERALS LTD SPON ADS EACH REP 200 ORD,history_error,,0.0,Do not support OTC market data RSMIY
+RTCJF,stale_csv,2026-05-19,71,True,STOCK,US_PINK,Baijiayun,history_error,,0.0,Do not support OTC market data RTCJF
+SAGU,missing_csv,,0,True,STOCK,US_NYSE,SHREYA ACQUISITION GROUP,history_empty,,0.0,
+SAPUY,empty_csv,,0,True,STOCK,US_PINK,SAPUTO GROUP INC UNSPON ADS EACH REP 1 COM,history_error,,0.0,Do not support OTC market data SAPUY
+SBCLY,stale_csv,2026-05-14,9,True,STOCK,US_PINK,SUMITOMO BAKELITE CO UNSPON ADS EACH REP 0.3 ORD,history_error,,0.0,Do not support OTC market data SBCLY
+SBKLF,stale_csv,2026-05-06,5,False,,,,not_in_futu_basicinfo,,0.0,
+SCBXY,empty_csv,,0,True,STOCK,US_PINK,SCB X PCL UNSPON ADS EACH REP 4 ORD,history_error,,0.0,Do not support OTC market data SCBXY
+SCRNY,stale_csv,2026-05-18,11,True,STOCK,US_PINK,SCREEN HOLDINGS CO LTD,history_error,,0.0,Do not support OTC market data SCRNY
+SCTAY,empty_csv,,0,True,STOCK,US_PINK,SECTRA AB UNSPON ADR EACH REP 1 ORD,history_error,,0.0,Do not support OTC market data SCTAY
+SCXBF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SEAH,empty_csv,,0,True,STOCK,US_NASDAQ,Seahawk Recycling Holdings,history_empty,,0.0,
+SECZ,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SFGRF,stale_csv,2026-05-20,78,False,,,,not_in_futu_basicinfo,,0.0,
+SFPT,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SGIHY,empty_csv,,0,True,STOCK,US_PINK,SGIHY,history_error,,0.0,Do not support OTC market data SGIHY
+SGPIY,empty_csv,,0,True,STOCK,US_PINK,SERES GROUP CO LTD UNSPON ADS EACH REP 1 ORD H,history_error,,0.0,Do not support OTC market data SGPIY
+SGST,empty_csv,,0,True,STOCK,US_PINK,STRATEGIC STORAGE TRUST VI INC,history_error,,0.0,Do not support OTC market data SGST
+SHILY,empty_csv,,0,True,STOCK,US_PINK,SHANGHAI ILUVATAR COREX SEMICONDUCT UNSPON ADS EACH REP 0.5 ORD H,history_error,,0.0,Do not support OTC market data SHILY
+SICCY,empty_csv,,0,True,STOCK,US_PINK,SICC CO LTD UNSPON ADS EACH REP 0.5 ORD,history_error,,0.0,Do not support OTC market data SICCY
+SKAI,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SKBBY,missing_csv,,0,True,STOCK,US_PINK,SICHUAN KELUN-BIOTECH BIOPHARMACEUT UNSPON ADS EACH REP 0.2 ORD,history_error,,0.0,Do not support OTC market data SKBBY
+SLBT,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SLFQF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SLNO,stale_csv,2026-05-18,137,True,STOCK,US_NASDAQ,Soleno Therapeutics(Delisted),history_stale,2026-05-15,122.0,
+SMFSY,empty_csv,,0,True,STOCK,US_PINK,SUMITOMO FORESTRY CO USPN ADR EACH ADS REP 1 COM,history_error,,0.0,Do not support OTC market data SMFSY
+SMGSY,stale_csv,2026-05-20,1,True,STOCK,US_PINK,SMG SWISS MARKETPLACE GROUP HOLDING UNSPON ADS ECH REP 5 COM,history_error,,0.0,Do not support OTC market data SMGSY
+SMPHY,empty_csv,,0,True,STOCK,US_PINK,SM PRIME HOLDINGS INC SPON ADS EACH REP 25 COM,history_error,,0.0,Do not support OTC market data SMPHY
+SNCY,stale_csv,2026-05-15,136,True,STOCK,US_NASDAQ,Sun Country Airlines(Delisted),history_stale,2026-05-12,119.0,
+SNEVY,empty_csv,,0,True,STOCK,US_PINK,SUNEVISION HLDGS UNSPON ADS EACH REP 20 ORD SHS,history_error,,0.0,Do not support OTC market data SNEVY
+SNSC,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SOGSY,missing_csv,,0,True,STOCK,US_PINK,SATURN OIL & GAS INC UNSPON ADS EACH REP 2 ORD,history_error,,0.0,Do not support OTC market data SOGSY
+SOUD,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SPED,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SPGDF,stale_csv,2026-05-19,8,False,,,,not_in_futu_basicinfo,,0.0,
+SPGNY,stale_csv,2026-05-15,11,True,STOCK,US_PINK,SPRINGER NATURE AG & CO. KGAA USPN ADS EACH REP 0.5 ORD,history_error,,0.0,Do not support OTC market data SPGNY
+SSHBY,empty_csv,,0,True,STOCK,US_PINK,SBI SHINSEI BANK LTD UNSPON ADS EA REP 1 COM,history_error,,0.0,Do not support OTC market data SSHBY
+SSMR,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SSRLY,empty_csv,,0,True,STOCK,US_PINK,SIENNA SENIOR LIVING INC UNSPON ADR EACH REP ONE ORD SHS,history_error,,0.0,Do not support OTC market data SSRLY
+STA,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+STJNY,empty_csv,,0,True,STOCK,US_PINK,STELLA JONES INC UNSPON ADS EACH REP 0.33 ORD SHS,history_error,,0.0,Do not support OTC market data STJNY
+STKTF,stale_csv,2026-03-09,3,False,,,,not_in_futu_basicinfo,,0.0,
+STME,stale_csv,2026-05-18,56,True,STOCK,US_PINK,Stimcell Energetics,history_error,,0.0,Do not support OTC market data STME
+STSR,empty_csv,,0,True,STOCK,US_PINK,STRATEGIC STUDENT & SENIOR HUSNG TR,history_error,,0.0,Do not support OTC market data STSR
+STWI,stale_csv,2026-04-10,2,True,STOCK,US_PINK,STAGEWISE STRATEGIES CORP,history_error,,0.0,Do not support OTC market data STWI
+SUCH,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SUNXF,stale_csv,2026-05-18,72,False,,,,not_in_futu_basicinfo,,0.0,
+SUWA,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SVICY,empty_csv,,0,True,STOCK,US_PINK,STORAGEVAULT CANADA INC,history_error,,0.0,Do not support OTC market data SVICY
+SVNHF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SVUWF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SWBGF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SWBKY,empty_csv,,0,True,STOCK,US_PINK,SHAWBROOK GROUP PLC SPONSORED ADS EACH REP 1 ORD SHS,history_error,,0.0,Do not support OTC market data SWBKY
+SWCPF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+SWDR,stale_csv,2026-02-06,3,True,STOCK,US_PINK,STARWOOD REAL ESTATE INCOME TR INC,history_error,,0.0,Do not support OTC market data SWDR
+SXTEY,missing_csv,,0,True,STOCK,US_PINK,SHENZHEN XUNCE TECHNOLOGY CO LTD.,history_error,,0.0,Do not support OTC market data SXTEY
+SYNSY,stale_csv,2026-02-26,1,True,STOCK,US_PINK,SYENSQO SA SPON ADS EACH REP 1/10 ORD,history_error,,0.0,Do not support OTC market data SYNSY
+TACPF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+TARX,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+TCLXY,empty_csv,,0,True,STOCK,US_PINK,TCL ELECTRONICS HOLDINGS LTD ADS EACH REP 10 ORD,history_error,,0.0,Do not support OTC market data TCLXY
+TCNCF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+TCRG,stale_csv,2026-04-16,14,True,STOCK,US_PINK,CANNAISSEUR GROUP INC,history_error,,0.0,Do not support OTC market data TCRG
+TEICY,empty_csv,,0,True,STOCK,US_PINK,TOSEI CORPORATION UNSPON ADS EACH REP 1 ORD,history_error,,0.0,Do not support OTC market data TEICY
+THCLY,empty_csv,,0,True,STOCK,US_PINK,TOHO CO LTD SPON ADS EACH REP 1 COM,history_error,,0.0,Do not support OTC market data THCLY
+THRC,stale_csv,2026-05-13,46,True,STOCK,US_PINK,HAVANA ROASTERS COFFEE COMPANIES IN,history_error,,0.0,Do not support OTC market data THRC
+THTG,empty_csv,,0,True,STOCK,US_PINK,TECH TONIC GROUP CORP,history_error,,0.0,Do not support OTC market data THTG
+TKCYY,empty_csv,,0,True,STOCK,US_PINK,TOKYO OHKA KOGYO CO UNSPON ADS EACH REP 1 ORD,history_error,,0.0,Do not support OTC market data TKCYY
+TKMEF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+TKMSF,stale_csv,2026-05-20,26,False,,,,not_in_futu_basicinfo,,0.0,
+TKVA,empty_csv,,0,True,STOCK,US_NASDAQ,Salspera,history_empty,,0.0,
+TMKVY,empty_csv,,0,True,STOCK,US_PINK,TAMARACK VALLEY ENERGY LTD UNSPON ADS EACH REP 10 COM,history_error,,0.0,Do not support OTC market data TMKVY
+TNDEF,stale_csv,2026-05-05,6,False,,,,not_in_futu_basicinfo,,0.0,
+TNMWF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+TOYWF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+TPH,stale_csv,2026-05-13,134,True,STOCK,US_NYSE,Tri Pointe Homes(Delisted),history_stale,2026-05-13,120.0,
+TPZEY,empty_csv,,0,True,STOCK,US_PINK,TOPAZ ENERGY CORP UNSPON ADS EACH REP 1 COM,history_error,,0.0,Do not support OTC market data TPZEY
+TRBG,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+TRMOY,stale_csv,2026-02-03,1,True,STOCK,US_PINK,TOURMALINE OIL CORP UNSPON ADS EACH REP 0.3 COM,history_error,,0.0,Do not support OTC market data TRMOY
+TRNTF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+TTEI,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+TVCN,empty_csv,,0,True,STOCK,US_NASDAQ,TV Channels Network,history_empty,,0.0,
+TVIV,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+TYG.RW,stale_csv,2026-05-20,1,False,,,,not_in_futu_basicinfo,,0.0,
+TYOEY,missing_csv,,0,True,STOCK,US_PINK,TOYO ENGINEERING CORP UNSPON ADS EACH REP 0.5 COM,history_error,,0.0,Do not support OTC market data TYOEY
+UATCY,empty_csv,,0,True,STOCK,US_PINK,UNISOUND AI TECHNOLOGY CO LTD UNSPON ADS EACH REP 0.1 ORD H,history_error,,0.0,Do not support OTC market data UATCY
+UDMY,stale_csv,2026-05-11,132,True,STOCK,US_NASDAQ,Udemy(Delisted),history_stale,2026-05-08,117.0,
+UDUD,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+UHP,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+UPX,empty_csv,,0,True,STOCK,US_NASDAQ,Uptrend,history_empty,,0.0,
+USDE,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+USDW,empty_csv,,0,True,STOCK,US_PINK,MADE IN USA INC,history_error,,0.0,Do not support OTC market data USDW
+VCCG,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+VENAF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+VEST,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+VGTHY,missing_csv,,0,True,STOCK,US_PINK,VICTORY GIANT TECHNOLOGY (HUIZHOU) UNSPON ADS EACH REP 0.125 ORD SHS,history_error,,0.0,Do not support OTC market data VGTHY
+VIRMF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+VMCWF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+VSGRY,empty_csv,,0,True,STOCK,US_PINK,VUSIONGROUP UNSPON ADS EACH REP 0.05 ORD,history_error,,0.0,Do not support OTC market data VSGRY
+VSRPF,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+VTEK,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+VUECF,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+VZSLY,missing_csv,,0,True,STOCK,US_PINK,VIZSLA ROYALTIES CORP UNSPON ADS EACH REP 5 ORD SHS,history_error,,0.0,Do not support OTC market data VZSLY
+WATR,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+WBKCY,stale_csv,2026-05-20,54,True,STOCK,US_PINK,WESTPAC BANKING CORPORATION UNSPON ADS EACH REP 2 ORD,history_error,,0.0,Do not support OTC market data WBKCY
+WBXWF,empty_csv,,0,True,WARRANT,US_PINK,WALLBOX N V C/WTS 01/10/2026 (TO PUR COM),history_error,,0.0,Do not support OTC market data WBXWF
+WDSP,empty_csv,,0,True,STOCK,US_PINK,WDSP,history_error,,0.0,Do not support OTC market data WDSP
+WHK,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+WHLRL,stale_csv,2026-05-08,25,True,STOCK,US_NASDAQ,WHEELER REAL ESTATE INVT TR INC 7.00% SENIOR NOTES 31/12/2031,history_current,2026-05-21,104.0,
+WLGMF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+WNHK,empty_csv,,0,True,STOCK,US_PINK,Winning Catering Group Inc,history_error,,0.0,Do not support OTC market data WNHK
+WRDIF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+WRLRF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+WRLWF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+WXILY,missing_csv,,0,True,STOCK,US_PINK,WUXI LEAD INTELLIGENT EQUIPMENT CO UNSPON ADS EACH REP 2 ORD H SHS,history_error,,0.0,Do not support OTC market data WXILY
+XAKJ,stale_csv,2026-05-05,16,True,STOCK,US_PINK,XIAO AI TECHNOLOGY LTD,history_error,,0.0,Do not support OTC market data XAKJ
+XTND,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+XXC,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+YGSHY,empty_csv,,0,True,STOCK,US_PINK,YANGZIJIANG SHIPBUILDING UNSPON ADS EACH REP 10 COM,history_error,,0.0,Do not support OTC market data YGSHY
+YICC,missing_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+YKCLY,stale_csv,2026-02-10,1,True,STOCK,US_PINK,YAMATO KOGYO CO UNSPONSORED ADS EACH REPR 0.2 ORD SHS,history_error,,0.0,Do not support OTC market data YKCLY
+YLY,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ZARE,empty_csv,,0,True,ETF,US_PINK,ZARE,history_error,,0.0,Do not support OTC market data ZARE
+ZGJLY,empty_csv,,0,True,STOCK,US_PINK,ZHEJIANG LEAPMOTOR TECHNOLOGY CO SPON ADS EACH REPRESENTING 2 ORD,history_error,,0.0,Do not support OTC market data ZGJLY
+ZHIHF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ZJGIY,empty_csv,,0,True,STOCK,US_PINK,ZIJIN GOLD INTERNATIONAL COMPANY LI UNSPON ADR EACH REP 1 COM,history_error,,0.0,Do not support OTC market data ZJGIY
+ZJNGF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ZNKUF,empty_csv,,0,False,,,,not_in_futu_basicinfo,,0.0,
+ZSHLY,empty_csv,,0,True,STOCK,US_PINK,ZENSHO HOLDINGS CO LTD UNSPON ADS EACH REP 0.25 ORD,history_error,,0.0,Do not support OTC market data ZSHLY
+ZSICY,empty_csv,,0,True,STOCK,US_PINK,ZHEJIANG SANHUA INTELLIGENT CONTROL UNSPONSORED ADS EACH REP 4 ORD SHS,history_error,,0.0,Do not support OTC market data ZSICY

@@ -1,0 +1,199 @@
+symbol,decision,semantic_type,confidence,reason
+AMLX,include,operating_company_common_equity,high,SEC and Yahoo both show Amylyx Pharmaceuticals operating equity; stale ETF label is false positive.
+BOXL,include,operating_company_common_equity,high,Boxlight is an operating company; old ETF listing name is stale ticker reuse.
+DRVN,include,operating_company_common_equity,high,Driven Brands is clearly common equity despite stale legacy metadata.
+ENGN,include,operating_company_common_equity,high,enGene Therapeutics is operating-company equity; old ETF record is reused ticker noise.
+ERO,include,operating_company_common_equity,high,Ero Copper is a mining operating company; legacy ETN listing is stale.
+EU,include,operating_company_common_equity,high,enCore Energy is operating-company equity; old fund label is unrelated ticker reuse.
+EVO,include,operating_company_common_equity,high,Evotec SE is an operating biotech company and listed equity.
+FIEE,include,operating_company_common_equity,high,"FiEE, Inc. is current equity; stale UBS listing metadata is irrelevant."
+FIG,include,operating_company_common_equity,high,Figma is operating-company equity; historical ETF listing is stale reuse.
+FTW,include,operating_company_common_equity,high,"Presidio Production Company is an operating energy issuer, not a fund."
+FWDI,include,operating_company_common_equity,high,Forward Industries is common equity; old listing snapshot is stale.
+GHI,include,reit_common_equity,high,Greystone Housing Impact Investors is an operating REIT-like equity vehicle eligible here.
+GMM,include,operating_company_common_equity,high,Global Mofy AI is operating-company equity; stale ETF metadata should be ignored.
+HAO,include,operating_company_common_equity,high,Haoxi Health Technology is common equity; old ETF listing is reused ticker noise.
+HHH,include,operating_company_common_equity,high,"Howard Hughes Holdings is operating-company equity, not a packaged vehicle."
+IBTA,include,operating_company_common_equity,high,Ibotta is current common equity; old ETF listing is stale reuse.
+INR,include,operating_company_common_equity,high,"Infinity Natural Resources is an operating company, not an ETN."
+IPW,include,operating_company_common_equity,high,iPower is ordinary operating-company equity.
+JEM,include,operating_company_common_equity,high,707 Cayman Holdings is operating-company equity; prior ETN label is stale.
+JOYY,include,operating_company_common_equity,high,JOYY is operating-company equity with no fund or note characteristics.
+LUXE,include,operating_company_common_equity,high,LuxExperience is a listed operating company; old name does not indicate a fund.
+MATH,include,operating_company_common_equity,high,"Metalpha is listed equity; no evidence of fund, note, or shell."
+NIQ,include,operating_company_common_equity,high,NIQ Global Intelligence is operating-company equity; stale fund listing is irrelevant.
+NPT,include,operating_company_common_equity,high,Texxon Holding is common equity; old municipal fund listing is stale reuse.
+NUCL,include,operating_company_common_equity,high,Eagle Nuclear Energy is operating-company equity; old ETF listing is stale.
+NVX,include,operating_company_common_equity,high,NOVONIX is ordinary operating-company equity.
+NYC,include,reit_common_equity,high,American Strategic Investment is a listed REIT-like operating equity.
+OIO,include,operating_company_common_equity,low,Current issuer appears company-like equity; ETF metadata looks stale and conflicting.
+PAM,include,operating_company_common_equity,high,Pampa Energía is operating-company equity; stale ETF label is unrelated.
+PPLC,include,operating_company_common_equity,high,PPL Corporation is operating utility equity; old ETF listing is stale reuse.
+PRME,include,operating_company_common_equity,high,"Prime Medicine is operating biotech equity, not a packaged vehicle."
+SKK,include,operating_company_common_equity,high,SKK Holdings is current company equity; prior ETF record is stale.
+SST,include,operating_company_common_equity,high,System1 is operating-company equity with current exchange listing.
+TAAG,include,operating_company_common_equity,high,The Awareness Group is company equity; old ETF listing is stale.
+UK,include,operating_company_common_equity,high,Ucommune is listed company equity; stale class listing is not disqualifying.
+WLTH,include,operating_company_common_equity,high,Wealthfront is operating-company equity; old ETF label is stale.
+ZBIO,include,operating_company_common_equity,high,Zenas BioPharma is operating-company equity; ETF metadata is stale reuse.
+CLWT,include,operating_company_common_equity,high,Euro Tech Holdings is ordinary operating-company equity.
+CRWS,include,operating_company_common_equity,high,Crown Crafts is ordinary operating-company equity.
+CWT,include,operating_company_common_equity,high,California Water Service is operating utility equity.
+DQWS,include,operating_company_common_equity,high,DSwiss is current company equity; no fund or security-claim evidence.
+ELWT,include,operating_company_common_equity,high,Elauwit Connection is operating-company equity.
+FLWS,include,operating_company_common_equity,high,1-800-FLOWERS.COM is operating-company equity.
+NEWT,include,private_credit_or_bdc_vehicle,high,"NewtekOne is a bank-like operating company, not a BDC fund."
+NWS,include,operating_company_common_equity,high,News Corporation is ordinary operating-company equity.
+RWT,include,reit_common_equity,high,Redwood Trust is a REIT-like operating equity.
+WS,include,operating_company_common_equity,high,Worthington Steel is operating-company equity.
+WT,include,operating_company_common_equity,high,WisdomTree is an operating company; ticker reuse does not change current equity status.
+ZWS,include,operating_company_common_equity,high,Zurn Elkay Water Solutions is operating-company equity.
+AFJK,quarantine,ambiguous,medium,"Current issuer looks like equity, but SIC 6770 raises unresolved SPAC/blank-check ambiguity."
+AIB,include,operating_company_common_equity,high,"SEC and Yahoo describe an equity operating company, not a fund or financing instrument."
+ALDA,quarantine,ambiguous,low,Generic issuer name with stale SPAC-like SIC; current evidence insufficient to confirm common equity.
+ALDF,exclude,spac_shell,high,Issuer name indicates acquisition vehicle; SIC 6770 strongly suggests pre-merger SPAC.
+AMFN,quarantine,ambiguous,low,Generic 6770 issuer; no clear operating-business evidence or explicit SPAC wording.
+ANTA,include,operating_company_common_equity,high,"Operating company-like equity with platform business; not an ETF, note, or shell."
+AVNI,quarantine,ambiguous,low,Generic issuer name and 6770 SIC; insufficient evidence to distinguish operating company from shell.
+BDCI,exclude,spac_shell,high,Development corp with 6770 SIC fits blank-check or shell structure.
+BZRD,quarantine,ambiguous,low,No clear operating-business evidence; SIC 6770 leaves shell risk unresolved.
+CBGGF,exclude,spac_shell,high,Chain Bridge I is acquisition-vehicle naming; SIC 6770 indicates SPAC-like shell.
+CBRRF,exclude,spac_shell,high,Chain Bridge I is acquisition-vehicle naming; SIC 6770 indicates SPAC-like shell.
+CCIX,exclude,spac_shell,high,Churchill Capital Corp IX is a SPAC-style acquisition vehicle.
+CCXI,exclude,spac_shell,high,Churchill Capital Corp XI is a SPAC-style acquisition vehicle; stale listing name irrelevant.
+CLRCF,exclude,spac_shell,high,ClimateRock is acquisition-vehicle naming with 6770 SIC.
+CMII,exclude,spac_shell,high,Columbus Circle Capital Corp II is a SPAC-style shell.
+CUB,exclude,spac_shell,high,Current issuer is Lionheart Holdings; stale listing name conflicts but SPAC-like issuer dominates.
+DYNC,include,operating_company_common_equity,medium,Current issuer is Dynamix Corporation; stale legacy listing name should not control.
+DYOR,exclude,spac_shell,high,Insight Digital Partners II is acquisition-vehicle naming consistent with SPAC shell.
+ENHA,quarantine,ambiguous,low,Generic issuer name and 6770 SIC provide insufficient evidence for operating equity.
+GEMI,include,operating_company_common_equity,high,"Current issuer is an operating company-like equity, not an investment vehicle."
+GIG,exclude,spac_shell,high,GigCapital7 Corp. is a clear SPAC-style acquisition vehicle.
+GIX,exclude,spac_shell,high,GigCapital9 Corp. is a clear SPAC-style acquisition vehicle.
+GPLL,quarantine,ambiguous,low,Generic holding company name with 6770 SIC; operating status unclear.
+GRAF,exclude,spac_shell,high,Current issuer is Graf Global Corp.; legacy listing name is stale and conflicts.
+HSTI,quarantine,ambiguous,low,Generic technology issuer with 6770 SIC; operating-business evidence is insufficient.
+INFQ,exclude,spac_shell,high,"Infleqtion, Inc. appears to be a pre-merger shell under 6770 SIC."
+INNI,quarantine,ambiguous,low,Issuer name is generic and SIC 6770 does not confirm operating common equity.
+INV,quarantine,ambiguous,low,Issuer name alone is insufficient; no clear evidence of operating common equity.
+ISLWF,exclude,spac_shell,high,Israel Acquisitions Corp is acquisition-vehicle naming consistent with SPAC shell.
+ISRLF,exclude,spac_shell,high,Israel Acquisitions Corp is acquisition-vehicle naming consistent with SPAC shell.
+KPET,exclude,spac_shell,high,Ultra Paceline Corp has acquisition-vehicle style naming and 6770 SIC.
+KRAQ,exclude,spac_shell,high,KRAKacquisition Corp is clearly an acquisition shell.
+KSEZ,quarantine,ambiguous,low,"Generic operating-looking name, but 6770 SIC leaves shell ambiguity."
+MRLN,exclude,spac_shell,high,Current issuer differs from stale listing; generic merger-era shell indicators remain.
+NOEM,exclude,spac_shell,high,CO2 Energy Transition Corp. is SPAC-like acquisition vehicle naming.
+PCMC,exclude,spac_shell,high,Public Company Management Corp is shell-like and 6770 SIC.
+PCSC,exclude,spac_shell,high,Perceptive Capital Solutions Corp is acquisition-vehicle naming consistent with SPAC.
+PONO,exclude,spac_shell,high,"Pono Capital Four, Inc. is a clear SPAC-style acquisition vehicle."
+SBXD,exclude,spac_shell,high,SilverBox Corp IV is a clear SPAC-style acquisition vehicle.
+SCPQ,exclude,spac_shell,high,Social Commerce Partners Corp is acquisition-vehicle style naming.
+SVCC,exclude,spac_shell,high,Stellar V Capital Corp. is a clear SPAC-style acquisition vehicle.
+SWRD,quarantine,ambiguous,low,Generic issuer name with no clear operating-business evidence.
+TCRI,quarantine,ambiguous,low,Generic corporate name and 6770 SIC do not confirm operating equity.
+TLNC,exclude,spac_shell,high,Talon Capital Corp. is acquisition-vehicle naming consistent with SPAC shell.
+TRGS,exclude,spac_shell,high,TRG Latin America Acquisitions Corp. is a clear acquisition shell.
+TWLV,exclude,spac_shell,high,"Twelve Seas Investment Company III is acquisition-vehicle naming, not operating equity."
+WONDF,include,operating_company_common_equity,high,"WonderFi Technologies is an operating company-like equity, not a fund or shell."
+XFLH,exclude,spac_shell,high,XFLH Capital Corp is acquisition-vehicle naming consistent with SPAC shell.
+XFLH.RI,exclude,right_or_warrant,high,"Suffix .RI indicates a rights instrument, not common equity."
+XITO,quarantine,ambiguous,low,Generic holdings name with 6770 SIC; operating-company status unclear.
+AMUB,exclude,exchange_traded_note,high,"Yahoo identifies an ETN ETF-like product, not operating company equity."
+ASA,exclude,closed_end_fund,high,"Gold and precious metals closed-end fund, not operating company equity."
+ATMP,exclude,exchange_traded_note,high,"ETN linked to MLP exposure; packaged debt instrument, not stock."
+BDCZ,exclude,exchange_traded_note,high,Leveraged ETN tracking BDC index; not eligible common equity.
+BNJ,exclude,preferred_security,high,"Brookfield preferred share; distribution claim, not common equity."
+BNKD,exclude,exchange_traded_note,high,Inverse leveraged ETN on banks; packaged derivative product.
+BNKU,exclude,exchange_traded_note,high,Leveraged ETN on banks; packaged derivative product.
+CET,exclude,closed_end_fund,high,"Central Securities is a closed-end fund, not operating company equity."
+DGP,exclude,exchange_traded_note,high,Gold leveraged ETN issued by bank; not stock.
+DGZ,exclude,exchange_traded_note,high,Gold inverse ETN issued by bank; not stock.
+DJP,exclude,exchange_traded_note,high,"Commodity index ETN; exposure is debt-linked, not equity."
+DULL,exclude,exchange_traded_note,high,Inverse leveraged gold ETN; packaged derivative instrument.
+DZZ,exclude,exchange_traded_note,high,Gold double-short ETN; not common equity.
+ECC,exclude,closed_end_fund,high,Eagle Point Credit is a closed-end credit fund.
+FNGD,exclude,exchange_traded_note,high,Inverse leveraged FANG+ ETN; not operating company equity.
+FNGO,exclude,exchange_traded_note,high,Leveraged FANG+ ETN; not operating company equity.
+GAM,exclude,closed_end_fund,high,General American Investors is a closed-end fund.
+GLDI,exclude,exchange_traded_note,high,"Covered-call gold ETN; bank-issued note, not stock."
+GRN,exclude,exchange_traded_note,high,Carbon ETN; packaged note rather than company equity.
+HDLB,exclude,exchange_traded_note,high,Leveraged dividend ETN; not eligible common stock.
+HQH,exclude,closed_end_fund,high,"Healthcare closed-end fund, not operating company equity."
+HQL,exclude,closed_end_fund,high,"Life sciences closed-end fund, not operating company equity."
+IWDL,exclude,exchange_traded_note,high,Leveraged factor ETN; packaged debt instrument.
+LEO,exclude,closed_end_fund,high,BNY Mellon Strategic Municipals is a closed-end fund.
+MCI,exclude,closed_end_fund,high,Barings Corporate Investors is a closed-end fund.
+MLPB,exclude,exchange_traded_note,high,Alerian MLP index ETN; not common equity.
+MPV,exclude,closed_end_fund,high,Barings Participation Investors is a closed-end fund.
+NXP,exclude,closed_end_fund,high,Nuveen Select Tax-Free Income Portfolio is a fund.
+OILD,exclude,exchange_traded_note,high,Inverse leveraged oil ETN; not operating company equity.
+OILU,exclude,exchange_traded_note,high,Leveraged oil ETN; not operating company equity.
+OXLC,exclude,private_credit_or_bdc_vehicle,high,Oxford Lane Capital is a BDC-like credit vehicle.
+PFFL,exclude,exchange_traded_note,high,Leveraged preferred stock ETN; not stock.
+PFX,exclude,private_credit_or_bdc_vehicle,high,PhenixFIN is a BDC/private-credit vehicle.
+SHNY,exclude,exchange_traded_note,high,Leveraged gold ETN; not eligible equity.
+SLVO,exclude,exchange_traded_note,high,Silver covered-call ETN; bank-issued note.
+SMHB,exclude,exchange_traded_note,high,Leveraged high-dividend ETN; not common equity.
+SOR,exclude,closed_end_fund,high,Source Capital is a closed-end fund.
+TAPR,exclude,exchange_traded_note,high,Defined-protection ETF/ETN structure; packaged investment product.
+TY,exclude,closed_end_fund,high,Tri-Continental is a closed-end fund.
+TYG,exclude,closed_end_fund,high,Tortoise Energy Infrastructure is a closed-end fund.
+UCIB,exclude,exchange_traded_note,high,"Commodity index ETN; debt instrument, not stock."
+USML,exclude,exchange_traded_note,high,Leveraged factor ETN; not common equity.
+USOI,exclude,exchange_traded_note,high,Crude oil covered-call ETN; not stock.
+VXX,exclude,exchange_traded_note,high,VIX futures ETN; packaged volatility product.
+VXZ,exclude,exchange_traded_note,high,VIX futures ETN; packaged volatility product.
+WTID,exclude,exchange_traded_note,high,Inverse energy ETN; not operating company equity.
+WTIU,exclude,exchange_traded_note,high,Leveraged energy ETN; not operating company equity.
+ALOV,exclude,spac_shell,high,Blank-check SPAC shell; not operating company equity.
+APAC,exclude,spac_shell,high,SPAC shell despite reuse; not eligible operating equity.
+BCAR,exclude,spac_shell,high,Blank-check acquisition shell; not operating company equity.
+BCSS,exclude,spac_shell,high,SPAC shell; no operating business shares.
+BIII,exclude,spac_or_blank_check_shell,high,SPAC shell identified by issuer name and SIC 6770.
+BPAC,exclude,spac_or_blank_check_shell,high,Acquisition company shell with SIC 6770 and SPAC naming.
+CEPF,exclude,spac_or_blank_check_shell,high,"Issuer is Cantor Equity Partners IV, a blank-check company."
+CEPO,exclude,spac_or_blank_check_shell,high,"Issuer is Cantor Equity Partners I, a blank-check company."
+CEPS,exclude,spac_or_blank_check_shell,high,"Issuer is Cantor Equity Partners VI, a blank-check company."
+CEPT,exclude,spac_or_blank_check_shell,high,"Issuer is Cantor Equity Partners II, a blank-check company."
+CGCT,exclude,spac_or_blank_check_shell,high,Growth corporation III with SIC 6770 indicates SPAC shell.
+CHEC,exclude,spac_or_blank_check_shell,high,Acquisition company III with SIC 6770 indicates SPAC shell.
+DBCA,exclude,spac_or_blank_check_shell,high,Acquisition I corporation; SIC 6770 blank-check shell.
+DMII,exclude,spac_or_blank_check_shell,high,Acquisition II corporation; SIC 6770 blank-check shell.
+FGMC,exclude,spac_or_blank_check_shell,high,Merger company and SIC 6770 indicate SPAC shell.
+GTEN,exclude,spac_or_blank_check_shell,high,Gores Holdings X is a SPAC shell.
+HCIC,exclude,spac_or_blank_check_shell,high,Hennessy Capital Investment Corp VIII is a SPAC shell.
+HSPOF,exclude,spac_or_blank_check_shell,high,Horizon Space Acquisition I Corp is a SPAC shell.
+HSPT,exclude,spac_or_blank_check_shell,high,Horizon Space Acquisition II Corp is a SPAC shell.
+HSPUF,exclude,spac_or_blank_check_shell,high,"Units security for Horizon Space Acquisition I, not common equity."
+HVII,exclude,spac_or_blank_check_shell,high,Hennessy Capital Investment Corp VII is a SPAC shell.
+HVMC,exclude,spac_or_blank_check_shell,high,Highview Merger Corp is a SPAC shell.
+IGTA,exclude,spac_or_blank_check_shell,high,Acquisition company with SIC 6770 is a SPAC shell.
+IRHO,exclude,spac_or_blank_check_shell,high,Acquisition II corporation; SIC 6770 blank-check shell.
+ISLUF,exclude,mutual_fund,high,"Yahoo classifies it as MUTUALFUND, not stock."
+KBON,exclude,spac_or_blank_check_shell,high,Capital partners corporation with SIC 6770 is SPAC shell.
+LCCC,exclude,spac_or_blank_check_shell,high,Lakeshore Acquisition III Corp is a SPAC shell.
+LEGO,exclude,spac_or_blank_check_shell,high,Legato Merger Corp. IV is a SPAC shell.
+LEGT,exclude,spac_or_blank_check_shell,high,Legato Merger Corp. III is a SPAC shell.
+MBAV,exclude,spac_or_blank_check_shell,high,M3-Brigade Acquisition V is a SPAC shell.
+MBVI,exclude,spac_or_blank_check_shell,high,M3-Brigade Acquisition VI is a SPAC shell.
+NBRG,exclude,spac_or_blank_check_shell,high,Newbridge Acquisition Limited is a blank-check company.
+NHIC,exclude,spac_or_blank_check_shell,high,NewHold Investment Corp III is a SPAC shell.
+NWAX,exclude,spac_or_blank_check_shell,high,New America Acquisition I Corp is a SPAC shell.
+OBA,exclude,spac_or_blank_check_shell,high,Oxley Bridge Acquisition Limited is a blank-check company.
+ORIQ,exclude,spac_or_blank_check_shell,high,Origin Investment Corp I is a blank-check company.
+PACH,exclude,spac_or_blank_check_shell,high,Pioneer Acquisition I Corp is a SPAC shell.
+REEUF,exclude,spac_or_blank_check_shell,high,Cartesian Growth Corporation II is a SPAC shell.
+RENEF,exclude,spac_or_blank_check_shell,high,Cartesian Growth Corporation II is a SPAC shell.
+TVA,exclude,spac_or_blank_check_shell,high,Texas Ventures Acquisition III Corp is a SPAC shell.
+UROY,exclude,commodity_or_royalty_pass_through,high,Uranium Royalty Corp is a royalty pass-through vehicle.
+VHCP,exclude,spac_or_blank_check_shell,high,Vine Hill Capital Investment Corp II is a SPAC shell.
+VMCAF,exclude,spac_or_blank_check_shell,high,Valuence Merger Corp. I is a SPAC shell.
+VMCUF,exclude,spac_or_blank_check_shell,high,"Units security for Valuence Merger Corp. I, not common equity."
+WENC,exclude,spac_or_blank_check_shell,high,West Enclave Merger Corp is a SPAC shell.
+WENC.RI,exclude,spac_or_blank_check_shell,high,"Rights security for West Enclave Merger Corp, not stock."
+YHNA,exclude,spac_or_blank_check_shell,high,YHN Acquisition I Limited is a blank-check company.
+YTFD,exclude,spac_or_blank_check_shell,high,"Yale Transaction Finders, Inc. is a blank-check company."
+BPYPM,exclude,preferred_security,high,"Brookfield Property Preferred is a preferred instrument, not common equity."
+GOODO,quarantine,ambiguous,low,"Yahoo says equity, but ticker pattern suggests possible preferred security."
+KTH,exclude,preferred_security,high,"Structured products trust preferred stock, not operating company equity."
+MBINN,exclude,preferred_security,high,"Yahoo listing names preferred shares, not common equity."

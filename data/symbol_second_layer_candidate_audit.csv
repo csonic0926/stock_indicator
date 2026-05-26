@@ -1,0 +1,827 @@
+symbol,sec_title,hard_filter_decision,second_layer_reasons
+DLR,"DIGITAL REALTY TRUST, INC.",include,trust_word
+NTRS,NORTHERN TRUST CORP,include,trust_word
+ESS,"ESSEX PROPERTY TRUST, INC.",include,trust_word
+CPT,CAMDEN PROPERTY TRUST,include,trust_word
+FRT,FEDERAL REALTY INVESTMENT TRUST,include,trust_word
+FR,FIRST INDUSTRIAL REALTY TRUST INC,include,trust_word
+PDI,PIMCO DYNAMIC INCOME FUND,include,fund_word
+HR,HEALTHCARE REALTY TRUST INC,include,trust_word
+EPRT,"ESSENTIAL PROPERTIES REALTY TRUST, INC.",include,trust_word
+STWD,"STARWOOD PROPERTY TRUST, INC.",include,trust_word
+VNO,VORNADO REALTY TRUST,include,trust_word
+NSA,NATIONAL STORAGE AFFILIATES TRUST,include,trust_word
+BXSL,BLACKSTONE SECURED LENDING FUND,include,fund_word
+KRG,KITE REALTY GROUP TRUST,include,trust_word
+DNP,DNP SELECT INCOME FUND INC,include,fund_word
+COLD,AMERICOLD REALTY TRUST,include,trust_word
+IRT,"INDEPENDENCE REALTY TRUST, INC.",include,trust_word
+UTG,REAVES UTILITY INCOME FUND,include,fund_word
+GBDC,"GOLUB CAPITAL BDC, INC.",include,bdc_vehicle
+NEA,NUVEEN AMT-FREE QUALITY MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+CSQ,CALAMOS STRATEGIC TOTAL RETURN FUND,include,fund_word
+AKR,ACADIA REALTY TRUST,include,trust_word
+LXP,LXP INDUSTRIAL TRUST,include,trust_word
+ADX,"ADAMS DIVERSIFIED EQUITY FUND, INC.",include,fund_word
+BXMT,"BLACKSTONE MORTGAGE TRUST, INC.",include,trust_word
+MPT,MEDICAL PROPERTIES TRUST INC,include,trust_word
+UTF,COHEN & STEERS INFRASTRUCTURE FUND INC,include,fund_word
+EXG,EATON VANCE TAX-MANAGED GLOBAL DIVERSIFIED EQUITY INCOME FUND,include,fund_word
+FCPT,"FOUR CORNERS PROPERTY TRUST, INC.",include,trust_word
+NAD,NUVEEN QUALITY MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+NVG,NUVEEN AMT-FREE MUNICIPAL CREDIT INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+GDV,GABELLI DIVIDEND & INCOME TRUST,include,trust_word
+PTY,PIMCO CORPORATE & INCOME OPPORTUNITY FUND,include,fund_word
+KYN,"KAYNE ANDERSON ENERGY INFRASTRUCTURE FUND, INC.",include,fund_word
+NZF,NUVEEN MUNICIPAL CREDIT INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+ETY,EATON VANCE TAX-MANAGED DIVERSIFIED EQUITY INCOME FUND,include,fund_word
+GOF,GUGGENHEIM STRATEGIC OPPORTUNITIES FUND,include,fund_word
+CLM,"CORNERSTONE STRATEGIC INVESTMENT FUND, INC.",include,fund_word
+RVT,"ROYCE SMALL-CAP TRUST, INC.",include,trust_word
+DHC,DIVERSIFIED HEALTHCARE TRUST,include,trust_word
+BXDC,BLACKSTONE DIGITAL INFRASTRUCTURE TRUST INC.,include,trust_word
+EVT,EATON VANCE TAX-ADVANTAGED DIVIDEND INCOME FUND,include,fund_word
+NUV,NUVEEN MUNICIPAL VALUE FUND INC,include,fund_word|municipal_or_clo_vehicle
+BSTZ,BLACKROCK SCIENCE & TECHNOLOGY TERM TRUST,include,trust_word
+NAC,NUVEEN CALIFORNIA QUALITY MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+PDO,PIMCO DYNAMIC INCOME OPPORTUNITIES FUND,include,fund_word
+RQI,COHEN & STEERS QUALITY INCOME REALTY FUND INC,include,fund_word
+USA,LIBERTY ALL STAR EQUITY FUND,include,fund_word
+GAB,GABELLI EQUITY TRUST INC,include,trust_word
+ETG,EATON VANCE TAX-ADVANTAGED GLOBAL DIVIDEND INCOME FUND,include,fund_word
+STEW,"SRH TOTAL RETURN FUND, INC.",include,fund_word
+SILA,"SILA REALTY TRUST, INC.",include,trust_word
+ETV,EATON VANCE TAX-MANAGED BUY-WRITE OPPORTUNITIES FUND,include,fund_word
+ESRT,"EMPIRE STATE REALTY TRUST, INC.",include,trust_word
+AAT,"AMERICAN ASSETS TRUST, INC.",include,trust_word
+PEB,PEBBLEBROOK HOTEL TRUST,include,trust_word
+BDJ,BLACKROCK ENHANCED EQUITY DIVIDEND TRUST,include,trust_word
+BCAT,BLACKROCK CAPITAL ALLOCATION TERM TRUST,include,trust_word
+BST,BLACKROCK SCIENCE & TECHNOLOGY TRUST,include,trust_word
+ECAT,BLACKROCK ESG CAPITAL ALLOCATION TERM TRUST,include,trust_word
+NXRT,"NEXPOINT RESIDENTIAL TRUST, INC.",include,trust_word
+QQQX,NUVEEN NASDAQ 100 DYNAMIC OVERWRITE FUND,include,fund_word
+PBT,PERMIAN BASIN ROYALTY TRUST,include,trust_word|royalty_trust
+BTT,BLACKROCK MUNICIPAL 2030 TARGET TERM TRUST,include,trust_word|municipal_or_clo_vehicle
+RLJ,RLJ LODGING TRUST,include,trust_word
+RVI,ROBINHOOD VENTURES FUND I,include,fund_word
+HYT,"BLACKROCK CORPORATE HIGH YIELD FUND, INC.",include,fund_word
+NFJ,"VIRTUS DIVIDEND, INTEREST & PREMIUM STRATEGY FUND",include,fund_word
+MSDL,MORGAN STANLEY DIRECT LENDING FUND,include,fund_word
+DSL,DOUBLELINE INCOME SOLUTIONS FUND,include,fund_word
+ABR,ARBOR REALTY TRUST INC,include,trust_word
+JFR,NUVEEN FLOATING RATE INCOME FUND,include,fund_word
+NBXG,NEUBERGER NEXT GENERATION CONNECTIVITY FUND INC.,include,fund_word
+CTBI,COMMUNITY TRUST BANCORP INC /KY/,include,trust_word
+EOS,EATON VANCE ENHANCED EQUITY INCOME FUND II,include,fund_word
+NMZ,NUVEEN MUNICIPAL HIGH INCOME OPPORTUNITY FUND,include,fund_word|municipal_or_clo_vehicle
+CRF,CORNERSTONE TOTAL RETURN FUND INC,include,fund_word
+SBR,SABINE ROYALTY TRUST,include,trust_word|royalty_trust
+CMRF,"CIM REAL ESTATE FINANCE TRUST, INC.",include,trust_word
+AOD,ABRDN TOTAL DYNAMIC DIVIDEND FUND,include,fund_word
+EVV,EATON VANCE LTD DURATION INCOME FUND,include,fund_word
+SVC,SERVICE PROPERTIES TRUST,include,trust_word
+EMO,CLEARBRIDGE ENERGY MIDSTREAM OPPORTUNITY FUND INC.,include,fund_word
+CII,"BLACKROCK ENHANCED LARGE CAP CORE FUND, INC.",include,fund_word
+ETW,EATON VANCE TAX-MANAGED GLOBAL BUY-WRITE OPPORTUNITIES FUND,include,fund_word
+MUC,"BLACKROCK MUNIHOLDINGS CALIFORNIA QUALITY FUND, INC.",include,fund_word
+GSBD,"GOLDMAN SACHS BDC, INC.",include,bdc_vehicle
+PDM,"PIEDMONT REALTY TRUST, INC.",include,trust_word
+BTX,BLACKROCK TECHNOLOGY & PRIVATE EQUITY TERM TRUST,include,trust_word
+CHY,CALAMOS CONVERTIBLE & HIGH INCOME FUND,include,fund_word
+KBDC,"KAYNE ANDERSON BDC, INC.",include,bdc_vehicle
+PDX,PIMCO DYNAMIC INCOME STRATEGY FUND,include,fund_word
+CHI,CALAMOS CONVERTIBLE OPPORTUNITIES & INCOME FUND,include,fund_word
+BTZ,BLACKROCK CREDIT ALLOCATION INCOME TRUST,include,trust_word
+BCX,BLACKROCK RESOURCES & COMMODITIES STRATEGY TRUST,include,trust_word
+NRK,NUVEEN NEW YORK AMT-FREE QUALITY MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+PMT,PENNYMAC MORTGAGE INVESTMENT TRUST,include,trust_word
+HTD,JOHN HANCOCK TAX-ADVANTAGED DIVIDEND INCOME FUND,include,fund_word
+BBDC,"BARINGS BDC, INC.",include,bdc_vehicle
+STK,"COLUMBIA SELIGMAN PREMIUM TECHNOLOGY GROWTH FUND, INC.",include,fund_word
+AIO,VIRTUS ARTIFICIAL INTELLIGENCE & TECHNOLOGY OPPORTUNITIES FUND,include,fund_word
+BMEZ,BLACKROCK HEALTH SCIENCES TERM TRUST,include,trust_word
+AWF,ALLIANCEBERNSTEIN GLOBAL HIGH INCOME FUND INC,include,fund_word
+PCN,PIMCO CORPORATE & INCOME STRATEGY FUND,include,fund_word
+PHK,PIMCO HIGH INCOME FUND,include,fund_word
+PSTL,"POSTAL REALTY TRUST, INC.",include,trust_word
+EOI,EATON VANCE ENHANCED EQUITY INCOME FUND,include,fund_word
+MQY,"BLACKROCK MUNIYIELD QUALITY FUND, INC.",include,fund_word
+MEGI,NYLI CBRE GLOBAL INFRASTRUCTURE MEGATRENDS TERM FUND,include,fund_word
+ADAM,"ADAMAS TRUST, INC.",include,trust_word
+THQ,ABRDN HEALTHCARE OPPORTUNITIES FUND,include,fund_word
+ASGI,ABRDN GLOBAL INFRASTRUCTURE INCOME FUND,include,fund_word
+PEO,"ADAMS NATURAL RESOURCES FUND, INC.",include,fund_word
+NIE,VIRTUS EQUITY & CONVERTIBLE INCOME FUND,include,fund_word
+JQC,NUVEEN CREDIT STRATEGIES INCOME FUND,include,fund_word
+MYI,"BLACKROCK MUNIYIELD QUALITY FUND III, INC.",include,fund_word
+IGR,CBRE GLOBAL REAL ESTATE INCOME FUND,include,fund_word
+RMT,"ROYCE MICRO-CAP TRUST, INC.",include,trust_word
+BIT,BLACKROCK MULTI-SECTOR INCOME TRUST,include,trust_word
+RA,BROOKFIELD REAL ASSETS INCOME FUND INC.,include,fund_word
+WDI,WESTERN ASSET DIVERSIFIED INCOME FUND (WDI),include,fund_word
+FBRT,"FRANKLIN BSP REALTY TRUST, INC.",include,trust_word
+TBLD,THORNBURG INCOME BUILDER OPPORTUNITIES TRUST,include,trust_word
+BUI,"BLACKROCK UTILITIES, INFRASTRUCTURE & POWER OPPORTUNITIES TRUST",include,trust_word
+DLY,DOUBLELINE YIELD OPPORTUNITIES FUND,include,fund_word
+PFN,PIMCO INCOME STRATEGY FUND II,include,fund_word
+ACP,ABRDN INCOME CREDIT STRATEGIES FUND,include,fund_word
+CCD,CALAMOS DYNAMIC CONVERTIBLE & INCOME FUND,include,fund_word
+NKX,NUVEEN CALIFORNIA AMT-FREE QUALITY MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+RWT,REDWOOD TRUST INC,include,trust_word
+PAXS,PIMCO ACCESS INCOME FUND,include,fund_word
+ALSAF,ALPHA STAR ACQUISITION CORP,include,spac_acquisition_title
+BOE,BLACKROCK ENHANCED GLOBAL DIVIDEND TRUST,include,trust_word
+AHRT,"AH REALTY TRUST, INC.",include,trust_word
+DMII,DRUGS MADE IN AMERICA ACQUISITION II CORP.,include,spac_acquisition_title
+MUJ,"BLACKROCK MUNIHOLDINGS NEW JERSEY QUALITY FUND, INC.",include,fund_word
+TRTX,"TPG RE FINANCE TRUST, INC.",include,trust_word
+PDT,JOHN HANCOCK PREMIUM DIVIDEND FUND,include,fund_word
+DSU,"BLACKROCK DEBT STRATEGIES FUND, INC.",include,fund_word|note_or_debt_abbreviation
+NDMO,NUVEEN DYNAMIC MUNICIPAL OPPORTUNITIES FUND,include,fund_word|municipal_or_clo_vehicle
+WASH,WASHINGTON TRUST BANCORP INC,include,trust_word
+FAX,"ABRDN ASIA-PACIFIC INCOME FUND, INC.",include,fund_word
+EMD,WESTERN ASSET EMERGING MARKETS DEBT FUND INC.,include,fund_word|note_or_debt_abbreviation
+NML,NEUBERGER ENERGY INFRASTRUCTURE & INCOME FUND INC.,include,fund_word
+EVAC,EQV VENTURES ACQUISITION CORP. II,include,spac_acquisition_title
+NMCO,NUVEEN MUNICIPAL CREDIT OPPORTUNITIES FUND,include,fund_word|municipal_or_clo_vehicle
+MHD,"BLACKROCK MUNIHOLDINGS FUND, INC.",include,fund_word
+AEXA,AMERICAN EXCEPTIONALISM ACQUISITION CORP. A,include,spac_acquisition_title
+UHT,UNIVERSAL HEALTH REALTY INCOME TRUST,include,trust_word
+IIM,INVESCO VALUE MUNICIPAL INCOME TRUST,include,trust_word|municipal_or_clo_vehicle
+ETJ,EATON VANCE RISK-MANAGED DIVERSIFIED EQUITY INCOME FUND,include,fund_word
+GUT,GABELLI UTILITY TRUST,include,trust_word
+ILPT,INDUSTRIAL LOGISTICS PROPERTIES TRUST,include,trust_word
+MMU,WESTERN ASSET MANAGED MUNICIPALS FUND INC.,include,fund_word
+MSIF,"MSC INCOME FUND, INC.",include,fund_word
+VGM,INVESCO TRUST FOR INVESTMENT GRADE MUNICIPALS,include,trust_word
+AVK,ADVENT CONVERTIBLE & INCOME FUND,include,fund_word
+CHW,CALAMOS GLOBAL DYNAMIC INCOME FUND,include,fund_word
+DPG,DUFF & PHELPS UTILITY & INFRASTRUCTURE FUND INC.,include,fund_word
+VKQ,INVESCO MUNICIPAL TRUST,include,trust_word|municipal_or_clo_vehicle
+THW,ABRDN WORLD HEALTHCARE FUND,include,fund_word
+WIW,WESTERN ASSET INFLATION-LINKED OPPORTUNITIES & INCOME FUND,include,fund_word
+GUG,GUGGENHEIM ACTIVE ALLOCATION FUND,include,fund_word
+TWN,TAIWAN FUND INC,include,fund_word
+BDN,BRANDYWINE REALTY TRUST,include,trust_word
+BGY,BLACKROCK ENHANCED INTERNATIONAL DIVIDEND TRUST,include,trust_word
+VCV,INVESCO CALIFORNIA VALUE MUNICIPAL INCOME TRUST,include,trust_word|municipal_or_clo_vehicle
+BGB,BLACKSTONE STRATEGIC CREDIT 2027 TERM FUND,include,fund_word
+IQI,INVESCO QUALITY MUNICIPAL INCOME TRUST,include,trust_word|municipal_or_clo_vehicle
+BME,BLACKROCK HEALTH SCIENCES TRUST,include,trust_word
+NWAX,NEW AMERICA ACQUISITION I CORP.,include,spac_acquisition_title
+KRSP,RICE ACQUISITION CORP 3,include,spac_acquisition_title
+CLDT,CHATHAM LODGING TRUST,include,trust_word
+CHCT,COMMUNITY HEALTHCARE TRUST INC,include,trust_word
+FTHY,FIRST TRUST HIGH YIELD OPPORTUNITIES 2027 TERM FUND,include,fund_word|trust_word
+IFN,"ABERDEEN INDIA FUND, INC.",include,fund_word
+ETO,EATON VANCE TAX-ADVANTAGED GLOBAL DIVIDEND OPPORTUNITIES FUND,include,fund_word
+PML,PIMCO MUNICIPAL INCOME FUND II,include,fund_word|municipal_or_clo_vehicle
+IGD,VOYA GLOBAL EQUITY DIVIDEND & PREMIUM OPPORTUNITY FUND,include,fund_word
+GHY,"PGIM GLOBAL HIGH YIELD FUND, INC.",include,fund_word
+BLW,BLACKROCK LTD DURATION INCOME TRUST,include,trust_word
+MEVO,M EVO GLOBAL ACQUISITION CORP II,include,spac_acquisition_title
+ANSC,AGRICULTURE & NATURAL SOLUTIONS ACQUISITION CORP,include,spac_acquisition_title
+CRAN,CRANE HARBOR ACQUISITION CORP. II,include,spac_acquisition_title
+GPAT,GP-ACT III ACQUISITION CORP.,include,spac_acquisition_title
+NMAI,NUVEEN MULTI-ASSET INCOME FUND,include,fund_word
+VVR,INVESCO SENIOR INCOME TRUST,include,trust_word
+KIO,KKR INCOME OPPORTUNITIES FUND,include,fund_word
+NBB,NUVEEN TAXABLE MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+FFA,FIRST TRUST ENHANCED EQUITY INCOME FUND,include,fund_word|trust_word
+ETB,EATON VANCE TAX-MANAGED BUY-WRITE INCOME FUND,include,fund_word
+BCAR,D. BORAL ARC ACQUISITION I CORP.,include,spac_acquisition_title
+IEAG,INFINITE EAGLE ACQUISITION CORP.,include,spac_acquisition_title
+MBVI,M3-BRIGADE ACQUISITION VI CORP.,include,spac_acquisition_title
+IACO,IDEA ACQUISITION CORP.,include,spac_acquisition_title
+MESH,MESHFLOW ACQUISITION CORP,include,spac_acquisition_title
+DBCA,D. BORAL ACQUISITION I CORP.,include,spac_acquisition_title
+BGR,BLACKROCK ENERGY & RESOURCES TRUST,include,trust_word
+PTOR,PRAETORIAN ACQUISITION CORP.,include,spac_acquisition_title
+FINS,ANGEL OAK FINANCIAL STRATEGIES INCOME TERM TRUST,include,trust_word
+EVN,EATON VANCE MUNICIPAL INCOME TRUST,include,trust_word|municipal_or_clo_vehicle
+KFII,K&F GROWTH ACQUISITION CORP. II,include,spac_acquisition_title
+CCAP,"CRESCENT CAPITAL BDC, INC.",include,bdc_vehicle
+XRPN,ARMADA ACQUISITION CORP. II,include,spac_acquisition_title
+CLBR,COLOMBIER ACQUISITION CORP. III,include,spac_acquisition_title
+MUA,"BLACKROCK MUNIASSETS FUND, INC.",include,fund_word
+SAAQ,SPACE ASSET ACQUISITION CORP.,include,spac_acquisition_title
+CRAQ,CAL REDWOOD ACQUISITION CORP.,include,spac_acquisition_title
+KREF,KKR REAL ESTATE FINANCE TRUST INC.,include,trust_word
+RTAC,RENATUS TACTICAL ACQUISITION CORP I,include,spac_acquisition_title
+NPAC,NEW PROVIDENCE ACQUISITION CORP. III/CAYMAN,include,spac_acquisition_title
+BBCQ,BLEICHROEDER ACQUISITION CORP. II,include,spac_acquisition_title
+TACO,BERTO ACQUISITION CORP.,include,spac_acquisition_title
+ALF,CENTURION ACQUISITION CORP.,include,spac_acquisition_title
+FRA,"BLACKROCK FLOATING RATE INCOME STRATEGIES FUND, INC.",include,fund_word
+SDHY,PGIM SHORT DURATION HIGH YIELD OPPORTUNITIES FUND,include,fund_word
+PCAP,PROCAP ACQUISITION CORP,include,spac_acquisition_title
+ZKP,LAFAYETTE DIGITAL ACQUISITION CORP. I,include,spac_acquisition_title
+MBAV,M3-BRIGADE ACQUISITION V CORP.,include,spac_acquisition_title
+MTAL,METALS ACQUISITION CORP. II,include,spac_acquisition_title
+RDAG,REPUBLIC DIGITAL ACQUISITION CO,include,spac_acquisition_title
+INRE,"INLAND REAL ESTATE INCOME TRUST, INC.",include,trust_word
+WENN,WEN ACQUISITION CORP,include,spac_acquisition_title
+VKI,INVESCO ADVANTAGE MUNICIPAL INCOME TRUST II,include,trust_word|municipal_or_clo_vehicle
+PFL,PIMCO INCOME STRATEGY FUND,include,fund_word
+EAD,ALLSPRING INCOME OPPORTUNITIES FUND,include,fund_word
+NCV,VIRTUS CONVERTIBLE & INCOME FUND,include,fund_word
+FOF,"COHEN & STEERS CLOSED-END OPPORTUNITY FUND, INC.",include,fund_word
+HACQ,HCM IV ACQUISITION CORP.,include,spac_acquisition_title
+MZYX,MOZAYYX ACQUISITION CORP.,include,spac_acquisition_title
+MYN,"BLACKROCK MUNIYIELD NEW YORK QUALITY FUND, INC.",include,fund_word
+FCRS,FUTURECREST ACQUISITION CORP.,include,spac_acquisition_title
+AEF,"ABRDN EMERGING MARKETS EX-CHINA FUND, INC.",include,fund_word
+FVAV,FORTRESS VALUE ACQUISITION CORP. V,include,spac_acquisition_title
+MSB,MESABI TRUST,include,trust_word
+SDHI,SIDDHI ACQUISITION CORP (CAYMAN ISLANDS),include,spac_acquisition_title
+OIM,ONEIM ACQUISITION CORP.,include,spac_acquisition_title
+ALUB,ALUSSA ENERGY ACQUISITION CORP. II,include,spac_acquisition_title
+AWP,ABRDN GLOBAL PREMIER PROPERTIES FUND,include,fund_word
+TACH,TITAN ACQUISITION CORP.,include,spac_acquisition_title
+OTGA,OTG ACQUISITION CORP. I,include,spac_acquisition_title
+DMAA,DRUGS MADE IN AMERICA ACQUISITION CORP.,include,spac_acquisition_title
+IPCX,INFLECTION POINT ACQUISITION CORP. III,include,spac_acquisition_title
+CCII,COHEN CIRCLE ACQUISITION CORP. II,include,spac_acquisition_title
+HIX,WESTERN ASSET HIGH INCOME FUND II INC.,include,fund_word
+KCHV,KOCHAV DEFENSE ACQUISITION CORP.,include,spac_acquisition_title
+SOUL,SOULPOWER ACQUISITION CORP.,include,spac_acquisition_title
+ARCI,ARCHIMEDES TECH SPAC PARTNERS III CO.,include,spac_acquisition_title
+PAII,PYROPHYTE ACQUISITION CORP. II,include,spac_acquisition_title
+KTF,DWS MUNICIPAL INCOME TRUST,include,trust_word|municipal_or_clo_vehicle
+SCD,LMP CAPITAL & INCOME FUND INC.,include,fund_word
+OYSE,OYSTER ENTERPRISES II ACQUISITION CORP,include,spac_acquisition_title
+JGH,NUVEEN GLOBAL HIGH INCOME FUND,include,fund_word
+BLZR,TRAILBLAZER ACQUISITION CORP.,include,spac_acquisition_title
+AXIN,AXIOM INTELLIGENCE ACQUISITION CORP 1,include,spac_acquisition_title
+ACAA,AVERIN CAPITAL ACQUISITION CORP.,include,spac_acquisition_title
+SORN,SOREN ACQUISITION CORP.,include,spac_acquisition_title
+MIY,"BLACKROCK MUNIYIELD MICHIGAN QUALITY FUND, INC.",include,fund_word
+HFRO,HIGHLAND OPPORTUNITIES & INCOME FUND,include,fund_word
+JRI,NUVEEN REAL ASSET INCOME & GROWTH FUND,include,fund_word
+HCMA,HCM III ACQUISITION CORP.,include,spac_acquisition_title
+HIO,WESTERN ASSET HIGH INCOME OPPORTUNITY FUND INC.,include,fund_word
+PINE,"ALPINE INCOME PROPERTY TRUST, INC.",include,trust_word
+DSAC,DAEDALUS SPECIAL ACQUISITION CORP.,include,spac_acquisition_title
+AACI,ARMADA ACQUISITION CORP. III,include,spac_acquisition_title
+IPFX,INFLECTION POINT ACQUISITION CORP. VI,include,spac_acquisition_title
+VACH,VOYAGER ACQUISITION CORP./CAYMAN ISLANDS,include,spac_acquisition_title
+PSBD,PALMER SQUARE CAPITAL BDC INC.,include,bdc_vehicle
+BLUW,BLUE WATER ACQUISITION CORP. III,include,spac_acquisition_title
+BKT,"BLACKROCK INCOME TRUST, INC.",include,trust_word
+BEAG,BOLD EAGLE ACQUISITION CORP.,include,spac_acquisition_title
+CAF,"MORGAN STANLEY CHINA A SHARE FUND, INC.",include,fund_word
+SIMA,SIM ACQUISITION CORP. I,include,spac_acquisition_title
+MLAC,MOUNTAIN LAKE ACQUISITION CORP.,include,spac_acquisition_title
+PPT,PUTNAM PREMIER INCOME TRUST,include,trust_word
+ATII,ARCHIMEDES TECH SPAC PARTNERS II CO.,include,spac_acquisition_title
+EMF,TEMPLETON EMERGING MARKETS FUND,include,fund_word
+BGT,BLACKROCK FLOATING RATE INCOME TRUST,include,trust_word
+FERA,FIFTH ERA ACQUISITION CORP I,include,spac_acquisition_title
+OBA,OXLEY BRIDGE ACQUISITION LTD,include,spac_acquisition_title
+DRDB,ROMAN DBDR ACQUISITION CORP. II,include,spac_acquisition_title
+SZZL,SIZZLE ACQUISITION CORP. II,include,spac_acquisition_title
+VACI,VIKING ACQUISITION CORP I,include,spac_acquisition_title
+AGD,ABRDN GLOBAL DYNAMIC DIVIDEND FUND,include,fund_word
+PACH,PIONEER ACQUISITION I CORP,include,spac_acquisition_title
+SVAC,SPRING VALLEY ACQUISITION CORP. III,include,spac_acquisition_title
+JOF,JAPAN SMALLER CAPITALIZATION FUND INC,include,fund_word
+EVOX,EVOLUTION GLOBAL ACQUISITION CORP,include,spac_acquisition_title
+NXG,NXG NEXTGEN INFRASTRUCTURE INCOME FUND,include,fund_word
+ASG,LIBERTY ALL STAR GROWTH FUND INC.,include,fund_word
+PMTR,PERIMETER ACQUISITION CORP. I,include,spac_acquisition_title
+PTAC,PATRIOT ACQUISITION CORP./CI,include,spac_acquisition_title
+KOYN,"CSLM DIGITAL ASSET ACQUISITION CORP III, LTD",include,spac_acquisition_title
+SPXX,NUVEEN S&P 500 DYNAMIC OVERWRITE FUND,include,fund_word
+SAC,SAFEGUARD ACQUISITION CORP.,include,spac_acquisition_title
+RFMZ,"RIVERNORTH FLEXIBLE MUNICIPAL INCOME FUND II, INC.",include,fund_word|municipal_or_clo_vehicle
+POLE,ANDRETTI ACQUISITION CORP. II,include,spac_acquisition_title
+RNGT,RANGE CAPITAL ACQUISITION CORP II,include,spac_acquisition_title
+TVA,TEXAS VENTURES ACQUISITION III CORP,include,spac_acquisition_title
+JACS,JACKSON ACQUISITION CO II,include,spac_acquisition_title
+MKLY,MCKINLEY ACQUISITION CORP,include,spac_acquisition_title
+AFB,ALLIANCEBERNSTEIN NATIONAL MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+AEAQ,ACTIVATE ENERGY ACQUISITION CORP.,include,spac_acquisition_title
+MXF,MEXICO FUND INC,include,fund_word
+AACO,ABONY ACQUISITION CORP. I,include,spac_acquisition_title
+NCA,NUVEEN CALIFORNIA MUNICIPAL VALUE FUND,include,fund_word|municipal_or_clo_vehicle
+LPAA,LAUNCH ONE ACQUISITION CORP.,include,spac_acquisition_title
+RIV,"RIVERNORTH OPPORTUNITIES FUND, INC.",include,fund_word
+ILLU,ILLUMINATION ACQUISITION CORP. I,include,spac_acquisition_title
+TMTS,SPARTACUS ACQUISITION CORP. II,include,spac_acquisition_title
+CAQ,CAMBRIDGE ACQUISITION CORP.,include,spac_acquisition_title
+EFR,EATON VANCE SENIOR FLOATING-RATE TRUST,include,trust_word
+LWAC,LIGHTWAVE ACQUISITION CORP.,include,spac_acquisition_title
+LPBB,LAUNCH TWO ACQUISITION CORP.,include,spac_acquisition_title
+SVIV,SPRING VALLEY ACQUISITION CORP. IV,include,spac_acquisition_title
+RAC,RITHM ACQUISITION CORP.,include,spac_acquisition_title
+ITHA,ITHAX ACQUISITION CORP III,include,spac_acquisition_title
+ARDC,"ARES DYNAMIC CREDIT ALLOCATION FUND, INC.",include,fund_word
+GTERA,GLOBA TERRA ACQUISITION CORP,include,spac_acquisition_title
+BIXI,BITCOIN INFRASTRUCTURE ACQUISITION CORP LTD,include,spac_acquisition_title
+LOKV,LIVE OAK ACQUISITION CORP. V,include,spac_acquisition_title
+JENA,JENA ACQUISITION CORP II,include,spac_acquisition_title
+NBH,NEUBERGER MUNICIPAL FUND INC.,include,fund_word|municipal_or_clo_vehicle
+RFI,COHEN & STEERS TOTAL RETURN REALTY FUND INC,include,fund_word
+GSRF,GSR IV ACQUISITION CORP.,include,spac_acquisition_title
+CMTG,"CLAROS MORTGAGE TRUST, INC.",include,trust_word
+FUND,SPROTT FOCUS TRUST INC.,include,trust_word
+GPAC,GENERAL PURPOSE ACQUISITION CORP.,include,spac_acquisition_title
+IRHO,IRON HORSE ACQUISITION II CORP.,include,spac_acquisition_title
+SVAQ,SILICON VALLEY ACQUISITION CORP.,include,spac_acquisition_title
+HCAC,HALL CHADWICK ACQUISITION CORP,include,spac_acquisition_title
+TEI,TEMPLETON EMERGING MARKETS INCOME FUND,include,fund_word
+BACC,BLUE ACQUISITION CORP/CAYMAN,include,spac_acquisition_title
+AACB,ARTIUS II ACQUISITION INC.,include,spac_acquisition_title
+JWSMF,JAWS MUSTANG ACQUISITION CORP,include,spac_acquisition_title
+EFT,EATON VANCE FLOATING-RATE INCOME TRUST,include,trust_word
+XFLT,XAI OCTAGON FLOATING RATE & ALTERNATIVE INCOME TRUST,include,trust_word
+BRW,SABA CAPITAL INCOME & OPPORTUNITIES FUND,include,fund_word
+OIA,INVESCO MUNICIPAL INCOME OPPORTUNITIES TRUST,include,trust_word|municipal_or_clo_vehicle
+PMO,PUTNAM MUNICIPAL OPPORTUNITIES TRUST,include,trust_word|municipal_or_clo_vehicle
+LPCV,LAUNCHPAD CADENZA ACQUISITION CORP I,include,spac_acquisition_title
+ADAC,AMERICAN DRIVE ACQUISITION CO,include,spac_acquisition_title
+NCZ,VIRTUS CONVERTIBLE & INCOME FUND II,include,fund_word
+FGII,FG IMPERII ACQUISITION CORP.,include,spac_acquisition_title
+NPCT,NUVEEN CORE PLUS IMPACT FUND,include,fund_word
+IRAB,IRIS ACQUISITION CORP II,include,spac_acquisition_title
+TDF,TEMPLETON DRAGON FUND INC,include,fund_word
+MMD,NYLI MACKAY DEFINEDTERM MUNI OPPORTUNITIES FUND,include,fund_word|municipal_or_clo_vehicle
+DBL,DOUBLELINE OPPORTUNISTIC CREDIT FUND,include,fund_word
+TVAI,THAYER VENTURES ACQUISITION CORP II,include,spac_acquisition_title
+XCBE,X3 ACQUISITION CORP. LTD.,include,spac_acquisition_title
+RMM,"RIVERNORTH MANAGED DURATION MUNICIPAL INCOME FUND, INC.",include,fund_word|municipal_or_clo_vehicle
+BGH,BARINGS GLOBAL SHORT DURATION HIGH YIELD FUND,include,fund_word
+JCE,NUVEEN CORE EQUITY ALPHA FUND,include,fund_word
+MIN,MFS INTERMEDIATE INCOME TRUST,include,trust_word
+XSLL,XSOLLA SPAC 1,include,spac_acquisition_title
+EOD,ALLSPRING GLOBAL DIVIDEND OPPORTUNITY FUND,include,fund_word
+MUZE,MUZERO ACQUISITION CORP,include,spac_acquisition_title
+ACV,VIRTUS DIVERSIFIED INCOME & CONVERTIBLE FUND,include,fund_word
+KF,KOREA FUND INC,include,fund_word
+PMM,PUTNAM MANAGED MUNICIPAL INCOME TRUST,include,trust_word|municipal_or_clo_vehicle
+OACC,OAKTREE ACQUISITION CORP. III LIFE SCIENCES,include,spac_acquisition_title
+EOT,EATON VANCE NATIONAL MUNICIPAL OPPORTUNITIES TRUST,include,trust_word|municipal_or_clo_vehicle
+FACT,FACT II ACQUISITION CORP.,include,spac_acquisition_title
+RLTY,COHEN & STEERS REAL ESTATE OPPORTUNITIES & INCOME FUND,include,fund_word
+PLMK,"PLUM ACQUISITION CORP, IV",include,spac_acquisition_title
+NTWO,NEWBURY STREET II ACQUISITION CORP,include,spac_acquisition_title
+WLII,WILLOW LANE ACQUISITION CORP. II,include,spac_acquisition_title
+VNME,VENDOME ACQUISITION CORP I,include,spac_acquisition_title
+CPZ,CALAMOS LONG/SHORT EQUITY & DYNAMIC INCOME TRUST,include,trust_word
+NXDT,NEXPOINT DIVERSIFIED REAL ESTATE TRUST,include,trust_word
+FCT,FIRST TRUST SENIOR FLOATING RATE INCOME FUND II,include,fund_word|trust_word
+RAAQ,REAL ASSET ACQUISITION CORP.,include,spac_acquisition_title
+ERC,ALLSPRING MULTI-SECTOR INCOME FUND,include,fund_word
+RCS,"PIMCO STRATEGIC INCOME FUND, INC.",include,fund_word
+SCII,SC II ACQUISITION CORP.,include,spac_acquisition_title
+NUW,NUVEEN AMT-FREE MUNICIPAL VALUE FUND,include,fund_word|municipal_or_clo_vehicle
+GLO,CLOUGH GLOBAL OPPORTUNITIES FUND,include,fund_word
+COPL,COPLEY ACQUISITION CORP,include,spac_acquisition_title
+MCR,MFS CHARTER INCOME TRUST,include,trust_word
+MMT,MFS MULTIMARKET INCOME TRUST,include,trust_word
+MCGA,YORKVILLE ACQUISITION CORP.,include,spac_acquisition_title
+SOCA,SOLARIUS CAPITAL ACQUISITION CORP.,include,spac_acquisition_title
+SSAC,SPACSPHERE ACQUISITION CORP.,include,spac_acquisition_title
+IGAC,INVEST GREEN ACQUISITION CORP,include,spac_acquisition_title
+DAAQ,DIGITAL ASSET ACQUISITION CORP.,include,spac_acquisition_title
+MITT,"TPG MORTGAGE INVESTMENT TRUST, INC.",include,trust_word
+FTF,FRANKLIN LTD DURATION INCOME TRUST,include,trust_word
+TDWD,TAILWIND 2.0 ACQUISITION CORP.,include,spac_acquisition_title
+MACI,MELAR ACQUISITION CORP. I/CAYMAN,include,spac_acquisition_title
+TDAC,TRANSLATIONAL DEVELOPMENT ACQUISITION CORP.,include,spac_acquisition_title
+LATA,GALATA ACQUISITION CORP. II,include,spac_acquisition_title
+SRV,NXG CUSHING MIDSTREAM ENERGY FUND,include,fund_word
+JRS,NUVEEN REAL ESTATE INCOME FUND,include,fund_word
+SUMA,SUMA ACQUISITION CORP,include,spac_acquisition_title
+BLRK,BLUEROCK ACQUISITION CORP.,include,spac_acquisition_title
+TPVG,TRIPLEPOINT VENTURE GROWTH BDC CORP.,include,bdc_vehicle
+LGI,LAZARD GLOBAL TOTAL RETURN & INCOME FUND INC,include,fund_word
+SABA,SABA CAPITAL INCOME & OPPORTUNITIES FUND II,include,fund_word
+BIII,BLACK SPADE ACQUISITION III CO,include,spac_acquisition_title
+HLXC,HELIX ACQUISITION CORP. III,include,spac_acquisition_title
+LIEN,"CHICAGO ATLANTIC BDC, INC.",include,bdc_vehicle
+CTAA,CLEARTHINK 1 ACQUISITION CORP.,include,spac_acquisition_title
+ONCH,1RT ACQUISITION CORP.,include,spac_acquisition_title
+MFM,MFS MUNICIPAL INCOME TRUST,include,trust_word|municipal_or_clo_vehicle
+TSI,TCW STRATEGIC INCOME FUND INC,include,fund_word
+CRAC,CROWN RESERVE ACQUISITION CORP. I,include,spac_acquisition_title
+NPV,NUVEEN VIRGINIA QUALITY MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+GSHR,GESHER ACQUISITION CORP. II,include,spac_acquisition_title
+EGHA,EGH ACQUISITION CORP.,include,spac_acquisition_title
+IPOD,COLLECTIVE ACQUISITION CORP.,include,spac_acquisition_title
+BXSY,BEXIL INVESTMENT TRUST,include,trust_word
+HAVA,HARVARD AVE ACQUISITION CORP,include,spac_acquisition_title
+PALO,PALOMA ACQUISITION CORP I,include,spac_acquisition_title
+IDE,"VOYA INFRASTRUCTURE, INDUSTRIALS & MATERIALS FUND",include,fund_word
+ETX,EATON VANCE MUNICIPAL INCOME 2028 TERM TRUST,include,trust_word|municipal_or_clo_vehicle
+IIF,"MORGAN STANLEY INDIA INVESTMENT FUND, INC.",include,fund_word
+KTWO,K2 CAPITAL ACQUISITION CORP,include,spac_acquisition_title
+FT,FRANKLIN UNIVERSAL TRUST,include,trust_word
+BRKH,BURTECH ACQUISITION CORP II,include,spac_acquisition_title
+SJT,SAN JUAN BASIN ROYALTY TRUST,include,trust_word|royalty_trust
+FIGX,FIGX CAPITAL ACQUISITION CORP.,include,spac_acquisition_title
+LFAC,LEAPFROG ACQUISITION CORP,include,spac_acquisition_title
+NHS,NEUBERGER HIGH YIELD STRATEGIES FUND INC.,include,fund_word
+AIIA,AI INFRASTRUCTURE ACQUISITION CORP.,include,spac_acquisition_title
+VPV,INVESCO PENNSYLVANIA VALUE MUNICIPAL INCOME TRUST,include,trust_word|municipal_or_clo_vehicle
+HGLB,HIGHLAND GLOBAL ALLOCATION FUND,include,fund_word
+GF,NEW GERMANY FUND INC,include,fund_word
+OPP,"RIVERNORTH/DOUBLELINE STRATEGIC OPPORTUNITY FUND, INC.",include,fund_word
+WIA,WESTERN ASSET INFLATION-LINKED INCOME FUND,include,fund_word
+NRO,NEUBERGER REAL ESTATE SECURITIES INCOME FUND INC,include,fund_word
+SEVN,SEVEN HILLS REALTY TRUST,include,trust_word
+DHY,CREDIT SUISSE HIGH YIELD CREDIT FUND,include,fund_word
+PAAC,PROEM ACQUISITION CORP. I,include,spac_acquisition_title
+BWIV,BLUE WATER ACQUISITION CORP. IV,include,spac_acquisition_title
+EHI,WESTERN ASSET GLOBAL HIGH INCOME FUND INC.,include,fund_word
+CHEC,CHENGHE ACQUISITION III CO.,include,spac_acquisition_title
+GGT,GABELLI MULTIMEDIA TRUST INC.,include,trust_word
+DHF,BNY MELLON HIGH YIELD STRATEGIES FUND,include,fund_word
+FLC,FLAHERTY & CRUMRINE TOTAL RETURN FUND INC,include,fund_word
+BSL,BLACKSTONE SENIOR FLOATING RATE 2027 TERM FUND,include,fund_word
+ECF,ELLSWORTH GROWTH & INCOME FUND LTD,include,fund_word
+RANG,RANGE CAPITAL ACQUISITION CORP.,include,spac_acquisition_title
+TAVI,TAVIA ACQUISITION CORP.,include,spac_acquisition_title
+BCAC,BROOKLINE CAPITAL ACQUISITION CORP II,include,spac_acquisition_title
+EDF,VIRTUS STONE HARBOR EMERGING MARKETS INCOME FUND,include,fund_word
+FREVS,"FIRST REAL ESTATE INVESTMENT TRUST OF NEW JERSEY, INC.",include,trust_word
+NMP,NMP ACQUISITION CORP.,include,spac_acquisition_title
+PCQ,PIMCO CALIFORNIA MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+NAZ,NUVEEN ARIZONA QUALITY MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+EMIS,EMMIS ACQUISITION CORP.,include,spac_acquisition_title
+QRED,QUASAREDGE ACQUISITION CORP,include,spac_acquisition_title
+LKSP,LAKE SUPERIOR ACQUISITION CORP,include,spac_acquisition_title
+NNY,NUVEEN NEW YORK MUNICIPAL VALUE FUND,include,fund_word|municipal_or_clo_vehicle
+GLED,GALAXYEDGE ACQUISITION CORP,include,spac_acquisition_title
+LAFA,LAFAYETTE ACQUISITION CORP.,include,spac_acquisition_title
+VTN,INVESCO TRUST FOR INVESTMENT GRADE NEW YORK MUNICIPALS,include,trust_word
+BMN,BLACKROCK 2037 MUNICIPAL TARGET TERM TRUST,include,trust_word|municipal_or_clo_vehicle
+SPEG,SILVER PEGASUS ACQUISITION CORP.,include,spac_acquisition_title
+WPAC,WHITE PEARL ACQUISITION CORP.,include,spac_acquisition_title
+GLQ,CLOUGH GLOBAL EQUITY FUND,include,fund_word
+MHF,WESTERN ASSET MUNICIPAL HIGH INCOME FUND INC.,include,fund_word|municipal_or_clo_vehicle
+INAC,INDIGO ACQUISITION CORP.,include,spac_acquisition_title
+PIM,PUTNAM MASTER INTERMEDIATE INCOME TRUST,include,trust_word
+YCY,AA MISSION ACQUISITION CORP. II,include,spac_acquisition_title
+IGA,VOYA GLOBAL ADVANTAGE & PREMIUM OPPORTUNITY FUND,include,fund_word
+SPE,"SPECIAL OPPORTUNITIES FUND, INC.",include,fund_word
+MSD,MORGAN STANLEY EMERGING MARKETS DEBT FUND INC,include,fund_word|note_or_debt_abbreviation
+TRAD,APEX TECH ACQUISITION INC.,include,spac_acquisition_title
+BHAV,BHAV ACQUISITION CORP,include,spac_acquisition_title
+MPA,BLACKROCK MUNIYIELD PENNSYLVANIA QUALITY FUND,include,fund_word
+BCV,BANCROFT FUND LTD,include,fund_word
+EVG,EATON VANCE SHORT DURATION DIVERSIFIED INCOME FUND,include,fund_word
+HEQ,JOHN HANCOCK DIVERSIFIED INCOME FUND,include,fund_word
+BGX,BLACKSTONE LONG-SHORT CREDIT INCOME FUND,include,fund_word
+RFAM,RF ACQUISITION CORP III,include,spac_acquisition_title
+CIK,"CREDIT SUISSE ASSET MANAGEMENT INCOME FUND, INC.",include,fund_word
+UAC,UNITED ACQUISITION CORP. I,include,spac_acquisition_title
+HYI,WESTERN ASSET HIGH YIELD OPPORTUNITY FUND INC.,include,fund_word
+CEE,"CENTRAL & EASTERN EUROPE FUND, INC.",include,fund_word
+GRX,GABELLI HEALTHCARE & WELLNESSRX TRUST,include,trust_word
+BWG,BRANDYWINEGLOBAL-GLOBAL INCOME OPPORTUNITIES FUND INC,include,fund_word
+CGO,CALAMOS GLOBAL TOTAL RETURN FUND,include,fund_word
+JHS,JOHN HANCOCK INCOME SECURITIES TRUST,include,trust_word
+IHD,VOYA EMERGING MARKETS HIGH DIVIDEND EQUITY FUND,include,fund_word
+DMO,WESTERN ASSET MORTGAGE OPPORTUNITY FUND INC.,include,fund_word
+IPEX,INFLECTION POINT ACQUISITION CORP. V,include,spac_acquisition_title
+RMMZ,"RIVERNORTH MANAGED DURATION MUNICIPAL INCOME FUND II, INC.",include,fund_word|municipal_or_clo_vehicle
+PHD,"PIONEER FLOATING RATE FUND, INC.",include,fund_word
+NMT,NUVEEN MASSACHUSETTS QUALITY MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+MCN,XAI MADISON EQUITY PREMIUM INCOME FUND,include,fund_word
+VFL,ABRDN NATIONAL MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+IAF,"ABRDN AUSTRALIA EQUITY FUND, INC.",include,fund_word
+NMI,NUVEEN MUNICIPAL INCOME FUND INC,include,fund_word|municipal_or_clo_vehicle
+QSEA,QUARTZSEA ACQUISITION CORP,include,spac_acquisition_title
+GGZ,GABELLI GLOBAL SMALL & MID CAP VALUE TRUST,include,trust_word
+CHAR,CHARLTON ARIA ACQUISITION CORP,include,spac_acquisition_title
+QUMS,QUANTUMSPHERE ACQUISITION CORP,include,spac_acquisition_title
+PGAC,PANTAGES CAPITAL ACQUISITION CORP,include,spac_acquisition_title
+CXE,MFS HIGH INCOME MUNICIPAL TRUST,include,trust_word|municipal_or_clo_vehicle
+GLU,GABELLI GLOBAL UTILITY & INCOME TRUST,include,trust_word
+PAI,WESTERN ASSET INVESTMENT GRADE INCOME FUND INC.,include,fund_word
+JHI,JOHN HANCOCK INVESTORS TRUST,include,trust_word
+NIM,NUVEEN SELECT MATURITIES MUNICIPAL FUND,include,fund_word|municipal_or_clo_vehicle
+RPT,RITHM PROPERTY TRUST INC.,include,trust_word
+SBI,WESTERN ASSET INTERMEDIATE MUNI FUND INC.,include,fund_word|municipal_or_clo_vehicle
+SUNS,"SUNRISE REALTY TRUST, INC.",include,trust_word
+SPKL,SPARK I ACQUISITION CORP,include,spac_acquisition_title
+PCF,HIGH INCOME SECURITIES FUND,include,fund_word
+CHPG,CHAMPIONSGATE ACQUISITION CORP,include,spac_acquisition_title
+ERH,ALLSPRING UTILITIES & HIGH INCOME FUND,include,fund_word
+JLS,NUVEEN MORTGAGE & INCOME FUND/MA/,include,fund_word
+PGP,PIMCO GLOBAL STOCKSPLUS & INCOME FUND,include,fund_word
+RMI,"RIVERNORTH OPPORTUNISTIC MUNICIPAL INCOME FUND, INC.",include,fund_word|municipal_or_clo_vehicle
+IGI,WESTERN ASSET INVESTMENT GRADE OPPORTUNITY TRUST INC.,include,trust_word
+GDL,GDL FUND,include,fund_word
+MGF,MFS GOVERNMENT MARKETS INCOME TRUST,include,trust_word
+LCCC,LAKESHORE ACQUISITION III CORP.,include,spac_acquisition_title
+RGT,"ROYCE GLOBAL TRUST, INC.",include,trust_word
+RFAI,RF ACQUISITION CORP II,include,spac_acquisition_title
+CSTAF,CONSTELLATION ACQUISITION CORP I,include,spac_acquisition_title
+BYNO,BYNORDIC ACQUISITION CORP,include,spac_acquisition_title
+EVF,EATON VANCE SENIOR INCOME TRUST,include,trust_word
+MMTX,MILUNA ACQUISITION CORP,include,spac_acquisition_title
+JATT,JATT II ACQUISITION CORP.,include,spac_acquisition_title
+GCV,GABELLI CONVERTIBLE & INCOME SECURITIES FUND INC,include,fund_word
+RFM,"RIVERNORTH FLEXIBLE MUNICIPAL INCOME FUND, INC.",include,fund_word|municipal_or_clo_vehicle
+IAE,VOYA ASIA PACIFIC HIGH DIVIDEND EQUITY INCOME FUND,include,fund_word
+FMN,FEDERATED HERMES PREMIER MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+CMU,MFS HIGH YIELD MUNICIPAL TRUST,include,trust_word|municipal_or_clo_vehicle
+ALIS,CALISA ACQUISITION CORP,include,spac_acquisition_title
+VGI,VIRTUS GLOBAL MULTI-SECTOR INCOME FUND,include,fund_word
+FVN,FUTURE VISION II ACQUISITION CORP.,include,spac_acquisition_title
+UYSC,UY SCUTI ACQUISITION CORP.,include,spac_acquisition_title
+APAC,STONEBRIDGE ACQUISITION II CORP,include,spac_acquisition_title
+WSTN,WESTIN ACQUISITION CORP,include,spac_acquisition_title
+GDO,WESTERN ASSET GLOBAL CORPORATE OPPORTUNITY FUND INC.,include,fund_word
+DTF,DTF TAX-FREE INCOME 2028 TERM FUND INC,include,fund_word
+PLMJF,PLUM ACQUISITION CORP. III,include,spac_acquisition_title
+BSAA,BEST SPAC I ACQUISITION CORP.,include,spac_acquisition_title
+IXAQF,IX ACQUISITION CORP.,include,spac_acquisition_title
+SSEA,STARRY SEA ACQUISITION CORP,include,spac_acquisition_title
+PNI,PIMCO NEW YORK MUNICIPAL INCOME FUND II,include,fund_word|municipal_or_clo_vehicle
+SWZ,TOTAL RETURN SECURITIES FUND,include,fund_word
+GLV,CLOUGH GLOBAL DIVIDEND & INCOME FUND,include,fund_word
+WTG,WINTERGREEN ACQUISITION CORP.,include,spac_acquisition_title
+NMS,NUVEEN MINNESOTA QUALITY MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+AEAE,ALTENERGY ACQUISITION CORP,include,spac_acquisition_title
+NBRG,NEWBRIDGE ACQUISITION LTD,include,spac_acquisition_title
+CNDA,CONCORD ACQUISITION CORP II,include,spac_acquisition_title
+BPAC,BLUEPORT ACQUISITION LTD,include,spac_acquisition_title
+NRT,NORTH EUROPEAN OIL ROYALTY TRUST,include,trust_word|royalty_trust
+EEA,"EUROPEAN EQUITY FUND, INC / MD",include,fund_word
+CEV,EATON VANCE CALIFORNIA MUNICIPAL INCOME TRUST,include,trust_word|municipal_or_clo_vehicle
+IMAQ,INTERNATIONAL MEDIA ACQUISITION CORP.,include,spac_acquisition_title
+PCM,"PCM FUND, INC.",include,fund_word
+CCIF,CARLYLE CREDIT INCOME FUND,include,fund_word
+KVAC,KEEN VISION ACQUISITION CORP.,include,spac_acquisition_title
+VLT,INVESCO HIGH INCOME TRUST II,include,trust_word
+TLGYF,TLGY ACQUISITION CORP,include,spac_acquisition_title
+PGZ,PRINCIPAL REAL ESTATE INCOME FUND,include,fund_word
+PVL,PERMIANVILLE ROYALTY TRUST,include,trust_word|royalty_trust
+PMVC,PMV CONSUMER ACQUISITION CORP.,include,spac_acquisition_title
+CRT,CROSS TIMBERS ROYALTY TRUST,include,trust_word|royalty_trust
+CXH,MFS INVESTMENT GRADE MUNICIPAL TRUST,include,trust_word|municipal_or_clo_vehicle
+GPMT,GRANITE POINT MORTGAGE TRUST INC.,include,trust_word
+DMA,DESTRA MULTI-ALTERNATIVE FUND,include,fund_word
+IBAC,IB ACQUISITION CORP.,include,spac_acquisition_title
+RSF,"RIVERNORTH CAPITAL & INCOME FUND, INC.",include,fund_word
+MXE,MEXICO EQUITY & INCOME FUND INC,include,fund_word
+CAPN,CAYSON ACQUISITION CORP,include,spac_acquisition_title
+LFT,"LUMENT FINANCE TRUST, INC.",include,trust_word
+FSHP,FLAG SHIP ACQUISITION CORP,include,spac_acquisition_title
+CDAQF,COMPASS DIGITAL ACQUISITION CORP.,include,spac_acquisition_title
+EURK,EUREKA ACQUISITION CORP,include,spac_acquisition_title
+JMM,NUVEEN MULTI-MARKET INCOME FUND,include,fund_word
+RDAC,RISING DRAGON ACQUISITION CORP.,include,spac_acquisition_title
+VOC,VOC ENERGY TRUST,include,trust_word
+RIBB,RIBBON ACQUISITION CORP.,include,spac_acquisition_title
+FWAC,FUTUREWAVE ACQUISITION CORP,include,spac_acquisition_title
+ALCYF,ALCHEMY INVESTMENTS ACQUISITION CORP 1,include,spac_acquisition_title
+BKHA,BLACK HAWK ACQUISITION CORP,include,spac_acquisition_title
+BREZ,BREEZE ACQUISITION CORP. II,include,spac_acquisition_title
+COLA,COLUMBUS ACQUISITION CORP/CAYMAN ISLANDS,include,spac_acquisition_title
+FMY,FIRST TRUST MORTGAGE INCOME FUND,include,fund_word|trust_word
+YHNA,YHN ACQUISITION I LTD,include,spac_acquisition_title
+HSPT,HORIZON SPACE ACQUISITION II CORP.,include,spac_acquisition_title
+QETA,QUETTA ACQUISITION CORP,include,spac_acquisition_title
+BHM,"BLUEROCK HOMES TRUST, INC.",include,trust_word
+TETEF,TECHNOLOGY & TELECOMMUNICATION ACQUISITION CORP,include,spac_acquisition_title
+DTSQ,DT CLOUD STAR ACQUISITION CORP,include,spac_acquisition_title
+MSSAF,METAL SKY STAR ACQUISITION CORP,include,spac_acquisition_title
+GRF,"EAGLE CAPITAL GROWTH FUND, INC.",include,fund_word
+MCAG,MOUNTAIN CREST ACQUISITION CORP. V,include,spac_acquisition_title
+WELNF,INTEGRATED WELLNESS ACQUISITION CORP,include,spac_acquisition_title
+HERZ,"HERZFELD CREDIT INCOME FUND, INC",include,fund_word
+BAYA,BAYVIEW ACQUISITION CORP,include,spac_acquisition_title
+HSPOF,HORIZON SPACE ACQUISITION I CORP.,include,spac_acquisition_title
+WBQNL,WOODBRIDGE LIQUIDATION TRUST,include,trust_word
+GDST,GOLDENSTONE ACQUISITION LTD.,include,spac_acquisition_title
+PRT,PERMROCK ROYALTY TRUST,include,trust_word|royalty_trust
+CIF,MFS INTERMEDIATE HIGH INCOME FUND,include,fund_word
+EMCGF,EMBRACE CHANGE ACQUISITION CORP.,include,spac_acquisition_title
+IGTA,INCEPTION GROWTH ACQUISITION LTD,include,spac_acquisition_title
+ASPC,ASPAC III ACQUISITION CORP.,include,spac_acquisition_title
+MVO,MV OIL TRUST,include,trust_word
+CFND,C1 FUND INC.,include,fund_word
+SPEX,SPECTRE ACQUISITION CORP,include,spac_acquisition_title
+ICMB,"INVESTCORP CREDIT MANAGEMENT BDC, INC.",include,bdc_vehicle
+AHT,ASHFORD HOSPITALITY TRUST INC,include,trust_word
+RCG,"RENN FUND, INC.",include,fund_word
+CHKR,CHESAPEAKE GRANITE WASH TRUST,include,trust_word
+TRXA,T-REX ACQUISITION CORP.,include,spac_acquisition_title
+CMCT,CREATIVE MEDIA & COMMUNITY TRUST CORP,include,trust_word
+IHT,INNSUITES HOSPITALITY TRUST,include,trust_word
+ECTM,ECA MARCELLUS TRUST I,include,trust_word
+MARPS,MARINE PETROLEUM TRUST,include,trust_word
+MTR,MESA ROYALTY TRUST/TX,include,trust_word|royalty_trust
+MMTRS,MILLS MUSIC TRUST,include,trust_word
+SQFT,"PRESIDIO PROPERTY TRUST, INC.",include,trust_word
+DEFG,GRAYSCALE DECENTRALIZED FINANCE (DEFI) FUND LLC,include,fund_word
+WHLR,"WHEELER REAL ESTATE INVESTMENT TRUST, INC.",include,trust_word
+SVVC,"FIRSTHAND TECHNOLOGY VALUE FUND, INC.",include,fund_word
+BID,TRIBECA STRATEGIC ACQUISITION CORP.,include,spac_acquisition_title
+ZTR,VIRTUS TOTAL RETURN FUND INC.,include,fund_word
+VMO,INVESCO MUNICIPAL OPPORTUNITY TRUST,include,trust_word|municipal_or_clo_vehicle
+BTO,JOHN HANCOCK FINANCIAL OPPORTUNITIES FUND,include,fund_word
+XSIAX,VOYA CREDIT INCOME FUND,include,fund_word
+IPB,MERRILL LYNCH DEPOSITOR INC INDEXPLUS TRUST SERIES 2003-1,include,trust_word
+GJH,STRATS SM TRUST FOR U S CELL CORP SEC SERIES 2004 6,include,trust_word
+PYT,PPLUS TRUST SERIES GSC-2,include,trust_word
+USO,"UNITED STATES OIL FUND, LP",include,fund_word
+DBC,INVESCO DB COMMODITY INDEX TRACKING FUND,include,fund_word
+FXE,INVESCO CURRENCYSHARES EURO TRUST,include,trust_word
+GJO,"STRATS SM TRUST FOR WAL-MART STORES, INC. SECURITIES, SERIES 2005-4",include,trust_word
+GJP,"STRATS(SM) TRUST FOR DOMINION RESOURCES, INC. SECURITIES, SERIES 2005-6",include,trust_word
+GJR,"STRATS(SM) TRUST FOR PROCTER & GAMBLE SECURITIES, SERIES 2006-1",include,trust_word
+FXB,INVESCO CURRENCYSHARES BRITISH POUND STERLING TRUST,include,trust_word
+FXC,INVESCO CURRENCYSHARES CANADIAN DOLLAR TRUST,include,trust_word
+FXY,INVESCO CURRENCYSHARES JAPANESE YEN TRUST,include,trust_word
+FXA,INVESCO CURRENCYSHARES AUSTRALIAN DOLLAR TRUST,include,trust_word
+FXF,INVESCO CURRENCYSHARES SWISS FRANC TRUST,include,trust_word
+GJS,"STRATS(SM) TRUST FOR GOLDMAN SACHS GROUP SECURITIES, SERIES 2006-2",include,trust_word
+GJT,"STRATS(SM) TRUST FOR ALLSTATE CORP SECURITIES, SERIES 2006-3",include,trust_word
+UNG,"UNITED STATES NATURAL GAS FUND, LP",include,fund_word
+DBP,INVESCO DB PRECIOUS METALS FUND,include,fund_word
+DBO,INVESCO DB OIL FUND,include,fund_word
+DBE,INVESCO DB ENERGY FUND,include,fund_word
+DBA,INVESCO DB AGRICULTURE FUND,include,fund_word
+DBB,INVESCO DB BASE METALS FUND,include,fund_word
+UDN,INVESCO DB US DOLLAR INDEX BEARISH FUND,include,fund_word
+UUP,INVESCO DB US DOLLAR INDEX BULLISH FUND,include,fund_word
+EDD,"MORGAN STANLEY EMERGING MARKETS DOMESTIC DEBT FUND, INC.",include,fund_word|note_or_debt_abbreviation
+UGA,"UNITED STATES GASOLINE FUND, LP",include,fund_word
+UNL,"UNITED STATES 12 MONTH NATURAL GAS FUND, LP",include,fund_word
+USL,"UNITED STATES 12 MONTH OIL FUND, LP",include,fund_word
+BNO,"UNITED STATES BRENT OIL FUND, LP",include,fund_word
+BPRE,BLUEROCK PRIVATE REAL ESTATE FUND,include,fund_word
+PLTM,GRANITESHARES PLATINUM TRUST,include,trust_word
+PDSRX,PRINCIPAL REAL ASSET FUND,include,fund_word
+SVIX,VS TRUST,include,trust_word
+VCRDX,HARRISON STREET INFRASTRUCTURE INCOME FUND,include,fund_word
+BTCW,WISDOMTREE BITCOIN FUND,include,fund_word
+FBTC,FIDELITY WISE ORIGIN BITCOIN FUND,include,fund_word
+ODOT,OSPREY POLKADOT TRUST,include,trust_word
+FGDL,FRANKLIN TEMPLETON HOLDINGS TRUST,include,trust_word
+VCX,"FUNDRISE INNOVATION FUND, LLC",include,fund_word
+OSOL,OSPREY SOLANA TRUST,include,trust_word
+EIIA,EAGLE POINT INSTITUTIONAL INCOME FUND,include,fund_word
+OBNB,OSPREY BNB CHAIN TRUST,include,trust_word
+PGIM,PGIM PRIVATE CREDIT FUND,include,fund_word
+DEFI,HASHDEX COMMODITIES TRUST,include,trust_word
+EZBC,FRANKLIN TEMPLETON DIGITAL HOLDINGS TRUST,include,trust_word
+FETH,FIDELITY ETHEREUM FUND,include,fund_word
+EZPZ,FRANKLIN CRYPTO TRUST,include,trust_word
+OBNK,OSPREY BONK TRUST,include,trust_word
+VAII,VOYAGER ACQUISITION CORP. II,include,spac_acquisition_title
+SOEZ,FRANKLIN SOLANA TRUST,include,trust_word
+XRPZ,FRANKLIN XRP TRUST,include,trust_word
+FSOL,FIDELITY SOLANA FUND,include,fund_word
+PLUN,PLUTONIAN ACQUISITION CORP. II,include,spac_acquisition_title
+FSSL,FS SPECIALTY LENDING FUND,include,fund_word
+BMOK,BM ACQUISITION CORP.,include,spac_acquisition_title
+ARCL,ARC GROUP ACQUISITION I CORP.,include,spac_acquisition_title
+SBAQ,SUBVERSIVE BITCOIN ACQUISITION CORP.,include,spac_acquisition_title
+PAXG,PINE TREE ACQUISITION CORP.,include,spac_acquisition_title
+UNID,"RIVERNORTH SHORT PRIME UNICORN FUND 2028, INC",include,fund_word
+UNIU,"RIVERNORTH LONG PRIME UNICORN FUND 2028, INC.",include,fund_word
+MYX,MAYWOOD ACQUISITION CORP. 2,include,spac_acquisition_title
+GONYF,GO RESIDENTIAL REAL ESTATE INVESTMENT TRUST,include,trust_word
+GUAC,BERTO ACQUISITION CORP. II,include,spac_acquisition_title
+VECA,VERNAL CAPITAL ACQUISITION CORP.,include,spac_acquisition_title
+AESP,AEON ACQUISITION I CORP.,include,spac_acquisition_title
+ALOG,ALBERT ORIGIN ACQUISITION CORP,include,spac_acquisition_title
+QADR,QDRO ACQUISITION CORP.,include,spac_acquisition_title
+SAGU,SHREYA ACQUISITION GROUP,include,spac_acquisition_title
+APNA,APEIRON ACQUISITION VEHICLE I,include,spac_acquisition_title
+ARTC,ART TECHNOLOGY ACQUISITION CORP.,include,spac_acquisition_title
+AFNX,AFTERNEXT ACQUISITION I CORP.,include,spac_acquisition_title
+PECE,PEACE ACQUISITION CORP.,include,spac_acquisition_title
+IDAC,IRON DOME ACQUISITION I CORP.,include,spac_acquisition_title
+OHAC,OCEANHAWK ACQUISITION CORP.,include,spac_acquisition_title
+OTAI,STARLINK AI ACQUISITION CORP,include,spac_acquisition_title
+MLAA,MOUNTAIN LAKE ACQUISITION CORP. II,include,spac_acquisition_title
+TVIV,TEXAS VENTURES ACQUISITION IV CORP,include,spac_acquisition_title
+FTHA,FOREFRONT TECH HOLDINGS ACQUISITION CORP,include,spac_acquisition_title
+FMAC,FUTURE MONEY ACQUISITION CORP,include,spac_acquisition_title
+EWAV,EAST WEST AVE ACQUISITION CORP.,include,spac_acquisition_title
+APMC,AMPERCAP ACQUISITION CO,include,spac_acquisition_title
+AACP,APOGEE ACQUISITION CORP,include,spac_acquisition_title
+QLEP,QUANTUM LEAP ACQUISITION CORP,include,spac_acquisition_title
+KEYY,KEYSTONE ACQUISITION CORP.,include,spac_acquisition_title
+SKAI,SKY ACQUISITION GROUP,include,spac_acquisition_title
+MRCO,MERCATOR ACQUISITION CORP.,include,spac_acquisition_title
+MCAH,MOUNTAIN CREST ACQUISITION 6 CORP.,include,spac_acquisition_title
+DGAC,DISCIPLINED GROWTH ACQUISITION CORP,include,spac_acquisition_title
+ACGC,ACP HOLDINGS ACQUISITION CORP.,include,spac_acquisition_title
+GSRV,GSR V ACQUISITION CORP.,include,spac_acquisition_title
+AMAN,AMANAT ACQUISITION CORP.,include,spac_acquisition_title
+CAII,COLLECTIVE ACQUISITION CORP. II,include,spac_acquisition_title
+FXAC,FORTUNEX ACQUISITION CORP,include,spac_acquisition_title
+IACQ,IRENIC ACQUISITION CORP.,include,spac_acquisition_title
+RREV,RRE VENTURES ACQUISITION CORP.,include,spac_acquisition_title
+TEAC,TIDEWISE ACQUISITION CORP,include,spac_acquisition_title
+FDMM,FREEDOM METALS ACQUISITION CORP.,include,spac_acquisition_title
+HCAX,HALL CHADWICK ACQUISITION CORP II,include,spac_acquisition_title
+WLAC,WILLOW LANE ACQUISITION CORP.,include,spac_acquisition_title
+ATEK,ATHENA TECHNOLOGY ACQUISITION CORP. II,include,spac_acquisition_title
+KBSR,"KBS REAL ESTATE INVESTMENT TRUST III, INC.",include,trust_word
+CMCAF,PIERMONT VALLEY ACQUISITION CORP,include,spac_acquisition_title
+ASCBF,ASPAC II ACQUISITION CORP.,include,spac_acquisition_title
+TRLC,TRILINC GLOBAL IMPACT FUND LLC,include,fund_word
+ALCY,ALCHEMY INVESTMENTS ACQUISITION CORP 1,include,spac_acquisition_title
+WINV,WINVEST ACQUISITION CORP.,include,spac_acquisition_title
+FCO,"ABRDN GLOBAL INCOME FUND, INC.",include,fund_word
+WHLRD,"WHEELER REAL ESTATE INVESTMENT TRUST, INC.",include,trust_word
+KACLF,KAIROUS ACQUISITION CORP. LTD,include,spac_acquisition_title
+NTRSO,NORTHERN TRUST CORP,include,trust_word
+ABAKF,"ABRDN ASIA-PACIFIC INCOME FUND, INC.",include,fund_word
+TXEMF,TEMPLETON EMERGING MARKETS INCOME FUND,include,fund_word
+RWTN,REDWOOD TRUST INC,include,trust_word
+RWTO,REDWOOD TRUST INC,include,trust_word
+RWTP,REDWOOD TRUST INC,include,trust_word
+RWTQ,REDWOOD TRUST INC,include,trust_word
+DHCNI,DIVERSIFIED HEALTHCARE TRUST,include,trust_word
+DHCNL,DIVERSIFIED HEALTHCARE TRUST,include,trust_word
+ADAMG,"ADAMAS TRUST, INC.",include,trust_word
+ADAMH,"ADAMAS TRUST, INC.",include,trust_word
+ADAMI,"ADAMAS TRUST, INC.",include,trust_word
+ADAML,"ADAMAS TRUST, INC.",include,trust_word
+ADAMM,"ADAMAS TRUST, INC.",include,trust_word
+ADAMN,"ADAMAS TRUST, INC.",include,trust_word
+ADAMO,"ADAMAS TRUST, INC.",include,trust_word
+ADAMZ,"ADAMAS TRUST, INC.",include,trust_word
+ZARE,ARES REAL ESTATE INCOME TRUST INC.,include,trust_word
+PMTU,PENNYMAC MORTGAGE INVESTMENT TRUST,include,trust_word
+PMTV,PENNYMAC MORTGAGE INVESTMENT TRUST,include,trust_word
+PMTW,PENNYMAC MORTGAGE INVESTMENT TRUST,include,trust_word
+LTAFX,ALTERNATIVE STRATEGIES INCOME FUND,include,fund_word
+LTCFX,ALTERNATIVE STRATEGIES INCOME FUND,include,fund_word
+MITN,"TPG MORTGAGE INVESTMENT TRUST, INC.",include,trust_word
+MITP,"TPG MORTGAGE INVESTMENT TRUST, INC.",include,trust_word
+CCID,CARLYLE CREDIT INCOME FUND,include,fund_word
+WHLRL,"WHEELER REAL ESTATE INVESTMENT TRUST, INC.",include,trust_word
+GRTUF,GRANITE REAL ESTATE INVESTMENT TRUST,include,trust_word
+HCTPF,HUTCHISON PORT HOLDINGS TRUST/ADR,include,trust_word
+HGIT,"HINES GLOBAL INCOME TRUST, INC.",include,trust_word
+FCRX,"CRESCENT CAPITAL BDC, INC.",include,bdc_vehicle
+LENDX,STONE RIDGE TRUST V,include,trust_word
+BSTT,"BLACKSTONE REAL ESTATE INCOME TRUST, INC.",include,trust_word
+NRSAX,NEXPOINT REAL ESTATE STRATEGIES FUND,include,fund_word
+TPTA,"TERRA PROPERTY TRUST, INC.",include,trust_word
+STSR,"STRATEGIC STUDENT & SENIOR HOUSING TRUST, INC.",include,trust_word
+SWDR,"STARWOOD REAL ESTATE INCOME TRUST, INC.",include,trust_word
+ASCIX,ANGEL OAK STRATEGIC CREDIT FUND,include,fund_word
+PMFAX,PIMCO FLEXIBLE MUNICIPAL INCOME FUND,include,fund_word|municipal_or_clo_vehicle
+NICHX,VARIANT ALTERNATIVE INCOME FUND,include,fund_word
+OWSCX,1WS CREDIT INCOME FUND,include,fund_word
+LARAX,LORD ABBETT CREDIT OPPORTUNITIES FUND,include,fund_word
+PDSKX,PRINCIPAL REAL ASSET FUND,include,fund_word
+UVIX,VS TRUST,include,trust_word
+PRIAF,PRIME IMPACT ACQUISITION I,include,spac_acquisition_title
+JWSUF,JAWS MUSTANG ACQUISITION CORP,include,spac_acquisition_title
+JWSWF,JAWS MUSTANG ACQUISITION CORP,include,spac_acquisition_title
+CSTUF,CONSTELLATION ACQUISITION CORP I,include,spac_acquisition_title
+CSTWF,CONSTELLATION ACQUISITION CORP I,include,spac_acquisition_title
+CPPTL,COPPER PROPERTY CTL PASS THROUGH TRUST,include,trust_word
+PLMUF,PLUM ACQUISITION CORP. III,include,spac_acquisition_title
+PLMWF,PLUM ACQUISITION CORP. III,include,spac_acquisition_title
+CDAUF,COMPASS DIGITAL ACQUISITION CORP.,include,spac_acquisition_title
+CDAWF,COMPASS DIGITAL ACQUISITION CORP.,include,spac_acquisition_title
+IXQUF,IX ACQUISITION CORP.,include,spac_acquisition_title
+IXQWF,IX ACQUISITION CORP.,include,spac_acquisition_title
+SGST,"STRATEGIC STORAGE TRUST VI, INC.",include,trust_word
+ACQC,RELATIVITY ACQUISITION CORP,include,spac_acquisition_title
+ALSTF,ALPHA STAR ACQUISITION CORP,include,spac_acquisition_title
+ALSUF,ALPHA STAR ACQUISITION CORP,include,spac_acquisition_title
+ALSWF,ALPHA STAR ACQUISITION CORP,include,spac_acquisition_title
+CMCUF,PIERMONT VALLEY ACQUISITION CORP,include,spac_acquisition_title
+CMCWF,PIERMONT VALLEY ACQUISITION CORP,include,spac_acquisition_title
+EMCRF,EMBRACE CHANGE ACQUISITION CORP.,include,spac_acquisition_title
+EMCWF,EMBRACE CHANGE ACQUISITION CORP.,include,spac_acquisition_title
+ASCRF,ASPAC II ACQUISITION CORP.,include,spac_acquisition_title
+ASCWF,ASPAC II ACQUISITION CORP.,include,spac_acquisition_title
+ASUUF,ASPAC II ACQUISITION CORP.,include,spac_acquisition_title
+TLGUF,TLGY ACQUISITION CORP,include,spac_acquisition_title
+TLGWF,TLGY ACQUISITION CORP,include,spac_acquisition_title
+MSSUF,METAL SKY STAR ACQUISITION CORP,include,spac_acquisition_title
+MSSWF,METAL SKY STAR ACQUISITION CORP,include,spac_acquisition_title
+TETUF,TECHNOLOGY & TELECOMMUNICATION ACQUISITION CORP,include,spac_acquisition_title
+TETWF,TECHNOLOGY & TELECOMMUNICATION ACQUISITION CORP,include,spac_acquisition_title
+ALCUF,ALCHEMY INVESTMENTS ACQUISITION CORP 1,include,spac_acquisition_title
+ALCWF,ALCHEMY INVESTMENTS ACQUISITION CORP 1,include,spac_acquisition_title
+HSPUF,HORIZON SPACE ACQUISITION I CORP.,include,spac_acquisition_title
+HSPWF,HORIZON SPACE ACQUISITION I CORP.,include,spac_acquisition_title
+SOUL.RI,SOULPOWER ACQUISITION CORP.,include,spac_acquisition_title
+JACS.RI,JACKSON ACQUISITION CO II,include,spac_acquisition_title
+JENA.RI,JENA ACQUISITION CORP II,include,spac_acquisition_title
+AIIA.RI,AI INFRASTRUCTURE ACQUISITION CORP.,include,spac_acquisition_title
+WPAC.RI,WHITE PEARL ACQUISITION CORP.,include,spac_acquisition_title
+VECA.RI,VERNAL CAPITAL ACQUISITION CORP.,include,spac_acquisition_title
+QRED.RI,QUASAREDGE ACQUISITION CORP,include,spac_acquisition_title
+TRAD.RI,APEX TECH ACQUISITION INC.,include,spac_acquisition_title
+ZKPU,LAFAYETTE DIGITAL ACQUISITION CORP. I,include,spac_acquisition_title
+ZKPW,LAFAYETTE DIGITAL ACQUISITION CORP. I,include,spac_acquisition_title
+GLED.RI,GALAXYEDGE ACQUISITION CORP,include,spac_acquisition_title

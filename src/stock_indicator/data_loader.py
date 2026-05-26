@@ -109,7 +109,10 @@ def download_history(
                     download_error,
                 )
         next_download_date = cached_frame.index.max() + pandas.Timedelta(days=1)
-        if next_download_date > pandas.Timestamp(end):
+        # Yahoo Finance treats the end date as exclusive.  When the next
+        # missing date is exactly equal to the requested end date, the cache is
+        # already complete for the requested half-open date range.
+        if next_download_date >= pandas.Timestamp(end):
             if cache_path is not None:
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
                 cached_frame.to_csv(cache_path)

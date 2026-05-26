@@ -58,6 +58,7 @@ class MultiBucketRunConfig:
     confirmation_sma_angle_range: Tuple[float, float] | None
     data_source_name: str | None
     symbol_list_name: str | None
+    ff12_data_path_text: str | None
     max_same_symbol: int
     raw_document: Dict[str, Any]
 
@@ -139,6 +140,48 @@ def _parse_volume_filter_text(text: str) -> Tuple[float | None, float | None, in
         "dollar_volume>NUMBER,TopN (or ,Nth), or "
         "dollar_volume>NUMBER%,TopN (or ,Nth)"
     )
+
+
+def parse_skip_ff12_groups(
+    raw_group_values: Any,
+    *,
+    bucket_label: str,
+) -> set[int]:
+    """Parse the optional per-bucket ``skip_ff12_groups`` config field."""
+
+    if raw_group_values is None:
+        return set()
+    if isinstance(raw_group_values, str):
+        group_value_parts: Sequence[Any] = [
+            value_part.strip()
+            for value_part in raw_group_values.split(",")
+            if value_part.strip()
+        ]
+    elif isinstance(raw_group_values, Sequence):
+        group_value_parts = raw_group_values
+    else:
+        raise ValueError(
+            f"bucket {bucket_label}: skip_ff12_groups must be a list or comma-separated string"
+        )
+
+    skipped_group_identifiers: set[int] = set()
+    for raw_group_value in group_value_parts:
+        if isinstance(raw_group_value, bool):
+            raise ValueError(
+                f"bucket {bucket_label}: skip_ff12_groups values must be positive integers"
+            )
+        try:
+            group_identifier = int(raw_group_value)
+        except (TypeError, ValueError) as parse_error:
+            raise ValueError(
+                f"bucket {bucket_label}: skip_ff12_groups values must be positive integers"
+            ) from parse_error
+        if group_identifier < 1:
+            raise ValueError(
+                f"bucket {bucket_label}: skip_ff12_groups values must be positive integers"
+            )
+        skipped_group_identifiers.add(group_identifier)
+    return skipped_group_identifiers
 
 
 def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
@@ -289,6 +332,10 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
                 raise ValueError(
                     f"bucket {label}: max_positions must be positive"
                 )
+        skipped_fama_french_groups = parse_skip_ff12_groups(
+            raw_bucket.get("skip_ff12_groups"),
+            bucket_label=label,
+        )
 
         d_sma_range = None
         ema_range = None
@@ -412,6 +459,7 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
             entry_priority=entry_priority,
             maximum_positions=bucket_maximum_positions,
             fill_remaining=bool(raw_bucket.get("fill_remaining", False)),
+            skipped_fama_french_groups=skipped_fama_french_groups,
             exit_alpha_factor=exit_alpha_factor_value,
             shape_slope_min=shape_slope_min_value,
             shape_dev_50_max=shape_dev_50_max_value,
@@ -600,6 +648,10 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
         else:
             adaptive_tp_sl_config = strategy.AdaptiveTPSLConfig()
 
+    raw_ff12_data_path_text = document.get("ff12_data_path") or document.get(
+        "sector_data_path"
+    )
+
     return MultiBucketRunConfig(
         bucket_definitions=bucket_definitions,
         adaptive_tp_sl=adaptive_tp_sl_config,
@@ -616,6 +668,11 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
         confirmation_sma_angle_range=confirmation_sma_angle_range,
         data_source_name=document.get("data_source"),
         symbol_list_name=document.get("symbol_list"),
+        ff12_data_path_text=(
+            str(raw_ff12_data_path_text)
+            if raw_ff12_data_path_text is not None
+            else None
+        ),
         max_same_symbol=int(document.get("max_same_symbol", 1)),
         raw_document=document,
     )
@@ -1027,6 +1084,7 @@ def compute_today_signals(
             maximum_symbols_per_group=bucket_def.maximum_symbols_per_group,
             minimum_average_dollar_volume_ratio=bucket_def.minimum_average_dollar_volume_ratio,
             allowed_symbols=allowed_symbols,
+            skipped_fama_french_groups=bucket_def.skipped_fama_french_groups,
             # Live cron uses signal-day convention (entry_date == the
             # bar the strategy fired on). _fill_deferred_pcts later
             # adds BDay(1) to fetch the actual T+1 open as the fill

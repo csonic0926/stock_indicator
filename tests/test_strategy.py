@@ -169,6 +169,34 @@ def test_evaluate_ema_sma_cross_strategy_raises_value_error_for_missing_columns(
         evaluate_ema_sma_cross_strategy(tmp_path, window_size=3)
 
 
+def test_load_price_data_drops_invalid_price_volume_rows(tmp_path: Path) -> None:
+    """Bad Yahoo rows must not poison dollar-volume eligibility."""
+
+    date_index = pandas.date_range("2020-01-01", periods=5, freq="D")
+    price_data_frame = pandas.DataFrame(
+        {
+            "Date": date_index,
+            "open": [10.0, -10.0, 10.0, 10.0, 10.0],
+            "high": [11.0, 11.0, 2_000_000.0, 11.0, 11.0],
+            "low": [9.0, 9.0, 9.0, 9.0, 9.0],
+            "close": [10.5, 10.5, 10.5, 0.0, 10.5],
+            "volume": [1000, 1000, 1000, 1000, -1],
+        }
+    )
+    csv_path = tmp_path / "invalid_price_volume_rows.csv"
+    price_data_frame.to_csv(csv_path, index=False)
+
+    loaded_price_data_frame = strategy.load_price_data(csv_path)
+
+    assert loaded_price_data_frame.index.tolist() == [
+        pandas.Timestamp("2020-01-01")
+    ]
+    assert loaded_price_data_frame.loc[
+        pandas.Timestamp("2020-01-01"),
+        "close",
+    ] == pytest.approx(10.5)
+
+
 def test_evaluate_ema_sma_cross_strategy_handles_multiindex(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1048,6 +1076,75 @@ def test_build_eligibility_mask_respects_pick_limit(
     )
     selected_symbols = mask.columns[mask.iloc[0]].tolist()
     assert set(selected_symbols) == {"AAA", "BBB", "DDD", "EEE"}
+
+
+def test_compute_signals_for_date_skips_ff12_groups_before_rank(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skipped FF12 groups should release rank slots to surviving groups."""
+
+    import stock_indicator.strategy as strategy_module
+
+    date_index = pandas.date_range("2020-01-01", periods=60, freq="D")
+    symbol_volumes = {
+        "AAA": 300_000_000,
+        "BBB": 200_000_000,
+        "CCC": 100_000_000,
+    }
+    for symbol_name, volume_value in symbol_volumes.items():
+        pandas.DataFrame(
+            {
+                "Date": date_index,
+                "open": [1.0] * 60,
+                "close": [1.0] * 60,
+                "volume": [volume_value] * 60,
+                "symbol": [symbol_name] * 60,
+            }
+        ).to_csv(tmp_path / f"{symbol_name}.csv", index=False)
+
+    group_mapping = {"AAA": 1, "BBB": 2, "CCC": 3}
+    monkeypatch.setattr(
+        strategy_module, "load_ff12_groups_by_symbol", lambda: group_mapping
+    )
+
+    def fake_signal_strategy(
+        price_data_frame: pandas.DataFrame,
+        **_: object,
+    ) -> None:
+        price_data_frame["noop_entry_signal"] = False
+        price_data_frame["noop_exit_signal"] = False
+
+    monkeypatch.setattr(
+        strategy_module,
+        "BUY_STRATEGIES",
+        {"noop": fake_signal_strategy},
+    )
+    monkeypatch.setattr(
+        strategy_module,
+        "SELL_STRATEGIES",
+        {"noop": fake_signal_strategy},
+    )
+    monkeypatch.setattr(
+        strategy_module,
+        "SUPPORTED_STRATEGIES",
+        {"noop": fake_signal_strategy},
+    )
+
+    signals = strategy_module.compute_signals_for_date(
+        tmp_path,
+        pandas.Timestamp("2020-02-29"),
+        "noop",
+        "noop",
+        top_dollar_volume_rank=2,
+        maximum_symbols_per_group=1,
+        skipped_fama_french_groups={1},
+    )
+
+    filtered_symbol_names = [
+        symbol_name for symbol_name, _group_identifier in signals["filtered_symbols"]
+    ]
+    assert filtered_symbol_names == ["BBB", "CCC"]
 
 
 def test_evaluate_combined_strategy_symbols_enter_and_exit_daily_universe(

@@ -25,6 +25,9 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 
 SEC_COMPANY_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
+SEC_COMPANY_TICKERS_EXCHANGE_URL = (
+    "https://www.sec.gov/files/company_tickers_exchange.json"
+)
 SEC_SUBMISSIONS_URL_TEMPLATE = "https://data.sec.gov/submissions/CIK{cik_padded}.json"
 
 # Per SEC guidelines, identify your app and provide a real contact.

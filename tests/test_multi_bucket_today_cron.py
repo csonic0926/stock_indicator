@@ -24,6 +24,7 @@ def test_load_multi_bucket_config_preserves_bucket_sigma_overrides(
                 "starting_cash": 60_000,
                 "margin": 1.5,
                 "withdraw": 0,
+                "ff12_data_path": "data/research_new_symbols_with_sector.parquet",
                 "adaptive_tp_sl": {"window": 20, "sigma": 0.5},
                 "buckets": [
                     {
@@ -31,6 +32,7 @@ def test_load_multi_bucket_config_preserves_bucket_sigma_overrides(
                         "strategy_id": "fish_head_vacuum_turn",
                         "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
                         "sigma": 0.75,
+                        "skip_ff12_groups": [9, "7", 5],
                     },
                     {
                         "label": "fish_tail_explore",
@@ -60,7 +62,17 @@ def test_load_multi_bucket_config_preserves_bucket_sigma_overrides(
     loaded_config = multi_bucket_today.load_multi_bucket_config(config_path)
 
     assert loaded_config.bucket_definitions["fish_head_production"].sigma == 0.75
+    assert (
+        loaded_config.bucket_definitions[
+            "fish_head_production"
+        ].skipped_fama_french_groups
+        == {5, 7, 9}
+    )
     assert loaded_config.bucket_definitions["fish_tail_explore"].sigma == 0.0
+    assert (
+        loaded_config.ff12_data_path_text
+        == "data/research_new_symbols_with_sector.parquet"
+    )
 
 
 def _build_test_bucket(
@@ -115,6 +127,7 @@ def _build_test_config() -> multi_bucket_today.MultiBucketRunConfig:
         confirmation_sma_angle_range=None,
         data_source_name="daily",
         symbol_list_name="test",
+        ff12_data_path_text=None,
         max_same_symbol=1,
         raw_document={},
     )

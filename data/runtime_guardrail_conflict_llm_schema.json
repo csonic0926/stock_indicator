@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "symbol": {"type": "string"},
+          "decision": {"type": "string", "enum": ["include", "exclude", "quarantine"]},
+          "semantic_type": {"type": "string"},
+          "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+          "reason": {"type": "string"}
+        },
+        "required": ["symbol", "decision", "semantic_type", "confidence", "reason"]
+      }
+    }
+  },
+  "required": ["records"]
+}

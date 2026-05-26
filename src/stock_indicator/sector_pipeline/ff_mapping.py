@@ -83,10 +83,29 @@ def attach_fama_french_groups(
 ) -> pd.DataFrame:
     """Merge Fama–French classifications into ``data_frame`` using ``sic`` codes.
 
-    Any SIC not present in the mapping defaults to FF12=12 ("Other").
-    FF48/FF49 remain unset and default to -1 when missing.
+    SIC codes explicitly covered by the Fama-French table receive their mapped
+    group. Valid SIC codes outside the FF12 ranges are marked as the legitimate
+    FF12 "Other" bucket. Rows with no SEC SIC are also kept as FF12=12 for
+    auditing, but their low-confidence source prevents runtime code from
+    treating the fallback as a reliable industry classification.
     """
     merged_data_frame = data_frame.merge(classification_lookup, on="sic", how="left")
+    missing_sic_mask = merged_data_frame["sic"].isna()
+    mapped_sic_mask = merged_data_frame["ff12"].notna()
+    unmapped_sic_mask = (~missing_sic_mask) & (~mapped_sic_mask)
+
+    merged_data_frame["ff12_source"] = "sic_mapping"
+    merged_data_frame.loc[unmapped_sic_mask, "ff12_source"] = "sic_unmapped_other"
+    merged_data_frame.loc[missing_sic_mask, "ff12_source"] = "missing_sic_fallback"
+
+    merged_data_frame["classification_confidence"] = "high"
+    merged_data_frame.loc[unmapped_sic_mask, "classification_confidence"] = "medium"
+    merged_data_frame.loc[missing_sic_mask, "classification_confidence"] = "low"
+
+    merged_data_frame["classification_issue"] = ""
+    merged_data_frame.loc[unmapped_sic_mask, "classification_issue"] = "unmapped_sic"
+    merged_data_frame.loc[missing_sic_mask, "classification_issue"] = "missing_sic"
+
     merged_data_frame["ff12"] = merged_data_frame["ff12"].fillna(12).astype(int)
     merged_data_frame["ff48"] = merged_data_frame["ff48"].fillna(-1).astype(int)
     merged_data_frame["ff49"] = merged_data_frame["ff49"].fillna(-1).astype(int)

@@ -204,6 +204,48 @@ def test_download_history_uses_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     pandas.testing.assert_frame_equal(combined_frame, saved_frame)
 
 
+def test_download_history_does_not_request_empty_exclusive_end_range(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Do not call Yahoo when the cache already reaches the exclusive end."""
+    symbol_name = "TEST"
+    cache_file_path = tmp_path / "TEST.csv"
+    cached_frame = pandas.DataFrame(
+        {"close": [1.0, 2.0]},
+        index=pandas.to_datetime(["2023-01-01", "2023-01-02"]),
+    )
+    cached_frame.to_csv(cache_file_path)
+
+    download_call_count = 0
+
+    def stubbed_download(
+        symbol: str,
+        start: str,
+        end: str,
+        progress: bool = False,
+        auto_adjust: bool = True,
+    ) -> pandas.DataFrame:
+        nonlocal download_call_count
+        download_call_count += 1
+        return pandas.DataFrame()
+
+    monkeypatch.setattr(
+        "stock_indicator.data_loader.yfinance.download", stubbed_download
+    )
+    monkeypatch.setattr("stock_indicator.symbols.load_symbols", lambda: [symbol_name])
+
+    combined_frame = download_history(
+        symbol_name,
+        "2023-01-01",
+        "2023-01-03",
+        cache_path=cache_file_path,
+    )
+
+    assert download_call_count == 0
+    saved_frame = pandas.read_csv(cache_file_path, index_col=0, parse_dates=True)
+    pandas.testing.assert_frame_equal(combined_frame, saved_frame)
+
+
 def test_download_history_extends_cache_backwards_and_forwards(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:

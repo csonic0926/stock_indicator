@@ -19,7 +19,6 @@ from .data_loader import download_history
 from .strategy import (
     SUPPORTED_STRATEGIES,
     load_ff12_groups_by_symbol,
-    load_symbols_excluded_by_industry,
     compute_signals_for_date,
 )
 
@@ -80,11 +79,11 @@ def parse_daily_task_arguments(argument_line: str) -> Tuple[
                 parts = [p.strip() for p in raw.split(",") if p.strip()]
                 parsed = {int(p) for p in parts}
             except ValueError as parse_error:  # noqa: BLE001
-                raise ValueError("Invalid group list; expected integers 1-11") from parse_error
-            if any(identifier < 1 or identifier > 11 for identifier in parsed):
-                raise ValueError("Group identifiers must be between 1 and 11")
-            if 12 in parsed:
-                raise ValueError("Group list must not include 12 (Other)")
+                raise ValueError(
+                    "Invalid group list; expected positive integers"
+                ) from parse_error
+            if any(identifier < 1 for identifier in parsed):
+                raise ValueError("Group identifiers must be positive integers")
             allowed_groups = parsed
         else:
             tokens.append(token)
@@ -263,5 +262,3 @@ def run_daily_tasks(
         near_delta_range=near_delta_range,
         price_tightness_range=price_tightness_range,
     )
-
-

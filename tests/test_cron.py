@@ -7,6 +7,16 @@ from stock_indicator import cron
 from stock_indicator import strategy
 
 
+def test_run_daily_job_uses_production_old_universe_without_refresh() -> None:
+    """The shell cron wrapper must not refresh research universe files."""
+
+    script_text = Path("run_daily_job.sh").read_text(encoding="utf-8")
+    yahoo_update_position = script_text.index("update_all_data_from_yf")
+    daily_signal_position = script_text.index("multi_bucket_daily_signal")
+    assert "update_universe_pipeline" not in script_text
+    assert yahoo_update_position < daily_signal_position
+
+
 def test_run_daily_tasks_detects_signals(tmp_path, monkeypatch):
     """run_daily_tasks should return symbols with entry and exit signals."""
     symbol_list = ["TEST"]
@@ -34,6 +44,8 @@ def test_run_daily_tasks_detects_signals(tmp_path, monkeypatch):
     monkeypatch.setitem(strategy.SELL_STRATEGIES, "fake_strategy", fake_strategy)
     monkeypatch.setitem(strategy.BUY_STRATEGIES, "fake_strategy", fake_strategy)
     monkeypatch.setitem(strategy.SELL_STRATEGIES, "fake_strategy", fake_strategy)
+    monkeypatch.setattr(strategy, "load_symbols_excluded_by_industry", lambda: set())
+    monkeypatch.setattr(strategy, "load_ff12_groups_by_symbol", lambda: {"TEST": 12})
     monkeypatch.setitem(strategy.BUY_STRATEGIES, "fake_strategy", fake_strategy)
     monkeypatch.setitem(strategy.SELL_STRATEGIES, "fake_strategy", fake_strategy)
 
@@ -173,6 +185,27 @@ def test_parse_daily_task_arguments_accepts_pick_parameter() -> None:
     assert stop_loss_percentage == 1.0
 
 
+def test_parse_daily_task_arguments_accepts_ff12_other_group() -> None:
+    """Group 12 is a valid Fama-French bucket."""
+    argument_line = "group=12 dollar_volume>2.41%,Top3,Pick2 ema_sma_cross ema_sma_cross"
+    (
+        minimum_average_dollar_volume,
+        top_dollar_volume_rank,
+        maximum_symbols_per_group,
+        buy_strategy_name,
+        sell_strategy_name,
+        stop_loss_percentage,
+        allowed_fama_french_groups,
+    ) = cron.parse_daily_task_arguments(argument_line)
+    assert minimum_average_dollar_volume == pytest.approx(0.0241)
+    assert top_dollar_volume_rank == 3
+    assert maximum_symbols_per_group == 2
+    assert buy_strategy_name == "ema_sma_cross"
+    assert sell_strategy_name == "ema_sma_cross"
+    assert stop_loss_percentage == 1.0
+    assert allowed_fama_french_groups == {12}
+
+
 def test_run_daily_tasks_skips_symbol_update_errors(tmp_path, monkeypatch):
     """run_daily_tasks should continue when the symbol cache update fails."""
 
@@ -204,6 +237,8 @@ def test_run_daily_tasks_skips_symbol_update_errors(tmp_path, monkeypatch):
     monkeypatch.setitem(strategy.SUPPORTED_STRATEGIES, "fake_strategy", fake_strategy)
     monkeypatch.setitem(strategy.BUY_STRATEGIES, "fake_strategy", fake_strategy)
     monkeypatch.setitem(strategy.SELL_STRATEGIES, "fake_strategy", fake_strategy)
+    monkeypatch.setattr(strategy, "load_symbols_excluded_by_industry", lambda: set())
+    monkeypatch.setattr(strategy, "load_ff12_groups_by_symbol", lambda: {"TEST": 12})
 
     result = cron.run_daily_tasks(
         "fake_strategy",
@@ -251,6 +286,12 @@ def test_run_daily_tasks_honors_dollar_volume_rank(tmp_path, monkeypatch):
     monkeypatch.setitem(strategy.SUPPORTED_STRATEGIES, "fake_strategy", fake_strategy)
     monkeypatch.setitem(strategy.BUY_STRATEGIES, "fake_strategy", fake_strategy)
     monkeypatch.setitem(strategy.SELL_STRATEGIES, "fake_strategy", fake_strategy)
+    monkeypatch.setattr(strategy, "load_symbols_excluded_by_industry", lambda: set())
+    monkeypatch.setattr(
+        strategy,
+        "load_ff12_groups_by_symbol",
+        lambda: {"AAA": 1, "BBB": 2, "CCC": 3},
+    )
     monkeypatch.setitem(strategy.BUY_STRATEGIES, "fake_strategy", fake_strategy)
     monkeypatch.setitem(strategy.SELL_STRATEGIES, "fake_strategy", fake_strategy)
     monkeypatch.setitem(strategy.BUY_STRATEGIES, "fake_strategy", fake_strategy)
@@ -316,7 +357,6 @@ def test_run_daily_tasks_honors_group_ratio_and_rank(
     monkeypatch.setattr(strategy, "load_ff12_groups_by_symbol", lambda: group_map)
     monkeypatch.setattr(cron, "load_ff12_groups_by_symbol", lambda: group_map)
     monkeypatch.setattr(strategy, "load_symbols_excluded_by_industry", lambda: set())
-    monkeypatch.setattr(cron, "load_symbols_excluded_by_industry", lambda: set())
 
     argument_line = "dollar_volume>1.6%,Top4 fake_strategy fake_strategy"
     (
@@ -423,6 +463,12 @@ def test_run_daily_tasks_applies_combined_filters(tmp_path, monkeypatch):
     monkeypatch.setitem(strategy.SUPPORTED_STRATEGIES, "fake_strategy", fake_strategy)
     monkeypatch.setitem(strategy.BUY_STRATEGIES, "fake_strategy", fake_strategy)
     monkeypatch.setitem(strategy.SELL_STRATEGIES, "fake_strategy", fake_strategy)
+    monkeypatch.setattr(strategy, "load_symbols_excluded_by_industry", lambda: set())
+    monkeypatch.setattr(
+        strategy,
+        "load_ff12_groups_by_symbol",
+        lambda: {"AAA": 1, "BBB": 2, "CCC": 3},
+    )
 
     result = cron.run_daily_tasks(
         "fake_strategy",

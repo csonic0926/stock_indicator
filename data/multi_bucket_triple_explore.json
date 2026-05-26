@@ -3,8 +3,8 @@
   "starting_cash": 60000,
   "margin": 1.5,
   "withdraw": 0,
-  "start_date": "1994-01-01",
-  "data_source": "1994_clean",
+  "start_date": "2010-01-01",
+  "data_source": "2010",
   "min_hold": 5,
   "show_trade_details": false,
   "risk_score_gate": {
@@ -94,5 +94,7 @@
       "max_hold": 14,
       "reset_hold_on_reentry_signal": true
     }
-  ]
+  ],
+  "symbol_list": "research_new",
+  "ff12_data_path": "data/research_new_symbols_with_sector.parquet"
 }

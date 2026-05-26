@@ -15,7 +15,7 @@ def test_load_ff12_groups_by_symbol_supports_dot_dash_aliases(
 
     sector_csv_path = tmp_path / "symbols_with_sector.csv"
     sector_csv_path.write_text(
-        "ticker,ff12\nBRK.B,11\nBF.B,1\n",
+        "ticker,ff12\nBRK.B,11\nBF.B,1\nDIS,12\n",
         encoding="utf-8",
     )
 
@@ -38,13 +38,49 @@ def test_load_ff12_groups_by_symbol_supports_dot_dash_aliases(
     assert symbol_to_group["BRK-B"] == 11
     assert symbol_to_group["BF.B"] == 1
     assert symbol_to_group["BF-B"] == 1
+    assert symbol_to_group["DIS"] == 12
 
 
-def test_load_symbols_excluded_by_industry_supports_dot_dash_aliases(
+def test_load_ff12_groups_by_symbol_skips_missing_sic_fallback(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Industry exclusions should also apply to YF dash aliases."""
+    """Low-confidence FF12=12 fallback should not be used as real sector data."""
+
+    sector_csv_path = tmp_path / "symbols_with_sector.csv"
+    sector_csv_path.write_text(
+        "ticker,ff12,ff12_source,classification_confidence\n"
+        "AAPL,6,sic_mapping,high\n"
+        "AAL,12,sic_unmapped_other,medium\n"
+        "ADR,12,missing_sic_fallback,low\n",
+        encoding="utf-8",
+    )
+
+    from stock_indicator.sector_pipeline import config as sector_config
+
+    monkeypatch.setattr(
+        sector_config,
+        "DEFAULT_OUTPUT_PARQUET_PATH",
+        tmp_path / "missing_symbols_with_sector.parquet",
+    )
+    monkeypatch.setattr(
+        sector_config,
+        "DEFAULT_OUTPUT_CSV_PATH",
+        sector_csv_path,
+    )
+
+    symbol_to_group = strategy.load_ff12_groups_by_symbol()
+
+    assert symbol_to_group["AAPL"] == 6
+    assert symbol_to_group["AAL"] == 12
+    assert "ADR" not in symbol_to_group
+
+
+def test_load_symbols_excluded_by_industry_is_legacy_no_op(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Industry exclusions should not override upstream symbol decisions."""
 
     sector_csv_path = tmp_path / "symbols_with_sector.csv"
     sector_csv_path.write_text(
@@ -79,5 +115,6 @@ def test_load_symbols_excluded_by_industry_supports_dot_dash_aliases(
     assert "BRK.B" not in excluded_symbols
     assert "BRK-B" not in excluded_symbols
     assert "NFLX" not in excluded_symbols
-    assert "AAC.WS" in excluded_symbols
-    assert "AAC-WS" in excluded_symbols
+    assert "AAC.WS" not in excluded_symbols
+    assert "AAC-WS" not in excluded_symbols
+    assert excluded_symbols == set()

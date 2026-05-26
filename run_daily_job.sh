@@ -27,7 +27,7 @@ cd "$SOURCE_DIRECTORY"
 LATEST_DATE="$("$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -c 'from stock_indicator.daily_job import determine_latest_trading_date as determine_date;print(determine_date())')"
 START_DATE="$("$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -c 'from datetime import datetime, timedelta; import sys; print((datetime.fromisoformat(sys.argv[1]) - timedelta(days=183)).date().isoformat())' "$LATEST_DATE")"
 
-# Update historical data and record signals
+# Update the production daily price cache, then record live signals.
 "$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage update_all_data_from_yf "$START_DATE" "$LATEST_DATE" >> "$LOG_DIRECTORY/cron_stdout.log" 2>&1
 
 # Multi-bucket signal generation. compute_today_signals emits one

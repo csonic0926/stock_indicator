@@ -225,13 +225,14 @@ def load_symbols_rejected_by_listing_name() -> set[str]:
 
 
 def load_runtime_download_symbols() -> list[str]:
-    """Return the sector-safe runtime universe for the daily Yahoo refresh.
+    """Return the symbol-cache universe for the daily Yahoo refresh.
 
     Runtime trading must not depend on every cached CSV under ``stock_data``.
-    The current symbol cache is the starting point, then known non-stock
-    instruments are removed.  When FF12 sector data is available, only symbols
-    with a valid selectable FF12 group are downloaded because production
-    selection is group-aware and cannot buy symbols without that layer.
+    The current ``symbols.txt`` cache is the stock-eligibility contract; ETF,
+    ETN, preferred, SPAC, fund, royalty-trust and quarantine decisions must be
+    resolved upstream before the cache is written.  This function only checks
+    FF12 coverage because production selection is group-aware and cannot buy
+    symbols without that layer.
     """
 
     current_symbols = [
@@ -240,59 +241,32 @@ def load_runtime_download_symbols() -> list[str]:
         if symbol_name and symbol_name.strip() and symbol_name != SP500_SYMBOL
     ]
     current_symbols = sorted(dict.fromkeys(current_symbols))
-    symbols_excluded_by_industry = strategy.load_symbols_excluded_by_industry()
     symbol_to_group_identifier = strategy.load_ff12_groups_by_symbol()
-    symbols_rejected_by_asset_metadata = load_symbols_rejected_by_asset_metadata()
-    symbols_rejected_by_listing_name = load_symbols_rejected_by_listing_name()
 
     if not symbol_to_group_identifier:
         LOGGER.warning(
-            "FF12 sector map is unavailable; runtime refresh will only apply "
-            "known non-stock exclusions"
-        )
-    if not symbols_rejected_by_asset_metadata:
-        LOGGER.warning(
-            "ETF metadata is unavailable; refresh will not apply the "
-            "Alpha Vantage ETF/fund rejection layer"
+            "FF12 sector map is unavailable; runtime refresh will trust "
+            "symbols.txt without sector coverage checks"
         )
 
     runtime_symbols: list[str] = []
-    skipped_non_stock_count = 0
     skipped_missing_sector_count = 0
-    skipped_asset_metadata_count = 0
-    skipped_listing_name_count = 0
     for symbol_name in current_symbols:
-        if symbol_name in symbols_excluded_by_industry:
-            skipped_non_stock_count += 1
-            continue
         if (
             symbol_to_group_identifier
             and symbol_name not in symbol_to_group_identifier
         ):
             skipped_missing_sector_count += 1
             continue
-        if symbol_name in symbols_rejected_by_asset_metadata:
-            skipped_asset_metadata_count += 1
-            continue
-        if (
-            symbol_name in symbols_rejected_by_listing_name
-            or NON_COMMON_STOCK_SYMBOL_PATTERN.search(symbol_name)
-        ):
-            skipped_listing_name_count += 1
-            continue
         runtime_symbols.append(symbol_name)
 
     runtime_symbols.append(SP500_SYMBOL)
     LOGGER.info(
         "Runtime Yahoo refresh universe: %d symbols (%d current, "
-        "%d non-stock skipped, %d missing-sector skipped, "
-        "%d ETF/fund skipped, %d listing-name skipped)",
+        "%d missing-sector skipped)",
         len(runtime_symbols),
         len(current_symbols),
-        skipped_non_stock_count,
         skipped_missing_sector_count,
-        skipped_asset_metadata_count,
-        skipped_listing_name_count,
     )
     return runtime_symbols
 
@@ -424,8 +398,8 @@ def find_history_signal(
         Fractional loss used for downstream simulations; not used in signal
         detection here but preserved for parity with other entry points.
     allowed_fama_french_groups:
-        Optional set of FF12 group identifiers (1–11) used to restrict the
-        tradable universe. Group 12 (Other) is not selectable for group-aware
+        Optional set of FF12 group identifiers (1–12) used to restrict the
+        tradable universe. Group 12 (Other) is selectable for group-aware
         filtering.
 
     Historical data starting from the later of
