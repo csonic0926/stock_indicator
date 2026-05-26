@@ -39,6 +39,7 @@ TRADING_ENV = "REAL"
 DEFAULT_HISTORY_LOOKBACK_DAYS = 180
 DEFAULT_SL_MIN_HOLD_BARS = 1
 TERMINAL_ORDER_STATUSES = {"CANCELLED_ALL", "FILLED_ALL", "FAILED", "DELETED"}
+BUCKET_TP_SL_WALK_BACK_DAYS = 14
 
 
 def _log_order(order_data: dict[str, Any]) -> None:
@@ -399,6 +400,51 @@ def _load_production_exit_rules() -> dict[str, dict[str, Any]]:
     return rules_by_key
 
 
+def _walk_back_bucket_tp_sl_entry(
+    *,
+    bucket_candidate: str,
+    anchor_date_text: str,
+    bucket_tp_sl_entries_by_key_and_date: dict[tuple[str, str], dict[str, Any]],
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Find the most recent BUCKET_TP_SL entry for `bucket_candidate` at or
+    before `anchor_date_text`, within BUCKET_TP_SL_WALK_BACK_DAYS calendar days.
+
+    Covers the case where cron freezes a bucket snapshot on a trading day but
+    Futu fills the entry on a later non-trading-aligned day (e.g., holiday
+    cron run vs. next-session execution).
+    """
+    if not bucket_candidate or not anchor_date_text:
+        return None, None
+    try:
+        anchor_date = date.fromisoformat(anchor_date_text)
+    except ValueError:
+        return None, None
+    best_entry: dict[str, Any] | None = None
+    best_date_text: str | None = None
+    best_distance = BUCKET_TP_SL_WALK_BACK_DAYS + 1
+    for (bucket_key, candidate_date_text), candidate_entry in (
+        bucket_tp_sl_entries_by_key_and_date.items()
+    ):
+        if bucket_key != bucket_candidate:
+            continue
+        try:
+            candidate_date = date.fromisoformat(candidate_date_text)
+        except ValueError:
+            continue
+        if candidate_date > anchor_date:
+            continue
+        distance_days = (anchor_date - candidate_date).days
+        if distance_days > BUCKET_TP_SL_WALK_BACK_DAYS:
+            continue
+        if distance_days < best_distance:
+            best_entry = candidate_entry
+            best_date_text = candidate_date_text
+            best_distance = distance_days
+            if distance_days == 0:
+                break
+    return best_entry, best_date_text
+
+
 def _merge_production_signal_metadata(
     *,
     symbol: str,
@@ -434,10 +480,29 @@ def _merge_production_signal_metadata(
             for bucket_candidate in bucket_candidates:
                 if not bucket_candidate:
                     continue
-                signal_entry = bucket_tp_sl_entries_by_key_and_date.get(
-                    (bucket_candidate, signal_date_text)
+                candidate_entry, matched_date_text = (
+                    _walk_back_bucket_tp_sl_entry(
+                        bucket_candidate=bucket_candidate,
+                        anchor_date_text=signal_date_text,
+                        bucket_tp_sl_entries_by_key_and_date=(
+                            bucket_tp_sl_entries_by_key_and_date
+                        ),
+                    )
                 )
-                if signal_entry is not None:
+                if candidate_entry is not None:
+                    signal_entry = candidate_entry
+                    if (
+                        matched_date_text
+                        and matched_date_text != signal_date_text
+                    ):
+                        LOGGER.info(
+                            "[BUCKET_TP_SL_WALK_BACK] symbol=%s bucket=%s "
+                            "anchor=%s matched=%s",
+                            symbol,
+                            bucket_candidate,
+                            signal_date_text,
+                            matched_date_text,
+                        )
                     break
             if signal_entry is not None:
                 break

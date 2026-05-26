@@ -390,6 +390,106 @@ def test_signal_metadata_can_fallback_to_entry_date_bucket_snapshot() -> None:
     assert merged_entry["sl_pct"] == 0.0434
 
 
+def test_bucket_snapshot_walks_back_when_anchor_date_has_no_entry() -> None:
+    """Holiday cron gap: anchor 05-26 but only 05-22 has a snapshot."""
+    merged_entry = place_tp_sl._merge_production_signal_metadata(
+        symbol="UNH",
+        entry={
+            "symbol": "UNH",
+            "entry_date": "2026-05-26",
+            "bucket": "fish_tail_explore",
+            "strategy_id": "fish_tail_blow_off_top",
+        },
+        signal_entries_by_symbol_and_date={},
+        bucket_tp_sl_entries_by_key_and_date={
+            (
+                "fish_tail_explore",
+                "2026-05-22",
+            ): {
+                "date": "2026-05-22",
+                "bucket": "fish_tail_explore",
+                "strategy_id": "fish_tail_blow_off_top",
+                "tp_pct": 0.0586,
+                "sl_pct": 0.0420,
+            }
+        },
+        production_exit_rules={},
+    )
+
+    assert merged_entry is not None
+    assert merged_entry["supports_tp_sl"] is True
+    assert merged_entry["tp_pct"] == 0.0586
+
+
+def test_bucket_snapshot_walk_back_rejects_older_than_cap() -> None:
+    """A snapshot older than BUCKET_TP_SL_WALK_BACK_DAYS must not match."""
+    merged_entry = place_tp_sl._merge_production_signal_metadata(
+        symbol="UNH",
+        entry={
+            "symbol": "UNH",
+            "entry_date": "2026-05-26",
+            "bucket": "fish_tail_explore",
+            "strategy_id": "fish_tail_blow_off_top",
+        },
+        signal_entries_by_symbol_and_date={},
+        bucket_tp_sl_entries_by_key_and_date={
+            (
+                "fish_tail_explore",
+                "2026-05-11",
+            ): {
+                "date": "2026-05-11",
+                "bucket": "fish_tail_explore",
+                "strategy_id": "fish_tail_blow_off_top",
+                "tp_pct": 0.0586,
+                "sl_pct": 0.0420,
+            }
+        },
+        production_exit_rules={},
+    )
+
+    assert merged_entry is None
+
+
+def test_bucket_snapshot_walk_back_prefers_closest_date() -> None:
+    """When multiple snapshots are within cap, pick the most recent one."""
+    merged_entry = place_tp_sl._merge_production_signal_metadata(
+        symbol="UNH",
+        entry={
+            "symbol": "UNH",
+            "entry_date": "2026-05-26",
+            "bucket": "fish_tail_explore",
+            "strategy_id": "fish_tail_blow_off_top",
+        },
+        signal_entries_by_symbol_and_date={},
+        bucket_tp_sl_entries_by_key_and_date={
+            (
+                "fish_tail_explore",
+                "2026-05-22",
+            ): {
+                "date": "2026-05-22",
+                "bucket": "fish_tail_explore",
+                "strategy_id": "fish_tail_blow_off_top",
+                "tp_pct": 0.0586,
+                "sl_pct": 0.0420,
+            },
+            (
+                "fish_tail_explore",
+                "2026-05-25",
+            ): {
+                "date": "2026-05-25",
+                "bucket": "fish_tail_explore",
+                "strategy_id": "fish_tail_blow_off_top",
+                "tp_pct": 0.0633,
+                "sl_pct": 0.0420,
+            },
+        },
+        production_exit_rules={},
+    )
+
+    assert merged_entry is not None
+    assert merged_entry["tp_pct"] == 0.0633
+
+
 def test_legacy_remark_does_not_block_production_signal_tp(
     tmp_path: Path,
     monkeypatch,
