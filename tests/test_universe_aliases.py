@@ -109,17 +109,12 @@ def test_production_config_uses_old_universe_risk_priority_path() -> None:
     }
 
 
-def test_production_default_files_are_old_universe_aliases() -> None:
-    """Production default files should remain byte-for-byte old universe aliases."""
+def test_production_default_symbol_file_is_old_universe_alias() -> None:
+    """Default symbol file should remain a byte-for-byte production alias."""
 
     assert (DATA_DIRECTORY / "symbols.txt").read_text(encoding="utf-8") == (
         PRODUCTION_SYMBOLS_PATH.read_text(encoding="utf-8")
     )
-    default_sector_frame = pandas.read_parquet(
-        DATA_DIRECTORY / "symbols_with_sector.parquet"
-    )
-    production_sector_frame = pandas.read_parquet(PRODUCTION_SECTOR_PATH)
-    pandas.testing.assert_frame_equal(default_sector_frame, production_sector_frame)
 
 
 def test_sector_files_cover_expected_universes_with_standard_ff12_groups() -> None:
@@ -133,9 +128,20 @@ def test_sector_files_cover_expected_universes_with_standard_ff12_groups() -> No
         RESEARCH_SECTOR_PATH,
         RESEARCH_SYMBOLS_PATH,
     )
-    assert set(production_sector_frame["ff12_source"]) == {"legacy_backtest"}
-    assert set(production_sector_frame["classification_confidence"]) == {"high"}
-    assert len(production_sector_frame) == 5004
+    production_source_values = {
+        source_text.strip().lower()
+        for source_text in production_sector_frame["ff12_source"].astype(str)
+    }
+    production_confidence_values = {
+        confidence_text.strip().lower()
+        for confidence_text in production_sector_frame[
+            "classification_confidence"
+        ].astype(str)
+    }
+    assert "legacy_backtest" in production_source_values
+    assert "missing_sic_fallback" not in production_source_values
+    assert "low" not in production_confidence_values
+    assert len(production_sector_frame) == len(_load_symbols(PRODUCTION_SYMBOLS_PATH))
     assert len(research_sector_frame) == len(_load_symbols(RESEARCH_SYMBOLS_PATH))
 
 

@@ -23,6 +23,7 @@ import yfinance  # TODO: review
 from pandas import DataFrame
 
 from . import data_loader, symbols, strategy, daily_job, multi_bucket_today
+from . import production_ff12_promotion
 from . import universe_pipeline
 from .simulator import calc_commission
 from .strategy_sets import load_strategy_set_mapping, load_strategy_entry_filters
@@ -748,6 +749,48 @@ class StockShell(cmd.Cmd):
             "  --dry-run: validate and print symbol diff without publishing outputs.\n"
             "  --maximum-drop-ratio RATIO: one-run safety threshold for controlled "
             "large universe migrations.\n"
+        )
+
+    def do_sync_production_ff12_sector(self, argument_line: str) -> None:  # noqa: D401
+        """sync_production_ff12_sector [--dry-run]
+        Append promoted research FF12 rows into production sector outputs."""
+
+        try:
+            argument_parts = shlex.split(argument_line)
+        except ValueError as parse_error:
+            self.stdout.write(f"invalid arguments: {parse_error}\n")
+            return
+
+        dry_run = False
+        for argument_text in argument_parts:
+            if argument_text == "--dry-run":
+                dry_run = True
+                continue
+            self.stdout.write("usage: sync_production_ff12_sector [--dry-run]\n")
+            return
+
+        try:
+            report = production_ff12_promotion.sync_production_ff12_sector(
+                publish_outputs=not dry_run,
+            )
+        except (FileNotFoundError, OSError, ValueError) as sync_error:
+            self.stdout.write(
+                f"Production FF12 promotion sync failed: {sync_error}\n"
+            )
+            raise
+        self.stdout.write("\n".join(report.to_lines()) + "\n")
+
+    def help_sync_production_ff12_sector(self) -> None:
+        """Display help for the sync_production_ff12_sector command."""
+
+        self.stdout.write(
+            "sync_production_ff12_sector [--dry-run]\n"
+            "Compare production_old_symbols.txt, production_old_symbols_with_sector, "
+            "and research_new_symbols_with_sector. Existing production rows stay "
+            "frozen; missing promoted symbols are appended from research sector "
+            "rows, then production parquet and CSV outputs are written atomically.\n"
+            "Parameters:\n"
+            "  --dry-run: validate and print the promotion diff without publishing.\n"
         )
 
     def do_update_sector_data(self, argument_line: str) -> None:  # noqa: D401
