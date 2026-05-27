@@ -3349,3 +3349,153 @@ def test_multi_bucket_daily_signal_forwards_ff12_data_path(
 
     assert recorded_override_paths == [ff12_data_path]
     assert f"FF12 data: {ff12_data_path}" in output_buffer.getvalue()
+
+
+def test_multi_bucket_daily_signal_applies_risk_score_priority_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Daily signal generation should use the active month's priorities."""
+
+    import stock_indicator.manage as manage_module
+    from stock_indicator import multi_bucket_today
+
+    data_directory = tmp_path / "prices"
+    data_directory.mkdir()
+    risk_score_path = tmp_path / "historical_risk_scores.csv"
+    risk_score_path.write_text(
+        "\n".join(
+            [
+                "year_month,duration_score,breadth_score,risk_score,"
+                "recommendation,key_event,confidence",
+                "2024-01,0,25,25,continue,test,H",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "multi_bucket_config.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    fish_head_definition = manage_module.strategy.ComplexStrategySetDefinition(
+        label="fish_head_production",
+        buy_strategy_name="fish_head_buy",
+        sell_strategy_name="fish_head_sell",
+        strategy_identifier="fish_head_vacuum_turn",
+        entry_priority=1,
+    )
+    fish_tail_definition = manage_module.strategy.ComplexStrategySetDefinition(
+        label="fish_tail_explore",
+        buy_strategy_name="fish_tail_buy",
+        sell_strategy_name="fish_tail_sell",
+        strategy_identifier="fish_tail_blow_off_top",
+        entry_priority=1,
+    )
+    fill_remaining_definition = (
+        manage_module.strategy.ComplexStrategySetDefinition(
+            label="fish_head_b30_35",
+            buy_strategy_name="fish_head_b30_35_buy",
+            sell_strategy_name="fish_head_b30_35_sell",
+            strategy_identifier="fish_head_b30_35",
+            entry_priority=2,
+        )
+    )
+    loaded_config = multi_bucket_today.MultiBucketRunConfig(
+        bucket_definitions={
+            fish_head_definition.label: fish_head_definition,
+            fish_tail_definition.label: fish_tail_definition,
+            fill_remaining_definition.label: fill_remaining_definition,
+        },
+        adaptive_tp_sl=manage_module.strategy.AdaptiveTPSLConfig(),
+        maximum_position_count=1,
+        starting_cash=1000.0,
+        withdraw_amount=0.0,
+        margin_multiplier=1.0,
+        minimum_holding_bars=0,
+        show_trade_details=False,
+        start_date_string=None,
+        confirmation_mode=None,
+        use_confirmation_angle=False,
+        confirmation_entry_mode="limit",
+        confirmation_sma_angle_range=None,
+        data_source_name="daily",
+        symbol_list_name=None,
+        ff12_data_path_text=None,
+        max_same_symbol=1,
+        raw_document={
+            "risk_score_gate": {
+                "csv_path": str(risk_score_path),
+                "stop_threshold": 75,
+            },
+            "risk_score_priority_overrides": {
+                "scores": [25, 50],
+                "priorities": {
+                    "fish_head_production": 1,
+                    "fish_tail_explore": 2,
+                    "fish_head_b30_35": 3,
+                },
+            },
+        },
+    )
+
+    monkeypatch.setattr(
+        manage_module.multi_bucket_today,
+        "load_multi_bucket_config",
+        lambda _: loaded_config,
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "DATA_SOURCE_PATHS",
+        {"daily": data_directory},
+    )
+    monkeypatch.setattr(
+        manage_module.multi_bucket_today,
+        "load_state",
+        lambda _: {"accepted_entries": []},
+    )
+    monkeypatch.setattr(
+        manage_module.multi_bucket_today,
+        "save_state_atomically",
+        lambda state_path, state: None,
+    )
+
+    recorded_priorities: dict[str, int] = {}
+
+    def fake_compute_today_signals(
+        **keyword_arguments: object,
+    ) -> multi_bucket_today.TodaySignalsResult:
+        config = keyword_arguments["config"]
+        assert isinstance(config, multi_bucket_today.MultiBucketRunConfig)
+        recorded_priorities.update(
+            {
+                bucket_label: bucket_definition.entry_priority
+                for bucket_label, bucket_definition
+                in config.bucket_definitions.items()
+            }
+        )
+        return multi_bucket_today.TodaySignalsResult(
+            eval_date_string="2024-01-02",
+            accepted_per_strategy={},
+            accepted_records=[],
+            rejected_records=[],
+            log_lines=["ok"],
+        )
+
+    monkeypatch.setattr(
+        manage_module.multi_bucket_today,
+        "compute_today_signals",
+        fake_compute_today_signals,
+    )
+
+    output_buffer = io.StringIO()
+    shell = manage_module.StockShell(stdout=output_buffer)
+    shell.onecmd(f"multi_bucket_daily_signal {config_path} 2024-01-02")
+
+    assert recorded_priorities == {
+        "fish_head_production": 1,
+        "fish_tail_explore": 2,
+        "fish_head_b30_35": 3,
+    }
+    assert "Risk-score priority override active: month=2024-01" in (
+        output_buffer.getvalue()
+    )

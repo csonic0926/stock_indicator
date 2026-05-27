@@ -62,7 +62,8 @@
       "override_min_hold_sl_only": true,
       "min_hold_sl": 1,
       "tp_regime_adjust": true,
-      "tp_slope_amplify": true
+      "tp_slope_amplify": true,
+      "max_hold": 7
     },
     {
       "label": "fish_head_b30_35",
@@ -92,6 +93,17 @@
   "risk_score_gate": {
     "csv_path": "data/historical_risk_scores.csv",
     "stop_threshold": 75
+  },
+  "risk_score_priority_overrides": {
+    "scores": [
+      25,
+      50
+    ],
+    "priorities": {
+      "fish_head_production": 1,
+      "fish_tail_explore": 2,
+      "fish_head_b30_35": 3
+    }
   },
   "ff12_data_path": "data/production_old_symbols_with_sector.parquet"
 }

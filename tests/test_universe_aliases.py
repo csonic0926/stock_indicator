@@ -85,6 +85,30 @@ def test_committed_multi_bucket_configs_select_expected_universes() -> None:
             assert config_document[config_key] == expected_value
 
 
+def test_production_config_uses_old_universe_risk_priority_path() -> None:
+    """Production cron config should promote the tested old-universe path."""
+
+    config_document = json.loads(
+        (DATA_DIRECTORY / "multi_bucket_production.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    bucket_by_label = {
+        bucket_document["label"]: bucket_document
+        for bucket_document in config_document["buckets"]
+    }
+
+    assert bucket_by_label["fish_tail_explore"]["max_hold"] == 7
+    assert config_document["risk_score_priority_overrides"] == {
+        "scores": [25, 50],
+        "priorities": {
+            "fish_head_production": 1,
+            "fish_tail_explore": 2,
+            "fish_head_b30_35": 3,
+        },
+    }
+
+
 def test_production_default_files_are_old_universe_aliases() -> None:
     """Production default files should remain byte-for-byte old universe aliases."""
 

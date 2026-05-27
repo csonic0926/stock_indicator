@@ -204,6 +204,41 @@ def load_risk_score_priority_overrides(
     )
 
 
+def apply_risk_score_priority_override_for_month(
+    config: multi_bucket_today.MultiBucketRunConfig,
+    evaluation_month: str,
+) -> tuple[set[int], dict[str, int]] | None:
+    """Apply configured bucket priorities for one risk-score month.
+
+    The daily cron path evaluates one date at a time, so it only needs the
+    override for ``evaluation_month`` instead of the simulator's full
+    month-keyed mapping.
+    """
+
+    (
+        bucket_priority_overrides_by_month,
+        target_scores,
+        priority_by_bucket_label,
+    ) = load_risk_score_priority_overrides(
+        config.raw_document.get("risk_score_priority_overrides"),
+        config.raw_document.get("risk_score_gate"),
+        set(config.bucket_definitions),
+    )
+    if bucket_priority_overrides_by_month is None:
+        return None
+
+    priority_override_for_month = bucket_priority_overrides_by_month.get(
+        evaluation_month
+    )
+    if priority_override_for_month is None:
+        return target_scores, {}
+
+    for bucket_label, priority_value in priority_override_for_month.items():
+        config.bucket_definitions[bucket_label].entry_priority = priority_value
+
+    return target_scores, priority_by_bucket_label
+
+
 def _resolve_strategy_choice(raw_name: str, allowed: dict) -> str:
     """Return the first supported strategy token from ``raw_name``.
 
@@ -4038,6 +4073,38 @@ class StockShell(cmd.Cmd):
                 return
             eval_date_string = date_string
         eval_date_timestamp = pandas.Timestamp(eval_date_string)
+        evaluation_month = eval_date_timestamp.strftime("%Y-%m")
+
+        try:
+            daily_priority_override = (
+                apply_risk_score_priority_override_for_month(
+                    config,
+                    evaluation_month,
+                )
+            )
+        except ValueError as priority_error:
+            self.stdout.write(f"{priority_error}\n")
+            return
+        if daily_priority_override is not None:
+            target_priority_scores, priority_by_bucket_label = (
+                daily_priority_override
+            )
+            if priority_by_bucket_label:
+                score_text = ", ".join(
+                    str(risk_score)
+                    for risk_score in sorted(target_priority_scores)
+                )
+                priority_text = ", ".join(
+                    f"{bucket_label}->{priority_value}"
+                    for bucket_label, priority_value in sorted(
+                        priority_by_bucket_label.items()
+                    )
+                )
+                self.stdout.write(
+                    "Risk-score priority override active: "
+                    f"month={evaluation_month} scores=[{score_text}], "
+                    f"{priority_text}\n"
+                )
 
         suffix = "_shadow" if shadow_mode else ""
         state_path = LIVE_STATE_DIRECTORY / f"adaptive_state{suffix}.json"
@@ -4107,6 +4174,8 @@ class StockShell(cmd.Cmd):
             "[ROLLING_TP_SL_STATE] log lines for the dashboard/order layer.\n"
             "Honors optional ff12_data_path from the JSON config so live "
             "selection uses the same sector map as the matching simulation.\n"
+            "Honors optional risk_score_priority_overrides for the evaluated "
+            "month.\n"
         )
 
     def do_compute_adaptive_tp_sl(self, argument_line: str) -> None:  # noqa: D401
