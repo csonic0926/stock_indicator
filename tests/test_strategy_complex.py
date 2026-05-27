@@ -1043,6 +1043,68 @@ def test_run_complex_simulation_enforces_shared_cap(
     assert metrics.overall_metrics.maximum_concurrent_positions == 2
 
 
+def test_run_complex_simulation_applies_monthly_bucket_priority_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Monthly priority overrides should decide same-day slot contention."""
+
+    trade_a = _build_trade("2024-01-02", "2024-01-10", symbol="AAA")
+    trade_b = _build_trade("2024-01-02", "2024-01-10", symbol="BBB")
+
+    artifacts_a = _build_artifacts([trade_a])
+    artifacts_b = _build_artifacts([trade_b])
+    artifact_map = {
+        "set_a": artifacts_a,
+        "set_b": artifacts_b,
+    }
+
+    def fake_generate(
+        *args: object,
+        **kwargs: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        buy_strategy_name = kwargs.get("buy_strategy_name") or args[1]
+        return artifact_map[str(buy_strategy_name)]
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+            entry_priority=1,
+        ),
+        "B": strategy.ComplexStrategySetDefinition(
+            label="B",
+            buy_strategy_name="set_b",
+            sell_strategy_name="set_b",
+            entry_priority=1,
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=1,
+        multi_bucket_mode=True,
+        bucket_priority_overrides_by_month={
+            "2024-01": {
+                "A": 2,
+                "B": 1,
+            },
+        },
+    )
+
+    assert metrics.metrics_by_set["A"].total_trades == 0
+    assert metrics.metrics_by_set["B"].total_trades == 1
+    assert metrics.overall_metrics.total_trades == 1
+
+
 def test_evict_oldest_keeps_evicted_exit_from_far_future_settlement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

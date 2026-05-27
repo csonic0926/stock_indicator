@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import cmd
+import csv
 import datetime
 import gc  # TODO: review
 import json
@@ -104,11 +105,103 @@ def resolve_ff12_data_path(ff12_data_path_text: object | None) -> Path | None:
         return None
     ff12_data_path = Path(str(ff12_data_path_text)).expanduser()
     if not ff12_data_path.is_absolute():
-        repository_root = Path(__file__).resolve().parent.parent.parent
-        ff12_data_path = repository_root / ff12_data_path
+        ff12_data_path = _resolve_repository_relative_path(ff12_data_path)
     if not ff12_data_path.exists():
         raise ValueError(f"ff12_data_path not found: {ff12_data_path}")
     return ff12_data_path
+
+
+def _resolve_repository_relative_path(path_text: object) -> Path:
+    """Resolve a path relative to the repository root when needed."""
+
+    resolved_path = Path(str(path_text)).expanduser()
+    if resolved_path.is_absolute():
+        return resolved_path
+    repository_root = Path(__file__).resolve().parent.parent.parent
+    return repository_root / resolved_path
+
+
+def load_risk_score_priority_overrides(
+    raw_priority_overrides: object | None,
+    raw_risk_score_gate: object | None,
+    bucket_labels: set[str],
+) -> tuple[dict[str, dict[str, int]] | None, set[int], dict[str, int]]:
+    """Load month-keyed bucket priority overrides from risk-score config."""
+
+    if raw_priority_overrides is None:
+        return None, set(), {}
+    if not isinstance(raw_priority_overrides, dict):
+        raise ValueError("risk_score_priority_overrides must be a JSON object")
+
+    raw_scores = raw_priority_overrides.get("scores")
+    if not isinstance(raw_scores, list) or not raw_scores:
+        raise ValueError("risk_score_priority_overrides.scores must be a list")
+    target_scores: set[int] = set()
+    for raw_score in raw_scores:
+        try:
+            target_scores.add(int(raw_score))
+        except (TypeError, ValueError) as parse_error:
+            raise ValueError(
+                "risk_score_priority_overrides.scores must contain integers"
+            ) from parse_error
+
+    raw_priorities = raw_priority_overrides.get("priorities")
+    if not isinstance(raw_priorities, dict) or not raw_priorities:
+        raise ValueError(
+            "risk_score_priority_overrides.priorities must be a JSON object"
+        )
+    priority_by_bucket_label: dict[str, int] = {}
+    for raw_bucket_label, raw_priority in raw_priorities.items():
+        bucket_label = str(raw_bucket_label)
+        if bucket_label not in bucket_labels:
+            raise ValueError(
+                "risk_score_priority_overrides.priorities contains unknown "
+                f"bucket label: {bucket_label}"
+            )
+        try:
+            priority_by_bucket_label[bucket_label] = int(raw_priority)
+        except (TypeError, ValueError) as parse_error:
+            raise ValueError(
+                "risk_score_priority_overrides.priorities values must be integers"
+            ) from parse_error
+
+    risk_score_csv_path_text = raw_priority_overrides.get("csv_path")
+    if not risk_score_csv_path_text and isinstance(raw_risk_score_gate, dict):
+        risk_score_csv_path_text = raw_risk_score_gate.get("csv_path")
+    if not risk_score_csv_path_text:
+        raise ValueError(
+            "risk_score_priority_overrides.csv_path is required when "
+            "risk_score_gate.csv_path is not configured"
+        )
+
+    risk_score_csv_path = _resolve_repository_relative_path(
+        risk_score_csv_path_text
+    )
+    if not risk_score_csv_path.exists():
+        raise ValueError(
+            "risk_score_priority_overrides.csv_path not found: "
+            f"{risk_score_csv_path}"
+        )
+
+    bucket_priority_overrides_by_month: dict[str, dict[str, int]] = {}
+    with risk_score_csv_path.open("r", newline="") as risk_score_file:
+        reader = csv.DictReader(risk_score_file)
+        for row in reader:
+            try:
+                risk_score = int(row["risk_score"])
+                year_month_text = row["year_month"]
+            except (KeyError, TypeError, ValueError):
+                continue
+            if risk_score in target_scores:
+                bucket_priority_overrides_by_month[year_month_text] = dict(
+                    priority_by_bucket_label
+                )
+
+    return (
+        bucket_priority_overrides_by_month,
+        target_scores,
+        priority_by_bucket_label,
+    )
 
 
 def _resolve_strategy_choice(raw_name: str, allowed: dict) -> str:
@@ -1961,6 +2054,36 @@ class StockShell(cmd.Cmd):
             )
 
         try:
+            (
+                bucket_priority_overrides_by_month,
+                target_priority_scores,
+                priority_by_bucket_label,
+            ) = load_risk_score_priority_overrides(
+                config_document.get("risk_score_priority_overrides"),
+                raw_gate,
+                set(bucket_definitions),
+            )
+        except ValueError as priority_error:
+            self.stdout.write(f"{priority_error}\n")
+            return
+        if bucket_priority_overrides_by_month is not None:
+            sorted_scores_text = ", ".join(
+                str(risk_score) for risk_score in sorted(target_priority_scores)
+            )
+            sorted_priorities_text = ", ".join(
+                f"{bucket_label}->{priority_value}"
+                for bucket_label, priority_value in sorted(
+                    priority_by_bucket_label.items()
+                )
+            )
+            self.stdout.write(
+                "Risk-score priority override: "
+                f"scores=[{sorted_scores_text}] "
+                f"({len(bucket_priority_overrides_by_month)} months), "
+                f"{sorted_priorities_text}\n"
+            )
+
+        try:
             with strategy.override_ff12_group_source_path(ff12_data_path):
                 simulation_metrics = strategy.run_complex_simulation(
                     data_directory,
@@ -1983,6 +2106,9 @@ class StockShell(cmd.Cmd):
                     exported_state=exported_state_holder,
                     risk_score_stop_months=risk_score_stop_months,
                     margin_overrides=margin_overrides,
+                    bucket_priority_overrides_by_month=(
+                        bucket_priority_overrides_by_month
+                    ),
                 )
         except ValueError as error:
             self.stdout.write(f"{error}\n")
@@ -2238,6 +2364,7 @@ class StockShell(cmd.Cmd):
             "non-daily backtest cache such as '2010'\n"
             "  - confirmation_mode: 'market', 'limit', or null (no confirmation)\n"
             "  - priority: lower = higher; ties broken by within-bucket quality then insertion order\n"
+            "  - risk_score_priority_overrides can change bucket priority for selected monthly scores\n"
             "  - max_positions per bucket is optional; null means no per-bucket cap\n"
             "  - skip_ff12_groups per bucket is optional; values are positive FF group ids removed before ranking\n"
             "  - ff12_data_path is optional; use it for frozen old-universe sector maps\n"

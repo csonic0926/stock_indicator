@@ -1247,6 +1247,32 @@ def compute_frozen_tp_sl_for_bucket(
     return tp_pct, sl_pct, rolling_mp, rolling_ml
 
 
+def _resolve_bucket_entry_priority(
+    bucket_label: str,
+    entry_date: pandas.Timestamp,
+    default_priority: int,
+    bucket_priority_overrides_by_month: dict[str, dict[str, int]] | None,
+) -> int:
+    """Return the bucket priority for an entry event.
+
+    The configured static priority remains the default. Monthly overrides are
+    keyed by ``YYYY-MM`` and only affect labels explicitly present for that
+    month, allowing experiments to change cross-bucket slot contention during
+    selected risk-score regimes without mutating the baseline bucket
+    definitions.
+    """
+
+    if not bucket_priority_overrides_by_month:
+        return default_priority
+    year_month_text = pandas.Timestamp(entry_date).strftime("%Y-%m")
+    priority_overrides_for_month = bucket_priority_overrides_by_month.get(
+        year_month_text
+    )
+    if not priority_overrides_for_month:
+        return default_priority
+    return priority_overrides_for_month.get(bucket_label, default_priority)
+
+
 def run_complex_simulation(
     data_directory: Path,
     set_definitions: Dict[str, ComplexStrategySetDefinition],
@@ -1269,6 +1295,7 @@ def run_complex_simulation(
     exported_state: Dict[str, Any] | None = None,
     risk_score_stop_months: set[str] | None = None,
     margin_overrides: dict[str, float] | None = None,
+    bucket_priority_overrides_by_month: dict[str, dict[str, int]] | None = None,
 ) -> ComplexSimulationMetrics:
     """Evaluate multiple strategy sets under a shared configuration.
 
@@ -1284,6 +1311,11 @@ def run_complex_simulation(
     the event sort order. The B-specific hardcoding is disabled so any number
     of buckets can share a global slot pool on a first-come-first-served
     basis, with priority as the secondary ordering key.
+
+    ``bucket_priority_overrides_by_month`` optionally replaces a bucket's
+    configured priority for entry events in selected ``YYYY-MM`` months. It is
+    intended for risk-regime experiments where slot contention should favor
+    one bucket family without changing the baseline bucket definitions.
     """
 
     if maximum_position_count <= 0:
@@ -1426,10 +1458,16 @@ def run_complex_simulation(
     event_insertion_counter = 0
     for label, artifacts in artifacts_by_set.items():
         priority_mode = priority_mode_by_set.get(label)
-        bucket_priority_value = (
-            set_definitions[label].entry_priority if multi_bucket_mode else 0
-        )
         for trade in artifacts.trades:
+            default_bucket_priority = (
+                set_definitions[label].entry_priority if multi_bucket_mode else 0
+            )
+            bucket_priority_value = _resolve_bucket_entry_priority(
+                label,
+                trade.entry_date,
+                default_bucket_priority,
+                bucket_priority_overrides_by_month,
+            )
             entry_priority = 0.0
             trade_detail_pair = artifacts.trade_detail_pairs.get(trade)
             if trade_detail_pair is not None:

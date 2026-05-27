@@ -3039,6 +3039,131 @@ def test_multi_bucket_simulation_forwards_symbol_list(
     assert "Symbol list: 2 symbols" in output_buffer.getvalue()
 
 
+def test_multi_bucket_simulation_forwards_risk_score_priority_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Risk-score priority config should become month-keyed overrides."""
+
+    import json
+
+    import stock_indicator.manage as manage_module
+
+    data_directory = tmp_path / "prices"
+    data_directory.mkdir()
+    risk_score_path = tmp_path / "historical_risk_scores.csv"
+    risk_score_path.write_text(
+        "\n".join(
+            [
+                "year_month,duration_score,breadth_score,risk_score,"
+                "recommendation,key_event,confidence",
+                "2024-01,0,25,25,continue,test,H",
+                "2024-02,0,0,0,continue,test,H",
+                "2024-03,25,25,50,reduce,test,H",
+                "2024-04,50,50,100,stop,test,H",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 2,
+                "starting_cash": 1000,
+                "start_date": "2020-01-01",
+                "data_source": "test",
+                "risk_score_gate": {
+                    "csv_path": str(risk_score_path),
+                    "stop_threshold": 75,
+                },
+                "risk_score_priority_overrides": {
+                    "scores": [25, 50],
+                    "priorities": {
+                        "fish_head_production": 1,
+                        "fish_tail_production": 2,
+                    },
+                },
+                "buckets": [
+                    {
+                        "label": "fish_head_production",
+                        "strategy_id": "fish_head_vacuum_turn",
+                        "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                    },
+                    {
+                        "label": "fish_tail_production",
+                        "strategy_id": "fish_tail_blow_off_top",
+                        "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        manage_module,
+        "DATA_SOURCE_PATHS",
+        {"test": data_directory},
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "load_strategy_set_mapping",
+        lambda: {
+            "fish_head_vacuum_turn": ("ema_sma_cross", "ema_sma_cross"),
+            "fish_tail_blow_off_top": ("ema_sma_cross_20", "ema_sma_cross_20"),
+        },
+    )
+    monkeypatch.setattr(manage_module, "load_strategy_entry_filters", lambda: {})
+    recorded_priority_overrides: dict[
+        str,
+        dict[str, dict[str, int]] | None,
+    ] = {}
+
+    def fake_run_complex_simulation(
+        data_directory: Path,
+        set_definitions: dict[str, object],
+        **kwargs: object,
+    ) -> manage_module.strategy.ComplexSimulationMetrics:
+        del data_directory, set_definitions
+        recorded_priority_overrides["value"] = kwargs.get(
+            "bucket_priority_overrides_by_month"
+        )
+        empty_metrics = _create_empty_metrics()
+        return manage_module.strategy.ComplexSimulationMetrics(
+            overall_metrics=empty_metrics,
+            metrics_by_set={
+                "fish_head_production": empty_metrics,
+                "fish_tail_production": empty_metrics,
+            },
+        )
+
+    monkeypatch.setattr(
+        manage_module.strategy,
+        "run_complex_simulation",
+        fake_run_complex_simulation,
+    )
+
+    output_buffer = io.StringIO()
+    shell = manage_module.StockShell(stdout=output_buffer)
+    shell.onecmd(f"multi_bucket_simulation {config_path}")
+
+    assert recorded_priority_overrides["value"] == {
+        "2024-01": {
+            "fish_head_production": 1,
+            "fish_tail_production": 2,
+        },
+        "2024-03": {
+            "fish_head_production": 1,
+            "fish_tail_production": 2,
+        },
+    }
+    assert "Risk-score priority override: scores=[25, 50] (2 months)" in (
+        output_buffer.getvalue()
+    )
+
+
 def test_multi_bucket_simulation_rejects_daily_data_source(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
