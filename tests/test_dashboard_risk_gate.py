@@ -198,6 +198,9 @@ def _patch_dashboard_paths(
     monkeypatch.setattr(dashboard, "PRODUCTION_CONFIG_PATH", config_path)
     monkeypatch.setattr(dashboard, "REPOSITORY_ROOT", repository_root)
     monkeypatch.setattr(dashboard, "DATA_DIRECTORY", repository_root)
+    live_state_directory = repository_root / "live_state"
+    live_state_directory.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(dashboard, "LIVE_STATE_DIRECTORY", live_state_directory)
     monkeypatch.setattr(dashboard, "LOGS_DIRECTORY", log_directory)
     monkeypatch.setattr(dashboard, "_get_futu_trd_ctx", lambda: FakeTradeContext())
     monkeypatch.setattr(dashboard, "_get_trd_env", lambda: object())
@@ -487,7 +490,8 @@ def test_preview_orders_does_not_use_local_state_for_max_hold(
         signal_date="2026-05-15",
         risk_score=50,
     )
-    (tmp_path / "adaptive_state.json").write_text(
+    (tmp_path / "live_state").mkdir(exist_ok=True)
+    (tmp_path / "live_state" / "adaptive_state.json").write_text(
         json.dumps(
             {
                 "accepted_entries": [

@@ -24,6 +24,7 @@ from stock_indicator.futu_trade_metadata import (
 LOGGER = logging.getLogger(__name__)
 
 DATA_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "data"
+LIVE_STATE_DIRECTORY = DATA_DIRECTORY / "live_state"
 LOGS_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "logs"
 
 app = FastAPI(title="Stock Indicator Dashboard")
@@ -349,8 +350,8 @@ def _get_log_dates() -> list[str]:
 @app.get("/api/state")
 def api_state():
     """Current system state: signal trades, adaptive state, latest log."""
-    signal_trades = _load_json(DATA_DIRECTORY / "signal_trades.json")
-    adaptive = _load_json(DATA_DIRECTORY / "adaptive_state.json")
+    signal_trades = _load_json(LIVE_STATE_DIRECTORY / "signal_trades.json")
+    adaptive = _load_json(LIVE_STATE_DIRECTORY / "adaptive_state.json")
     dates = _get_log_dates()
     latest_log = None
     if dates:
@@ -376,7 +377,7 @@ def api_log(log_date: str):
 @app.get("/api/trades")
 def api_trades():
     """Rolling trade history from adaptive_state.json."""
-    adaptive = _load_json(DATA_DIRECTORY / "adaptive_state.json")
+    adaptive = _load_json(LIVE_STATE_DIRECTORY / "adaptive_state.json")
     return {
         "raw_trade_profits": adaptive.get("raw_trade_profits", []),
         "closed_trades": adaptive.get("closed_trades", []),
@@ -987,15 +988,19 @@ def _log_order(order_data: dict) -> None:
     log_path.write_text(json.dumps(orders, indent=2), encoding="utf-8")
 
 
-SIGNAL_TRADES_PATH = DATA_DIRECTORY / "signal_trades.json"
+def _signal_trades_path() -> Path:
+    """Resolve the live signal_trades.json path at call time so tests can
+    monkeypatch LIVE_STATE_DIRECTORY after import."""
+    return LIVE_STATE_DIRECTORY / "signal_trades.json"
 
 
 def _load_signal_trades() -> dict:
     """Read signal_trades.json. Returns empty dict on miss/parse error."""
-    if not SIGNAL_TRADES_PATH.exists():
+    signal_trades_path = _signal_trades_path()
+    if not signal_trades_path.exists():
         return {}
     try:
-        data = json.loads(SIGNAL_TRADES_PATH.read_text(encoding="utf-8"))
+        data = json.loads(signal_trades_path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return data
     except (json.JSONDecodeError, OSError):
@@ -1005,10 +1010,12 @@ def _load_signal_trades() -> dict:
 
 def _save_signal_trades(data: dict) -> None:
     """Atomic write of signal_trades.json local execution mirror."""
-    tmp_path = SIGNAL_TRADES_PATH.with_suffix(".json.tmp")
+    signal_trades_path = _signal_trades_path()
+    signal_trades_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = signal_trades_path.with_suffix(".json.tmp")
     tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
     import os as _os
-    _os.replace(tmp_path, SIGNAL_TRADES_PATH)
+    _os.replace(tmp_path, signal_trades_path)
 
 
 def _record_buy_in_signal_trades(

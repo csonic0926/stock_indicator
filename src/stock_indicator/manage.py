@@ -35,6 +35,10 @@ from stock_indicator.sector_pipeline import pipeline
 LOGGER = logging.getLogger(__name__)
 
 DATA_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "data"
+# Live trading state (cron rolling pool + dashboard signal_trades mirror) is
+# kept under data/live_state/ so sim/research cleanups inside data/ cannot
+# accidentally wipe production runtime files.
+LIVE_STATE_DIRECTORY = DATA_DIRECTORY / "live_state"
 # Store downloaded per-symbol CSVs under a dedicated subfolder to avoid mixing
 # with other project CSVs (e.g., sector exports).
 STOCK_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
@@ -3646,7 +3650,7 @@ class StockShell(cmd.Cmd):
         # recorded into adaptive_state.json for rolling TP/SL computation.
         # This is NOT live portfolio state — actual positions come from Futu API.
         # Format: {"strategy_id": [{"symbol": "X", "entry_date": "YYYY-MM-DD"}, ...]}
-        positions_path = DATA_DIRECTORY / "signal_trades.json"
+        positions_path = LIVE_STATE_DIRECTORY / "signal_trades.json"
         all_positions: Dict[str, List[Dict[str, str]]] = {}
         if positions_path.exists():
             try:
@@ -3732,7 +3736,8 @@ class StockShell(cmd.Cmd):
         # alternatively, compute_adaptive_tp_sl can be called with
         # the actual exit price.
         if held_exit_signals:
-            state_path = DATA_DIRECTORY / "adaptive_state.json"
+            state_path = LIVE_STATE_DIRECTORY / "adaptive_state.json"
+            state_path.parent.mkdir(parents=True, exist_ok=True)
             adaptive_state: dict = {"raw_trade_profits": [], "closed_trades": []}
             if state_path.exists():
                 try:
@@ -3785,6 +3790,7 @@ class StockShell(cmd.Cmd):
         if strategy_id:
             all_positions[strategy_id] = expected_entries
             try:
+                positions_path.parent.mkdir(parents=True, exist_ok=True)
                 with positions_path.open("w", encoding="utf-8") as fp:
                     json.dump(all_positions, fp, indent=2)
             except OSError as write_error:
@@ -3907,7 +3913,8 @@ class StockShell(cmd.Cmd):
         eval_date_timestamp = pandas.Timestamp(eval_date_string)
 
         suffix = "_shadow" if shadow_mode else ""
-        state_path = DATA_DIRECTORY / f"adaptive_state{suffix}.json"
+        state_path = LIVE_STATE_DIRECTORY / f"adaptive_state{suffix}.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
 
         state = multi_bucket_today.load_state(state_path)
 
@@ -3986,7 +3993,8 @@ class StockShell(cmd.Cmd):
 
         Config: window=20, sigma=0.5, SL sensor=median rolling loss.
         """
-        state_path = DATA_DIRECTORY / "adaptive_state.json"
+        state_path = LIVE_STATE_DIRECTORY / "adaptive_state.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Adaptive parameters (matching new design):
         # - sl_pct computed as robust rolling median loss indicator
@@ -4158,7 +4166,7 @@ class StockShell(cmd.Cmd):
     def do_show_positions(self, argument_line: str) -> None:  # noqa: D401
         """show_positions
         Print active signal trades from signal_trades.json (not live portfolio)."""
-        positions_path = DATA_DIRECTORY / "signal_trades.json"
+        positions_path = LIVE_STATE_DIRECTORY / "signal_trades.json"
         all_positions: Dict[str, list] = {}
         if positions_path.exists():
             try:
