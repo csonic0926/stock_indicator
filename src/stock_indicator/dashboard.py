@@ -448,7 +448,7 @@ PRODUCTION_CONFIG_PATH = (
     / "multi_bucket_production.json"
 )
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent.parent
-RISK_GATE_SKIP_STATUSES = {"slot_full", "risk_score_stop"}
+PREVIEW_SKIP_STATUSES = {"slot_full", "risk_score_stop", "min_hold_block"}
 
 # TODO: review
 
@@ -472,6 +472,18 @@ def _load_max_positions() -> int:
         return int(_load_production_config().get("max_position_count", 6))
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return 6
+
+
+def _load_production_min_hold() -> int:
+    """Read signal-exit `min_hold` (weekday bars) from the production config.
+
+    Returns 0 when the field is absent or unreadable so a missing key never
+    silently blocks SELL orders.
+    """
+    try:
+        return max(0, int(_load_production_config().get("min_hold", 0)))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return 0
 
 
 def _resolve_config_path(path_text: str) -> Path:
@@ -896,13 +908,15 @@ def _build_max_hold_sell_orders(
     position_data: Any,
     existing_sell_symbols: set[str],
     entry_signal_symbols: set[str],
+    futu_open_entries: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Build max-hold SELL orders from Futu live position and deal history."""
-    futu_open_entries = _load_futu_open_trade_entries(
-        trade_context,
-        trading_environment,
-        signal_date_text=signal_date_text,
-    )
+    if futu_open_entries is None:
+        futu_open_entries = _load_futu_open_trade_entries(
+            trade_context,
+            trading_environment,
+            signal_date_text=signal_date_text,
+        )
     sell_orders: list[dict[str, Any]] = []
 
     for symbol, entry_record in futu_open_entries.items():
@@ -1168,7 +1182,26 @@ def api_preview_orders():
             slots_remaining -= 1
         orders.append(order_dict)
 
-    # SELL orders (exit signals for held positions).
+    # SELL orders (exit signals for held positions). The signal layer (cron)
+    # treats its own sim portfolio as truth, so it can emit an exit signal for
+    # a symbol that Futu only filled this signal day. The order layer must
+    # re-check min_hold against the Futu entry_date before sending the SELL.
+    signal_date_text = str(log.get("date") or "")
+    futu_open_entries: dict[str, dict[str, Any]] = {}
+    if signal_date_text:
+        try:
+            futu_open_entries = _load_futu_open_trade_entries(
+                trd_ctx,
+                trd_env,
+                signal_date_text=signal_date_text,
+            )
+        except Exception as load_error:
+            LOGGER.warning(
+                "Failed to load Futu open entries for min_hold gate: %s",
+                load_error,
+            )
+    production_min_hold = _load_production_min_hold()
+
     for symbol in log.get("sell_actions", []):
         if symbol not in held_symbols:
             continue
@@ -1178,14 +1211,40 @@ def api_preview_orders():
             if len(match) > 0:
                 qty = int(match.iloc[0].get("qty", 0))
         price = _get_last_price(symbol)
-        orders.append({
+        order_dict: dict[str, Any] = {
             "side": "SELL",
             "symbol": symbol,
             "qty": qty,
             "price": price,
             "order_type": "MARKET",
             "exit_reason": "signal",
-        })
+        }
+        futu_entry = futu_open_entries.get(symbol)
+        if production_min_hold > 0 and futu_entry is not None:
+            entry_date_text = str(futu_entry.get("entry_date") or "")
+            try:
+                bars_held = _count_weekday_bars_held(
+                    entry_date_text, signal_date_text
+                )
+            except ValueError:
+                bars_held = None
+                LOGGER.warning(
+                    "Skipping min_hold check for %s due to invalid Futu "
+                    "entry date %r",
+                    symbol,
+                    entry_date_text,
+                )
+            if bars_held is not None and bars_held < production_min_hold:
+                order_dict["status"] = "min_hold_block"
+                order_dict["qty"] = 0
+                order_dict["bars_held"] = bars_held
+                order_dict["min_hold"] = production_min_hold
+                order_dict["entry_date"] = entry_date_text
+                order_dict["skip_reason"] = (
+                    f"bars_held={bars_held} < min_hold={production_min_hold} "
+                    f"(entry={entry_date_text})"
+                )
+        orders.append(order_dict)
 
     existing_sell_symbols = {
         order["symbol"]
@@ -1197,10 +1256,11 @@ def api_preview_orders():
             trade_context=trd_ctx,
             trading_environment=trd_env,
             held_symbols=held_symbols,
-            signal_date_text=str(log.get("date")),
+            signal_date_text=signal_date_text,
             position_data=pos_data,
             existing_sell_symbols=existing_sell_symbols,
             entry_signal_symbols=set(log.get("entry_signals", [])),
+            futu_open_entries=futu_open_entries,
         )
     )
 
@@ -1242,10 +1302,10 @@ def api_execute_orders(req: ExecuteRequest):
         qty = order["qty"]
         code = f"US.{symbol}"
 
-        # Preview may mark BUY orders as non-sendable (slot cap or
-        # dashboard risk-score stop). Skip without sending so confirm cannot
-        # bypass the preview-layer guardrails.
-        if order.get("status") in RISK_GATE_SKIP_STATUSES:
+        # Preview may mark orders as non-sendable (slot cap, dashboard
+        # risk-score stop, signal-exit min_hold gate). Skip without sending so
+        # confirm cannot bypass the preview-layer guardrails.
+        if order.get("status") in PREVIEW_SKIP_STATUSES:
             results.append({
                 "symbol": symbol,
                 "status": "skipped",

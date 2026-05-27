@@ -613,6 +613,146 @@ def test_current_bucket_tp_sl_uses_config_sigma_not_stale_frozen_log(
     assert tp_by_bucket["fish_tail_explore"] == 0.07
 
 
+def _write_min_hold_fixture(
+    tmp_path: Path,
+    *,
+    signal_date: str,
+    held_symbol: str,
+    min_hold: int,
+) -> tuple[Path, Path]:
+    """Write a production config (with min_hold) and a SELL-signal log."""
+    config_path = tmp_path / "multi_bucket_production.json"
+    log_directory = tmp_path / "logs"
+    log_directory.mkdir()
+
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 6,
+                "starting_cash": 60_000,
+                "margin": 1.5,
+                "withdraw": 0,
+                "min_hold": min_hold,
+                "buckets": [
+                    {
+                        "label": "fish_head_production",
+                        "strategy_id": "fish_head_vacuum_turn",
+                        "dollar_volume_filter": (
+                            "dollar_volume>0.02%,Top500,Pick5"
+                        ),
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (log_directory / f"{signal_date}.log").write_text(
+        f"[EXIT_SIGNAL] symbol={held_symbol} "
+        "buckets=fish_head_production strategies=fish_head_vacuum_turn\n",
+        encoding="utf-8",
+    )
+    return config_path, log_directory
+
+
+def test_preview_orders_blocks_sell_when_min_hold_not_satisfied(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A SELL signal on the same trading day as a Futu entry must be blocked."""
+    config_path, log_directory = _write_min_hold_fixture(
+        tmp_path,
+        signal_date="2026-05-26",
+        held_symbol="UNH",
+        min_hold=5,
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: FakeTradeContext(
+            positions=[{"code": "US.UNH", "qty": 14}],
+            deals=[
+                {
+                    "code": "US.UNH",
+                    "trd_side": "BUY",
+                    "qty": 14,
+                    "create_time": "2026-05-26 09:30:00",
+                    "order_id": "11",
+                }
+            ],
+            orders=[],
+        ),
+    )
+
+    preview = dashboard.api_preview_orders()
+    sell_orders = [
+        order for order in preview["orders"] if order["side"] == "SELL"
+    ]
+
+    assert len(sell_orders) == 1
+    blocked_order = sell_orders[0]
+    assert blocked_order["symbol"] == "UNH"
+    assert blocked_order["status"] == "min_hold_block"
+    assert blocked_order["qty"] == 0
+    assert blocked_order["bars_held"] == 1
+    assert blocked_order["min_hold"] == 5
+    assert blocked_order["entry_date"] == "2026-05-26"
+    assert "min_hold=5" in blocked_order["skip_reason"]
+
+
+def test_preview_orders_allows_sell_when_min_hold_satisfied(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A SELL signal after the min_hold window must pass through unblocked."""
+    config_path, log_directory = _write_min_hold_fixture(
+        tmp_path,
+        signal_date="2026-05-26",
+        held_symbol="HD",
+        min_hold=5,
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: FakeTradeContext(
+            positions=[{"code": "US.HD", "qty": 17}],
+            deals=[
+                {
+                    "code": "US.HD",
+                    "trd_side": "BUY",
+                    "qty": 17,
+                    "create_time": "2026-05-06 09:30:00",
+                    "order_id": "22",
+                }
+            ],
+            orders=[],
+        ),
+    )
+
+    preview = dashboard.api_preview_orders()
+    sell_orders = [
+        order for order in preview["orders"] if order["side"] == "SELL"
+    ]
+
+    assert len(sell_orders) == 1
+    passed_order = sell_orders[0]
+    assert passed_order["symbol"] == "HD"
+    assert "status" not in passed_order
+    assert passed_order["qty"] == 17
+    assert passed_order["exit_reason"] == "signal"
+
+
 def test_cron_dashboard_contract_names_layer_ownership() -> None:
     """Dashboard should expose a plain-language source-of-truth contract."""
     communication_contract = dashboard._build_cron_dashboard_contract()
