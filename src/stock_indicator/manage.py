@@ -24,6 +24,7 @@ from pandas import DataFrame
 
 from . import data_loader, symbols, strategy, daily_job, multi_bucket_today
 from . import production_ff12_promotion
+from . import symbol_seasoning
 from . import universe_pipeline
 from .simulator import calc_commission
 from .strategy_sets import load_strategy_set_mapping, load_strategy_entry_filters
@@ -120,6 +121,26 @@ def _resolve_repository_relative_path(path_text: object) -> Path:
         return resolved_path
     repository_root = Path(__file__).resolve().parent.parent.parent
     return repository_root / resolved_path
+
+
+def load_symbol_seasoning_dates_for_config(
+    seasoning_config: symbol_seasoning.SymbolSeasoningConfig,
+) -> tuple[Path, dict[str, datetime.date]] | None:
+    """Load symbol seasoning dates when the configured gate is enabled."""
+
+    if not seasoning_config.enabled:
+        return None
+    repository_root = Path(__file__).resolve().parent.parent.parent
+    eligibility_path = symbol_seasoning.resolve_eligibility_path(
+        seasoning_config,
+        repository_root=repository_root,
+    )
+    symbol_first_eligible_trade_dates = (
+        symbol_seasoning.load_symbol_first_eligible_trade_dates(
+            eligibility_path
+        )
+    )
+    return eligibility_path, symbol_first_eligible_trade_dates
 
 
 def load_risk_score_priority_overrides(
@@ -1985,6 +2006,27 @@ class StockShell(cmd.Cmd):
         if ff12_data_path is not None:
             self.stdout.write(f"FF12 data: {ff12_data_path}\n")
 
+        try:
+            seasoning_config = symbol_seasoning.parse_symbol_seasoning_config(
+                config_document.get("symbol_seasoning")
+            )
+            seasoning_dates_result = load_symbol_seasoning_dates_for_config(
+                seasoning_config
+            )
+        except (FileNotFoundError, ValueError) as seasoning_error:
+            self.stdout.write(f"{seasoning_error}\n")
+            return
+        symbol_first_eligible_trade_dates = None
+        if seasoning_dates_result is not None:
+            eligibility_path, symbol_first_eligible_trade_dates = (
+                seasoning_dates_result
+            )
+            self.stdout.write(
+                "Symbol seasoning: enabled "
+                f"records={len(symbol_first_eligible_trade_dates)} "
+                f"eligibility_path={eligibility_path}\n"
+            )
+
         # Parse adaptive TP/SL configuration.
         adaptive_tp_sl_config: strategy.AdaptiveTPSLConfig | None = None
         raw_adaptive = config_document.get("adaptive_tp_sl")
@@ -2186,6 +2228,9 @@ class StockShell(cmd.Cmd):
                     margin_overrides=margin_overrides,
                     bucket_priority_overrides_by_month=(
                         bucket_priority_overrides_by_month
+                    ),
+                    symbol_first_eligible_trade_dates=(
+                        symbol_first_eligible_trade_dates
                     ),
                 )
         except ValueError as error:
@@ -4104,6 +4149,24 @@ class StockShell(cmd.Cmd):
         if ff12_data_path is not None:
             self.stdout.write(f"FF12 data: {ff12_data_path}\n")
 
+        try:
+            seasoning_dates_result = load_symbol_seasoning_dates_for_config(
+                config.symbol_seasoning or symbol_seasoning.SymbolSeasoningConfig()
+            )
+        except (FileNotFoundError, ValueError) as seasoning_error:
+            self.stdout.write(f"{seasoning_error}\n")
+            return
+        symbol_first_eligible_trade_dates = None
+        if seasoning_dates_result is not None:
+            eligibility_path, symbol_first_eligible_trade_dates = (
+                seasoning_dates_result
+            )
+            self.stdout.write(
+                "Symbol seasoning: enabled "
+                f"records={len(symbol_first_eligible_trade_dates)} "
+                f"eligibility_path={eligibility_path}\n"
+            )
+
         if date_string is None:
             eval_date_string = daily_job.determine_latest_trading_date().isoformat()
         else:
@@ -4185,6 +4248,9 @@ class StockShell(cmd.Cmd):
                     state=state,
                     data_directory=data_directory,
                     allowed_symbols=allowed_symbols,
+                    symbol_first_eligible_trade_dates=(
+                        symbol_first_eligible_trade_dates
+                    ),
                 )
         except ValueError as run_error:
             self.stdout.write(f"compute_today_signals failed: {run_error}\n")

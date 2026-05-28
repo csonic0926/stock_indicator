@@ -107,6 +107,11 @@ def test_production_config_uses_old_universe_risk_priority_path() -> None:
             "fish_head_b30_35": 3,
         },
     }
+    assert config_document["symbol_seasoning"] == {
+        "enabled": True,
+        "eligibility_path": "data/production_symbol_eligibility.csv",
+        "default_new_symbol_quarantine_days": 365,
+    }
 
 
 def test_production_default_symbol_file_is_old_universe_alias() -> None:

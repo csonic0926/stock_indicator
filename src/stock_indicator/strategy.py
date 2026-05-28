@@ -6,6 +6,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
+import datetime
 import heapq
 import inspect
 import logging
@@ -1273,6 +1274,28 @@ def _resolve_bucket_entry_priority(
     return priority_overrides_for_month.get(bucket_label, default_priority)
 
 
+def _is_symbol_trade_date_eligible(
+    symbol_first_eligible_trade_dates: dict[str, datetime.date] | None,
+    symbol_name: str,
+    trade_date: pandas.Timestamp,
+) -> bool:
+    """Return whether a symbol may open a new trade on the given date.
+
+    A ``None`` map disables the gate. When the map is present, missing symbols
+    are deliberately blocked so newly promoted symbols cannot slip through
+    without an audited eligibility row.
+    """
+
+    if symbol_first_eligible_trade_dates is None:
+        return True
+    first_eligible_trade_date = symbol_first_eligible_trade_dates.get(
+        symbol_name.strip().upper()
+    )
+    if first_eligible_trade_date is None:
+        return False
+    return pandas.Timestamp(trade_date).date() >= first_eligible_trade_date
+
+
 def run_complex_simulation(
     data_directory: Path,
     set_definitions: Dict[str, ComplexStrategySetDefinition],
@@ -1296,6 +1319,7 @@ def run_complex_simulation(
     risk_score_stop_months: set[str] | None = None,
     margin_overrides: dict[str, float] | None = None,
     bucket_priority_overrides_by_month: dict[str, dict[str, int]] | None = None,
+    symbol_first_eligible_trade_dates: dict[str, datetime.date] | None = None,
 ) -> ComplexSimulationMetrics:
     """Evaluate multiple strategy sets under a shared configuration.
 
@@ -2078,6 +2102,12 @@ def run_complex_simulation(
                         open_trade_entry_dates[refreshed_trade_identifier] = event_date
                         accepted_trade_keys.add(trade_key)
                         continue
+                if not _is_symbol_trade_date_eligible(
+                    symbol_first_eligible_trade_dates,
+                    trade_sym,
+                    event_date,
+                ):
+                    continue
                 # Slot check: add back same-day closes to prevent lookahead.
                 # Entries cannot use slots freed by closes on the same date
                 # because you don't know at entry time whether TP/SL will
@@ -2415,6 +2445,16 @@ def run_complex_simulation(
                     )
             else:
                 if trade_key in accepted_trade_keys:
+                    continue
+                trade_symbol_name = artifacts_by_set[label].trade_symbol_lookup.get(
+                    trade,
+                    "",
+                )
+                if not _is_symbol_trade_date_eligible(
+                    symbol_first_eligible_trade_dates,
+                    trade_symbol_name,
+                    event_date,
+                ):
                     continue
                 current_open_total = len(open_trade_keys)
                 if current_open_total >= maximum_position_count:

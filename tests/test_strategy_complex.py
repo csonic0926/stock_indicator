@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 import sys
 
@@ -138,6 +139,65 @@ def _stub_metrics_functions(
     monkeypatch.setattr(strategy, "calculate_max_drawdown", fake_calculate_max_drawdown)
 
     return call_records
+
+
+def test_symbol_seasoning_skips_before_date_and_allows_on_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Seasoning should block early entries and allow inclusive eligibility."""
+
+    blocked_trade, blocked_detail_pair = _build_trade(
+        "2024-01-02",
+        "2024-01-03",
+        symbol="AAA",
+    )
+    eligible_trade, eligible_detail_pair = _build_trade(
+        "2024-01-05",
+        "2024-01-08",
+        symbol="AAA",
+    )
+    artifacts = _build_artifacts(
+        [
+            (blocked_trade, blocked_detail_pair),
+            (eligible_trade, eligible_detail_pair),
+        ]
+    )
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        lambda *arguments, **keyword_arguments: artifacts,
+    )
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=5,
+        symbol_first_eligible_trade_dates={
+            "AAA": datetime.date(2024, 1, 5),
+        },
+    )
+
+    open_details = [
+        trade_detail
+        for detail_list in metrics.overall_metrics.trade_details_by_year.values()
+        for trade_detail in detail_list
+        if trade_detail.action == "open"
+    ]
+
+    assert [trade_detail.date for trade_detail in open_details] == [
+        pandas.Timestamp("2024-01-05")
+    ]
+    assert metrics.overall_metrics.total_trades == 1
 
 
 def test_resolve_trade_decision_dates_non_pending() -> None:

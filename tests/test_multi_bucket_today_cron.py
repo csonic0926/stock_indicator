@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas
 
-from stock_indicator import multi_bucket_today, strategy
+from stock_indicator import multi_bucket_today, strategy, symbol_seasoning
 
 
 def test_load_multi_bucket_config_preserves_bucket_sigma_overrides(
@@ -25,6 +25,11 @@ def test_load_multi_bucket_config_preserves_bucket_sigma_overrides(
                 "margin": 1.5,
                 "withdraw": 0,
                 "ff12_data_path": "data/research_new_symbols_with_sector.parquet",
+                "symbol_seasoning": {
+                    "enabled": True,
+                    "eligibility_path": "data/production_symbol_eligibility.csv",
+                    "default_new_symbol_quarantine_days": 365,
+                },
                 "adaptive_tp_sl": {"window": 20, "sigma": 0.5},
                 "buckets": [
                     {
@@ -72,6 +77,12 @@ def test_load_multi_bucket_config_preserves_bucket_sigma_overrides(
     assert (
         loaded_config.ff12_data_path_text
         == "data/research_new_symbols_with_sector.parquet"
+    )
+    assert loaded_config.symbol_seasoning is not None
+    assert loaded_config.symbol_seasoning.enabled is True
+    assert (
+        loaded_config.symbol_seasoning.eligibility_path
+        == "data/production_symbol_eligibility.csv"
     )
 
 
@@ -130,6 +141,94 @@ def _build_test_config() -> multi_bucket_today.MultiBucketRunConfig:
         ff12_data_path_text=None,
         max_same_symbol=1,
         raw_document={},
+    )
+
+
+def test_compute_today_signals_rejects_ineligible_symbol_before_slots(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Seasoning should reject entry candidates before slot competition."""
+
+    signal_results_by_strategy: dict[str, dict[str, Any]] = {
+        "fish_head_production_buy": {
+            "filtered_symbols": [("VST", 1)],
+            "entry_signals": ["VST"],
+            "exit_signals": [],
+        },
+        "fish_tail_explore_buy": {
+            "filtered_symbols": [("AMZN", 1)],
+            "entry_signals": ["AMZN"],
+            "exit_signals": [],
+        },
+    }
+
+    def fake_compute_signals_for_date(
+        *,
+        buy_strategy_name: str,
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Return deterministic bucket signals without reading stock data."""
+
+        return signal_results_by_strategy[buy_strategy_name]
+
+    monkeypatch.setattr(
+        strategy,
+        "compute_signals_for_date",
+        fake_compute_signals_for_date,
+    )
+    monkeypatch.setattr(
+        multi_bucket_today.daily_job,
+        "filter_debug_values",
+        lambda *arguments, **keyword_arguments: {
+            "slope_60": 0.1,
+            "near_delta": 0.2,
+        },
+    )
+    monkeypatch.setattr(
+        multi_bucket_today,
+        "passes_per_bucket_entry_filters",
+        lambda *arguments, **keyword_arguments: True,
+    )
+    monkeypatch.setattr(
+        strategy,
+        "compute_frozen_tp_sl_for_bucket",
+        lambda *arguments, **keyword_arguments: (0.05, 0.03, 0.04, -0.02),
+    )
+
+    config = _build_test_config()
+    config.symbol_seasoning = symbol_seasoning.SymbolSeasoningConfig(
+        enabled=True,
+        eligibility_path="eligibility.csv",
+    )
+    state: dict[str, Any] = {
+        "schema_version": multi_bucket_today.SCHEMA_VERSION,
+        "winners": [],
+        "losers": [],
+        "pending_rolling": [],
+        "closed_trades": [],
+        "accepted_entries": [],
+    }
+
+    result = multi_bucket_today.compute_today_signals(
+        config=config,
+        eval_date=pandas.Timestamp("2026-05-14"),
+        held_positions={},
+        state=state,
+        data_directory=tmp_path,
+        allowed_symbols=None,
+        symbol_first_eligible_trade_dates={
+            "VST": pandas.Timestamp("2026-05-15").date(),
+            "AMZN": pandas.Timestamp("2026-05-14").date(),
+        },
+    )
+
+    assert [(record.symbol, reason) for record, reason in result.rejected_records] == [
+        ("VST", "symbol_seasoning")
+    ]
+    assert [record.symbol for record in result.accepted_records] == ["AMZN"]
+    assert "('VST', 'fish_head_production', 'symbol_seasoning')" in next(
+        log_line for log_line in result.log_lines if log_line.startswith("rejected:")
     )
 
 

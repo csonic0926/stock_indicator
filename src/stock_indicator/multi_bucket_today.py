@@ -16,6 +16,7 @@ blocker.
 
 from __future__ import annotations
 
+import datetime
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,7 +24,7 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 import pandas
 
-from . import daily_job, strategy
+from . import daily_job, strategy, symbol_seasoning
 from .strategy_sets import (
     load_strategy_entry_filters,
     load_strategy_set_mapping,
@@ -61,6 +62,7 @@ class MultiBucketRunConfig:
     ff12_data_path_text: str | None
     max_same_symbol: int
     raw_document: Dict[str, Any]
+    symbol_seasoning: symbol_seasoning.SymbolSeasoningConfig | None = None
 
 
 def _parse_volume_filter_text(text: str) -> Tuple[float | None, float | None, int | None, int]:
@@ -651,6 +653,9 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
     raw_ff12_data_path_text = document.get("ff12_data_path") or document.get(
         "sector_data_path"
     )
+    seasoning_config = symbol_seasoning.parse_symbol_seasoning_config(
+        document.get("symbol_seasoning")
+    )
 
     return MultiBucketRunConfig(
         bucket_definitions=bucket_definitions,
@@ -675,6 +680,7 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
         ),
         max_same_symbol=int(document.get("max_same_symbol", 1)),
         raw_document=document,
+        symbol_seasoning=seasoning_config,
     )
 
 
@@ -1030,6 +1036,7 @@ def compute_today_signals(
     state: Dict[str, Any],
     data_directory: Path,
     allowed_symbols: set[str] | None,
+    symbol_first_eligible_trade_dates: Dict[str, datetime.date] | None = None,
 ) -> TodaySignalsResult:
     """Reproduce the simulator's single-day decision in production.
 
@@ -1051,6 +1058,14 @@ def compute_today_signals(
     delayed_rolling = adaptive.delayed_rolling_update
     rolling_window = adaptive.window
     eval_date_string = eval_date.date().isoformat()
+    seasoning_enabled = (
+        config.symbol_seasoning is not None
+        and config.symbol_seasoning.enabled
+    )
+    if seasoning_enabled and symbol_first_eligible_trade_dates is None:
+        raise ValueError(
+            "symbol_seasoning is enabled but eligibility dates were not loaded"
+        )
 
     log_lines: List[str] = []
     log_lines.append(
@@ -1184,6 +1199,7 @@ def compute_today_signals(
     # commit 1240118d). Across-bucket order: bucket_priority asc, then
     # dollar_volume rank asc (lower-priority value wins; lower rank wins).
     # ------------------------------------------------------------------
+    rejected_records: List[Tuple[AcceptedEntry, str]] = []
     candidates: List[Tuple[int, int, str, str, AcceptedEntry]] = []
     for bucket_label, bucket_def in config.bucket_definitions.items():
         strategy_identifier = bucket_def.strategy_identifier
@@ -1278,6 +1294,13 @@ def compute_today_signals(
                     bucket_def.reset_hold_on_reentry_signal
                 ),
             )
+            if seasoning_enabled and not symbol_seasoning.is_symbol_eligible_on(
+                symbol_name,
+                eval_date,
+                symbol_first_eligible_trade_dates or {},
+            ):
+                rejected_records.append((candidate_record, "symbol_seasoning"))
+                continue
             candidates.append((
                 bucket_def.entry_priority,
                 dollar_volume_rank,
@@ -1327,7 +1350,6 @@ def compute_today_signals(
         bucket_remaining[bucket_label] = cap
 
     accepted_records: List[AcceptedEntry] = []
-    rejected_records: List[Tuple[AcceptedEntry, str]] = []
     for _, _, bucket_label, symbol_name, candidate_record in candidates:
         if global_remaining <= 0:
             rejected_records.append((candidate_record, "slot_full"))
