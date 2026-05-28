@@ -493,6 +493,10 @@ pipeline is intentionally not part of `run_daily_job.sh`, because candidate
 refreshes must never rewrite active production files during the daily price or
 signal window.
 
+The live production JSON settings are locked in
+`Docs/production_runtime_config.md`. Update that document in the same change as
+any deliberate production JSON edit.
+
 ```bash
 # === Phase A: Price data (consumes active production symbols.txt) ===
 update_all_data_from_yf               # download per symbols.txt
