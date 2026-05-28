@@ -1,220 +1,153 @@
 {
-  "raw_trade_profits": [
-    -0.10965624,
-    0.0117459,
-    0.02783401,
-    -0.17472289,
-    -0.01597934,
-    0.0220139,
-    -0.04362809,
-    -0.00154324,
-    0.05443931,
-    -0.02171195,
-    0.00685225,
-    0.05202071,
-    0.0214619,
-    0.03105391,
-    0.19770015,
-    0.10662739,
-    0.007121,
-    0.03893939,
-    0.12221722,
-    0.0471672
+  "schema_version": 2,
+  "winners": [
+    0.05896171194608094,
+    0.08491982970598357,
+    0.016636801407476177,
+    0.023861522014458104
   ],
+  "losers": [
+    -0.011890576397289765,
+    -0.03701528926146943,
+    -0.024801660673801813
+  ],
+  "pending_rolling": [],
   "closed_trades": [
     {
-      "symbol": "AVGO",
-      "entry_date": "2026-02-06",
-      "exit_date": "2026-02-23",
-      "entry_price": 319.4299,
-      "exit_price": 331.5545,
-      "raw_pct": 0.037957
+      "symbol": "CVX",
+      "bucket": "fish_head_production",
+      "strategy_id": "fish_head_vacuum_turn",
+      "entry_date": "2026-05-08",
+      "exit_date": "2026-05-20",
+      "entry_price": 183.0,
+      "exit_price": 193.79,
+      "raw_pct": 0.058962,
+      "exit_reason": "signal"
     },
     {
-      "symbol": "AMZN",
-      "entry_date": "2026-02-17",
-      "exit_date": "2026-02-24",
-      "entry_price": 198.13,
-      "exit_price": 205.47,
-      "raw_pct": 0.037046
+      "symbol": "T",
+      "bucket": "fish_head_production",
+      "strategy_id": "fish_head_vacuum_turn",
+      "entry_date": "2026-05-08",
+      "exit_date": "2026-05-26",
+      "entry_price": 25.23,
+      "exit_price": 24.93,
+      "raw_pct": -0.011891,
+      "exit_reason": "signal"
     },
     {
-      "symbol": "CVNA",
-      "entry_date": "2026-02-24",
-      "exit_date": "2026-03-09",
-      "entry_price": 325.82,
-      "exit_price": 312.89,
-      "raw_pct": -0.039684
+      "symbol": "XOM",
+      "bucket": "fish_head_production",
+      "strategy_id": "fish_head_vacuum_turn",
+      "entry_date": "2026-05-08",
+      "exit_date": "2026-05-20",
+      "entry_price": 146.02,
+      "exit_price": 158.42,
+      "raw_pct": 0.08492,
+      "exit_reason": "signal"
     },
     {
-      "symbol": "F",
-      "entry_date": "2026-03-05",
-      "exit_date": "2026-03-12",
-      "entry_price": 12.7,
-      "exit_price": 11.93,
-      "raw_pct": -0.06063
+      "symbol": "JNJ",
+      "bucket": "fish_head_production",
+      "strategy_id": "fish_head_vacuum_turn",
+      "entry_date": "2026-05-11",
+      "exit_date": "2026-05-15",
+      "entry_price": 223.0,
+      "exit_price": 226.71,
+      "raw_pct": 0.016637,
+      "exit_reason": "signal"
     },
     {
-      "symbol": "CVNA",
-      "entry_date": "2026-03-11",
-      "exit_date": "2026-03-19",
-      "entry_price": 320.0,
-      "exit_price": 284.91,
-      "raw_pct": -0.109656
+      "symbol": "WMT",
+      "bucket": "fish_tail_explore",
+      "strategy_id": "fish_tail_blow_off_top",
+      "entry_date": "2026-05-12",
+      "exit_date": "2026-05-20",
+      "entry_price": 129.19,
+      "exit_price": 124.408,
+      "raw_pct": -0.037015,
+      "exit_reason": "signal"
     },
     {
-      "symbol": "BSX",
-      "entry_date": "2026-03-13",
-      "exit_date": "2026-03-20",
-      "entry_price": 68.96,
-      "exit_price": 69.77,
-      "raw_pct": 0.011746
+      "symbol": "MCD",
+      "bucket": "fish_head_production",
+      "strategy_id": "fish_head_vacuum_turn",
+      "entry_date": "2026-05-12",
+      "exit_date": "2026-05-20",
+      "entry_price": 274.5,
+      "exit_price": 281.05,
+      "raw_pct": 0.023862,
+      "exit_reason": "signal"
     },
     {
-      "symbol": "JPM",
-      "entry_date": "2026-03-16",
-      "exit_date": "2026-03-23",
-      "entry_price": 284.882,
-      "exit_price": 292.8115,
-      "raw_pct": 0.027834
-    },
-    {
-      "symbol": "OKLO",
-      "entry_date": "2026-03-17",
-      "exit_date": "2026-03-26",
-      "entry_price": 64.96,
-      "exit_price": 53.61,
-      "raw_pct": -0.174723
-    },
-    {
-      "symbol": "LLY",
-      "entry_date": "2026-03-20",
-      "exit_date": "2026-03-27",
-      "entry_price": 910.55,
-      "exit_price": 896.0,
-      "raw_pct": -0.015979
-    },
-    {
-      "symbol": "GM",
-      "entry_date": "2026-03-17",
-      "exit_date": "2026-03-27",
-      "entry_price": 73.59,
-      "exit_price": 75.21,
-      "raw_pct": 0.022014
-    },
-    {
-      "symbol": "HD",
-      "entry_date": "2026-03-16",
-      "exit_date": "2026-03-27",
-      "entry_price": 342.44,
-      "exit_price": 327.5,
-      "raw_pct": -0.043628
-    },
-    {
-      "symbol": "ABBV",
-      "entry_date": "2026-03-23",
-      "exit_date": "2026-04-06",
-      "entry_price": 205.6539,
-      "exit_price": 205.3365,
-      "raw_pct": -0.001543
-    },
-    {
-      "symbol": "CVNA",
-      "entry_date": "2026-03-23",
-      "exit_date": "2026-04-06",
-      "entry_price": 291.15,
-      "exit_price": 307.0,
-      "raw_pct": 0.054439
-    },
-    {
-      "symbol": "ABT",
-      "entry_date": "2026-03-24",
-      "exit_date": "2026-04-07",
-      "entry_price": 103.441,
-      "exit_price": 101.1951,
-      "raw_pct": -0.021712
-    },
-    {
-      "symbol": "MSFT",
-      "entry_date": "2026-03-24",
-      "exit_date": "2026-04-08",
-      "entry_price": 382.36,
-      "exit_price": 384.98,
-      "raw_pct": 0.006852
-    },
-    {
-      "symbol": "LLY",
-      "entry_date": "2026-03-31",
-      "exit_date": "2026-04-13",
-      "entry_price": 893.49,
-      "exit_price": 939.97,
-      "raw_pct": 0.052021
-    },
-    {
-      "symbol": "HD",
-      "entry_date": "2026-03-31",
-      "exit_date": "2026-04-13",
-      "entry_price": 328.49,
-      "exit_price": 335.54,
-      "raw_pct": 0.021462
-    },
-    {
-      "symbol": "BSX",
-      "entry_date": "2026-04-09",
-      "exit_date": "2026-04-17",
-      "entry_price": 62.15,
-      "exit_price": 64.08,
-      "raw_pct": 0.031054
-    },
-    {
-      "symbol": "NVDA",
-      "entry_date": "2026-03-31",
-      "exit_date": "2026-04-20",
-      "entry_price": 166.97,
-      "exit_price": 199.98,
-      "raw_pct": 0.1977
-    },
-    {
-      "symbol": "TSLA",
-      "entry_date": "2026-04-08",
-      "exit_date": "2026-04-20",
-      "entry_price": 363.79,
-      "exit_price": 402.58,
-      "raw_pct": 0.106627
-    },
-    {
-      "symbol": "CL",
-      "entry_date": "2026-04-24",
-      "exit_date": "2026-04-30",
-      "entry_price": 84.26,
-      "exit_price": 84.86,
-      "raw_pct": 0.007121
-    },
-    {
-      "symbol": "ABBV",
-      "entry_date": "2026-04-24",
-      "exit_date": "2026-05-04",
-      "entry_price": 198.0,
-      "exit_price": 205.71,
-      "raw_pct": 0.038939
-    },
-    {
-      "symbol": "LLY",
-      "entry_date": "2026-04-28",
-      "exit_date": "2026-05-05",
-      "entry_price": 866.04,
-      "exit_price": 971.885,
-      "raw_pct": 0.122217
-    },
-    {
-      "symbol": "MRK",
-      "entry_date": "2026-04-28",
-      "exit_date": "2026-05-05",
-      "entry_price": 108.55,
-      "exit_price": 113.67,
-      "raw_pct": 0.047167
+      "symbol": "PEP",
+      "bucket": "fish_head_production",
+      "strategy_id": "fish_head_vacuum_turn",
+      "entry_date": "2026-05-15",
+      "exit_date": "2026-05-26",
+      "entry_price": 149.99,
+      "exit_price": 146.27,
+      "raw_pct": -0.024802,
+      "exit_reason": "signal"
     }
   ],
-  "tp_pct": 0.080348,
-  "sl_pct": 0.03267
+  "accepted_entries": [
+    {
+      "entry_date": "2026-05-26",
+      "bucket": "fish_head_production",
+      "strategy_id": "fish_head_vacuum_turn",
+      "symbol": "WMT",
+      "dollar_volume_rank": 15,
+      "tp_pct": 0.02,
+      "sl_pct": 0.01,
+      "rolling_mp": 0.0,
+      "min_hold_sl": 1,
+      "max_hold": null,
+      "reset_hold_on_reentry_signal": false,
+      "disable_sl_trigger": true,
+      "slope_60": -0.058094,
+      "near_delta": 0.045709
+    },
+    {
+      "entry_date": "2026-05-27",
+      "bucket": "fish_head_production",
+      "strategy_id": "fish_head_vacuum_turn",
+      "symbol": "NEE",
+      "dollar_volume_rank": 43,
+      "tp_pct": 0.06995,
+      "sl_pct": 0.024802,
+      "rolling_mp": 0.046095,
+      "min_hold_sl": 1,
+      "max_hold": 14,
+      "reset_hold_on_reentry_signal": false,
+      "disable_sl_trigger": true,
+      "slope_60": -0.054579,
+      "near_delta": 0.0
+    },
+    {
+      "entry_date": "2026-05-27",
+      "bucket": "fish_tail_explore",
+      "strategy_id": "fish_tail_blow_off_top",
+      "symbol": "AMZN",
+      "dollar_volume_rank": 6,
+      "tp_pct": 0.111576,
+      "sl_pct": 0.024802,
+      "rolling_mp": 0.046095,
+      "min_hold_sl": 1,
+      "max_hold": 7,
+      "reset_hold_on_reentry_signal": false,
+      "disable_sl_trigger": true,
+      "slope_60": 0.3024,
+      "near_delta": -0.071723
+    }
+  ],
+  "raw_trade_profits": [
+    0.058962,
+    -0.011891,
+    0.08492,
+    0.016637,
+    -0.037015,
+    0.023862,
+    -0.024802
+  ]
 }

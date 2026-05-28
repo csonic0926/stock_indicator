@@ -64,5 +64,10 @@
       "tp_regime_adjust": true,
       "tp_slope_amplify": true
     }
-  ]
+  ],
+  "symbol_seasoning": {
+    "enabled": true,
+    "eligibility_path": "data/production_symbol_eligibility.csv",
+    "default_new_symbol_quarantine_days": 365
+  }
 }

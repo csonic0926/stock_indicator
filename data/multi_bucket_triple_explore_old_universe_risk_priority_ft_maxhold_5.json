@@ -49,7 +49,7 @@
       "tp_slope_amplify": false,
       "pre_cross_signal_lookback": true,
       "max_hold": 14,
-      "reset_hold_on_reentry_signal": true
+      "reset_hold_on_reentry_signal": false
     },
     {
       "label": "fish_tail_production",
@@ -68,7 +68,8 @@
       "min_hold_sl": 1,
       "tp_regime_adjust": true,
       "tp_slope_amplify": true,
-      "max_hold": 14
+      "max_hold": 5,
+      "reset_hold_on_reentry_signal": false
     },
     {
       "label": "fish_head_b30_35",
@@ -91,8 +92,7 @@
       "tp_regime_adjust": false,
       "tp_slope_amplify": false,
       "pre_cross_signal_lookback": true,
-      "max_hold": 14,
-      "reset_hold_on_reentry_signal": true
+      "reset_hold_on_reentry_signal": false
     }
   ],
   "symbol_list": "production_old",

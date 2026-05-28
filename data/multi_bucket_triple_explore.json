@@ -96,5 +96,10 @@
     }
   ],
   "symbol_list": "research_new",
-  "ff12_data_path": "data/research_new_symbols_with_sector.parquet"
+  "ff12_data_path": "data/research_new_symbols_with_sector.parquet",
+  "symbol_seasoning": {
+    "enabled": true,
+    "eligibility_path": "data/production_symbol_eligibility.csv",
+    "default_new_symbol_quarantine_days": 365
+  }
 }
