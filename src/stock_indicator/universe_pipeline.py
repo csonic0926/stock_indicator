@@ -1,9 +1,10 @@
-"""Atomic research-universe and FF12 sector contract builder.
+"""Atomic production-candidate universe and FF12 sector contract builder.
 
-This module owns the research universe refresh: fetch the SEC ticker list,
-rebuild the auditable universe decisions, apply sticky policy/quarantine
+This module owns the production-candidate refresh: fetch the SEC ticker list,
+rebuild the auditable universe decisions, apply sticky policy and quarantine
 layers, rebuild FF12 coverage, validate the contract, and atomically publish
-``research_new_symbols.txt`` plus ``research_new_symbols_with_sector`` outputs.
+``production_candidate_symbols.txt`` plus
+``production_candidate_symbols_with_sector`` outputs.
 """
 
 from __future__ import annotations
@@ -60,10 +61,10 @@ PRICE_HISTORY_DIRECTORY_NAME = "stock_data_2010_yf_clean"
 SYMBOL_HARD_PLUS_LLM_AUDIT_FILE_NAME = "symbol_universe_hard_plus_llm_audit.csv"
 SYMBOL_HARD_PLUS_LLM_FILE_NAME = "symbols_hard_plus_llm_from_sec.txt"
 SYMBOL_FINAL_AUDIT_FILE_NAME = "symbol_universe_final_audit.csv"
-SYMBOL_CONTRACT_FILE_NAME = "research_new_symbols.txt"
+SYMBOL_CONTRACT_FILE_NAME = "production_candidate_symbols.txt"
 SYMBOL_PRICE_SOURCE_USABLE_FILE_NAME = "symbols_price_source_usable.txt"
-SECTOR_PARQUET_FILE_NAME = "research_new_symbols_with_sector.parquet"
-SECTOR_CSV_FILE_NAME = "research_new_symbols_with_sector.csv"
+SECTOR_PARQUET_FILE_NAME = "production_candidate_symbols_with_sector.parquet"
+SECTOR_CSV_FILE_NAME = "production_candidate_symbols_with_sector.csv"
 
 FINAL_AUDIT_COLUMNS = [
     "symbol",
@@ -868,11 +869,11 @@ def apply_tradability_gate(
 ) -> pandas.DataFrame:
     """Exclude included symbols without trusted exchange and mature price history.
 
-    This is the persistent version of the legacy ``2010_safe`` provenance gate:
-    a ticker must be a reviewed include, listed on a trusted SEC exchange, and
-    have enough local daily history before it enters the research universe.
-    Manual policy includes bypass the gate because those are explicit research
-    choices that remain auditable.
+    This is the persistent version of the historical production provenance
+    gate: a ticker must be a reviewed include, listed on a trusted SEC
+    exchange, and have enough local daily history before it enters the
+    production-candidate contract. Manual policy includes bypass the gate
+    because those are explicit audited choices.
     """
 
     final_audit_frame = price_source_audit_frame.copy()
@@ -1233,7 +1234,7 @@ def _write_sector_last_run_configuration(
     mapping_source: str | Path,
     paths: UniversePipelinePaths,
 ) -> None:
-    """Keep the legacy sector update configuration pointed at research output."""
+    """Keep the legacy sector update configuration pointed at candidate output."""
 
     save_json_file(
         {

@@ -5,7 +5,7 @@
   "withdraw": 0,
   "start_date": "2010-01-01",
   "data_source": "daily",
-  "symbol_list": "production_old",
+  "symbol_list": "production",
   "min_hold": 5,
   "show_trade_details": false,
   "adaptive_tp_sl": {
@@ -107,7 +107,7 @@
       "fish_head_b30_35": 3
     }
   },
-  "ff12_data_path": "data/production_old_symbols_with_sector.parquet",
+  "ff12_data_path": "data/production_symbols_with_sector.parquet",
   "symbol_seasoning": {
     "enabled": true,
     "eligibility_path": "data/production_symbol_eligibility.csv",

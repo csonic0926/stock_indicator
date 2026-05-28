@@ -1,4 +1,4 @@
-"""Tests for appending promoted research FF12 rows into production."""
+"""Tests for appending promoted candidate FF12 rows into production."""
 
 from __future__ import annotations
 
@@ -79,33 +79,33 @@ def _write_promotion_inputs(
     data_directory: Path,
     production_symbols: list[str],
     production_sector_records: list[dict[str, object]],
-    research_sector_records: list[dict[str, object]],
+    candidate_sector_records: list[dict[str, object]],
 ) -> None:
     """Write a complete promotion fixture under ``data_directory``."""
 
     data_directory.mkdir(parents=True, exist_ok=True)
-    (data_directory / "production_old_symbols.txt").write_text(
+    (data_directory / "production_symbols.txt").write_text(
         "\n".join(production_symbols) + "\n",
         encoding="utf-8",
     )
     _write_sector_pair(
         data_directory=data_directory,
-        parquet_file_name="production_old_symbols_with_sector.parquet",
-        csv_file_name="production_old_symbols_with_sector.csv",
+        parquet_file_name="production_symbols_with_sector.parquet",
+        csv_file_name="production_symbols_with_sector.csv",
         sector_records=production_sector_records,
     )
     _write_sector_pair(
         data_directory=data_directory,
-        parquet_file_name="research_new_symbols_with_sector.parquet",
-        csv_file_name="research_new_symbols_with_sector.csv",
-        sector_records=research_sector_records,
+        parquet_file_name="production_candidate_symbols_with_sector.parquet",
+        csv_file_name="production_candidate_symbols_with_sector.csv",
+        sector_records=candidate_sector_records,
     )
 
 
 def test_sync_appends_promoted_symbol_and_preserves_legacy_rows(
     tmp_path: Path,
 ) -> None:
-    """Existing production rows stay frozen while missing symbols use research."""
+    """Existing production rows stay frozen while missing symbols use candidates."""
 
     data_directory = tmp_path / "data"
     _write_promotion_inputs(
@@ -114,7 +114,7 @@ def test_sync_appends_promoted_symbol_and_preserves_legacy_rows(
         production_sector_records=[
             _sector_record("OLD", ff12_group=3, ff12_source="legacy_backtest"),
         ],
-        research_sector_records=[
+        candidate_sector_records=[
             _sector_record("OLD", ff12_group=9, ff12_source="sic_mapping"),
             _sector_record(
                 "NEW",
@@ -130,16 +130,23 @@ def test_sync_appends_promoted_symbol_and_preserves_legacy_rows(
     )
 
     parquet_frame = pandas.read_parquet(
-        data_directory / "production_old_symbols_with_sector.parquet"
+        data_directory / "production_symbols_with_sector.parquet"
+    )
+    runtime_parquet_frame = pandas.read_parquet(
+        data_directory / "symbols_with_sector.parquet"
     )
     csv_frame = pandas.read_csv(
-        data_directory / "production_old_symbols_with_sector.csv",
+        data_directory / "production_symbols_with_sector.csv",
         keep_default_na=False,
     )
     sector_frame_by_ticker = parquet_frame.set_index("ticker")
 
     assert report.appended_symbols == ["NEW"]
     assert list(parquet_frame["ticker"]) == ["OLD", "NEW"]
+    assert data_directory.joinpath("symbols.txt").read_text(
+        encoding="utf-8"
+    ) == "OLD\nNEW\n"
+    pandas.testing.assert_frame_equal(parquet_frame, runtime_parquet_frame)
     assert sector_frame_by_ticker.loc["OLD", "ff12"] == 3
     assert sector_frame_by_ticker.loc["OLD", "ff12_source"] == "legacy_backtest"
     assert sector_frame_by_ticker.loc["NEW", "ff12"] == 12
@@ -158,7 +165,7 @@ def test_sync_appends_promoted_symbol_and_preserves_legacy_rows(
     )
 
 
-def test_sync_fails_when_promoted_symbol_has_no_research_sector_row(
+def test_sync_fails_when_promoted_symbol_has_no_candidate_sector_row(
     tmp_path: Path,
 ) -> None:
     """A production symbol missing from both sector sources must fail closed."""
@@ -170,18 +177,18 @@ def test_sync_fails_when_promoted_symbol_has_no_research_sector_row(
         production_sector_records=[
             _sector_record("OLD", ff12_group=3, ff12_source="legacy_backtest"),
         ],
-        research_sector_records=[
+        candidate_sector_records=[
             _sector_record("OTHER", ff12_group=4, ff12_source="sic_mapping"),
         ],
     )
 
-    with pytest.raises(ValueError, match="missing research sector rows"):
+    with pytest.raises(ValueError, match="missing candidate sector rows"):
         production_ff12_promotion.sync_production_ff12_sector(
             data_directory=data_directory,
         )
 
     production_sector_frame = pandas.read_parquet(
-        data_directory / "production_old_symbols_with_sector.parquet"
+        data_directory / "production_symbols_with_sector.parquet"
     )
     assert list(production_sector_frame["ticker"]) == ["OLD"]
 
@@ -196,7 +203,7 @@ def test_sync_fails_on_duplicate_sector_rows(tmp_path: Path) -> None:
         production_sector_records=[
             _sector_record("OLD", ff12_group=3, ff12_source="legacy_backtest"),
         ],
-        research_sector_records=[
+        candidate_sector_records=[
             _sector_record("NEW", ff12_group=6, ff12_source="sic_mapping"),
             _sector_record("NEW", ff12_group=7, ff12_source="sic_mapping"),
         ],
@@ -249,7 +256,7 @@ def test_sync_fails_on_invalid_promoted_sector_contract(
         production_sector_records=[
             _sector_record("OLD", ff12_group=3, ff12_source="legacy_backtest"),
         ],
-        research_sector_records=[invalid_sector_record],
+        candidate_sector_records=[invalid_sector_record],
     )
 
     with pytest.raises(ValueError, match=expected_message):
@@ -271,7 +278,7 @@ def test_sync_drops_inactive_sector_rows_to_match_symbol_contract(
             _sector_record("OLD", ff12_group=3, ff12_source="legacy_backtest"),
             _sector_record("REMOVED", ff12_group=4, ff12_source="legacy_backtest"),
         ],
-        research_sector_records=[
+        candidate_sector_records=[
             _sector_record("OLD", ff12_group=3, ff12_source="sic_mapping"),
         ],
     )
@@ -281,7 +288,7 @@ def test_sync_drops_inactive_sector_rows_to_match_symbol_contract(
     )
 
     production_sector_frame = pandas.read_parquet(
-        data_directory / "production_old_symbols_with_sector.parquet"
+        data_directory / "production_symbols_with_sector.parquet"
     )
     assert report.removed_sector_symbols == ["REMOVED"]
     assert list(production_sector_frame["ticker"]) == ["OLD"]
@@ -299,7 +306,7 @@ def test_mixed_source_sector_is_loaded_by_existing_ff12_loader(
         production_sector_records=[
             _sector_record("OLD", ff12_group=3, ff12_source="legacy_backtest"),
         ],
-        research_sector_records=[
+        candidate_sector_records=[
             _sector_record(
                 "NEW",
                 ff12_group=12,
@@ -313,7 +320,7 @@ def test_mixed_source_sector_is_loaded_by_existing_ff12_loader(
     )
 
     symbol_to_ff12_group = strategy.load_ff12_groups_by_symbol(
-        data_directory / "production_old_symbols_with_sector.parquet"
+        data_directory / "production_symbols_with_sector.parquet"
     )
 
     assert symbol_to_ff12_group["OLD"] == 3

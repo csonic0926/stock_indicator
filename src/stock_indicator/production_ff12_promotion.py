@@ -1,9 +1,8 @@
 """Append promoted-symbol FF12 rows into the production sector contract.
 
-The production-old sector file is an audited trading contract. Existing rows
-must remain frozen, while newly promoted production symbols receive their
-already-audited research classification rows from the research-new sector
-output.
+The production sector file is an audited trading contract. Existing rows must
+remain frozen, while newly promoted production symbols receive their
+already-audited classification rows from the production-candidate sector output.
 """
 
 # TODO: review
@@ -24,11 +23,16 @@ from stock_indicator.symbols import normalize_symbol_for_cache
 
 LOGGER = logging.getLogger(__name__)
 
-PRODUCTION_SYMBOLS_FILE_NAME = "production_old_symbols.txt"
-PRODUCTION_SECTOR_PARQUET_FILE_NAME = "production_old_symbols_with_sector.parquet"
-PRODUCTION_SECTOR_CSV_FILE_NAME = "production_old_symbols_with_sector.csv"
-RESEARCH_SECTOR_PARQUET_FILE_NAME = "research_new_symbols_with_sector.parquet"
-RESEARCH_SECTOR_CSV_FILE_NAME = "research_new_symbols_with_sector.csv"
+PRODUCTION_SYMBOLS_FILE_NAME = "production_symbols.txt"
+PRODUCTION_SECTOR_PARQUET_FILE_NAME = "production_symbols_with_sector.parquet"
+PRODUCTION_SECTOR_CSV_FILE_NAME = "production_symbols_with_sector.csv"
+RUNTIME_SYMBOLS_FILE_NAME = "symbols.txt"
+RUNTIME_SECTOR_PARQUET_FILE_NAME = "symbols_with_sector.parquet"
+RUNTIME_SECTOR_CSV_FILE_NAME = "symbols_with_sector.csv"
+CANDIDATE_SECTOR_PARQUET_FILE_NAME = (
+    "production_candidate_symbols_with_sector.parquet"
+)
+CANDIDATE_SECTOR_CSV_FILE_NAME = "production_candidate_symbols_with_sector.csv"
 
 REQUIRED_SECTOR_COLUMNS = {
     "ticker",
@@ -65,16 +69,34 @@ class ProductionFf12PromotionPaths:
         return self.data_directory / PRODUCTION_SECTOR_CSV_FILE_NAME
 
     @property
-    def research_sector_parquet_path(self) -> Path:
-        """Return the research sector parquet source path."""
+    def runtime_symbols_path(self) -> Path:
+        """Return the runtime symbol mirror path used by daily price refresh."""
 
-        return self.data_directory / RESEARCH_SECTOR_PARQUET_FILE_NAME
+        return self.data_directory / RUNTIME_SYMBOLS_FILE_NAME
 
     @property
-    def research_sector_csv_path(self) -> Path:
-        """Return the research sector CSV source path."""
+    def runtime_sector_parquet_path(self) -> Path:
+        """Return the runtime sector parquet mirror path."""
 
-        return self.data_directory / RESEARCH_SECTOR_CSV_FILE_NAME
+        return self.data_directory / RUNTIME_SECTOR_PARQUET_FILE_NAME
+
+    @property
+    def runtime_sector_csv_path(self) -> Path:
+        """Return the runtime sector CSV mirror path."""
+
+        return self.data_directory / RUNTIME_SECTOR_CSV_FILE_NAME
+
+    @property
+    def candidate_sector_parquet_path(self) -> Path:
+        """Return the production-candidate sector parquet source path."""
+
+        return self.data_directory / CANDIDATE_SECTOR_PARQUET_FILE_NAME
+
+    @property
+    def candidate_sector_csv_path(self) -> Path:
+        """Return the production-candidate sector CSV source path."""
+
+        return self.data_directory / CANDIDATE_SECTOR_CSV_FILE_NAME
 
 
 @dataclass(frozen=True)
@@ -101,8 +123,10 @@ class ProductionFf12PromotionReport:
             f"production symbols: {self.production_symbol_count}",
             f"original sector rows: {self.original_sector_row_count}",
             f"final sector rows: {self.final_sector_row_count}",
-            f"appended promoted symbols: {len(self.appended_symbols)} ({appended_sample})",
-            f"removed inactive sector rows: {len(self.removed_sector_symbols)} ({removed_sample})",
+            "appended promoted symbols: "
+            f"{len(self.appended_symbols)} ({appended_sample})",
+            "removed inactive sector rows: "
+            f"{len(self.removed_sector_symbols)} ({removed_sample})",
             f"ff12 sources: {_format_count_mapping(self.ff12_source_counts)}",
         ]
 
@@ -344,9 +368,9 @@ def build_promoted_production_ff12_sector_frame(
     *,
     production_symbols: list[str],
     production_sector_frame: pandas.DataFrame,
-    research_sector_frame: pandas.DataFrame,
+    candidate_sector_frame: pandas.DataFrame,
 ) -> ProductionFf12PromotionBuildResult:
-    """Return production sector rows plus research rows for promoted symbols."""
+    """Return production rows plus candidate rows for promoted symbols."""
 
     normalized_production_symbols: list[str] = []
     seen_production_symbols: set[str] = set()
@@ -371,16 +395,16 @@ def build_promoted_production_ff12_sector_frame(
         source_label="production",
     )
     _validate_sector_source_frame(
-        research_sector_frame,
-        source_label="research",
+        candidate_sector_frame,
+        source_label="production candidate",
     )
 
     production_schema_columns = list(production_sector_frame.columns)
     production_sector_row_by_ticker = _build_row_index_by_ticker(
         production_sector_frame
     )
-    research_sector_row_by_ticker = _build_row_index_by_ticker(
-        research_sector_frame
+    candidate_sector_row_by_ticker = _build_row_index_by_ticker(
+        candidate_sector_frame
     )
 
     production_symbol_set = set(normalized_production_symbols)
@@ -389,25 +413,25 @@ def build_promoted_production_ff12_sector_frame(
         for symbol_name in normalized_production_symbols
         if symbol_name not in production_sector_row_by_ticker
     ]
-    missing_research_symbols = [
+    missing_candidate_symbols = [
         symbol_name
         for symbol_name in missing_production_symbols
-        if symbol_name not in research_sector_row_by_ticker
+        if symbol_name not in candidate_sector_row_by_ticker
     ]
-    if missing_research_symbols:
+    if missing_candidate_symbols:
         raise ValueError(
-            "promoted production symbols are missing research sector rows: "
-            f"{missing_research_symbols[:20]}"
+            "promoted production symbols are missing candidate sector rows: "
+            f"{missing_candidate_symbols[:20]}"
         )
 
     if missing_production_symbols:
-        missing_research_columns = (
-            set(production_schema_columns) - set(research_sector_frame.columns)
+        missing_candidate_columns = (
+            set(production_schema_columns) - set(candidate_sector_frame.columns)
         )
-        if missing_research_columns:
+        if missing_candidate_columns:
             raise ValueError(
-                "research sector frame cannot supply production schema columns: "
-                f"{sorted(missing_research_columns)}"
+                "candidate sector frame cannot supply production schema columns: "
+                f"{sorted(missing_candidate_columns)}"
             )
 
     removed_sector_symbols = sorted(
@@ -424,8 +448,8 @@ def build_promoted_production_ff12_sector_frame(
                 row_index,
             ][production_schema_columns].copy()
         else:
-            row_index = research_sector_row_by_ticker[symbol_name]
-            selected_row = research_sector_frame.iloc[
+            row_index = candidate_sector_row_by_ticker[symbol_name]
+            selected_row = candidate_sector_frame.iloc[
                 row_index,
             ][production_schema_columns].copy()
         selected_row["ticker"] = symbol_name
@@ -450,16 +474,31 @@ def _write_sector_outputs_to_temporary_directory(
     *,
     temporary_directory: Path,
     sector_frame: pandas.DataFrame,
+    production_symbols: list[str],
 ) -> dict[Path, str]:
-    """Write production sector outputs under a temporary directory."""
+    """Write production sector outputs and runtime mirrors under temp storage."""
 
     temporary_parquet_path = temporary_directory / PRODUCTION_SECTOR_PARQUET_FILE_NAME
     temporary_csv_path = temporary_directory / PRODUCTION_SECTOR_CSV_FILE_NAME
+    temporary_runtime_symbols_path = temporary_directory / RUNTIME_SYMBOLS_FILE_NAME
+    temporary_runtime_parquet_path = (
+        temporary_directory / RUNTIME_SECTOR_PARQUET_FILE_NAME
+    )
+    temporary_runtime_csv_path = temporary_directory / RUNTIME_SECTOR_CSV_FILE_NAME
     sector_frame.to_parquet(temporary_parquet_path, index=False)
     sector_frame.to_csv(temporary_csv_path, index=False)
+    sector_frame.to_parquet(temporary_runtime_parquet_path, index=False)
+    sector_frame.to_csv(temporary_runtime_csv_path, index=False)
+    temporary_runtime_symbols_path.write_text(
+        "\n".join(production_symbols) + "\n",
+        encoding="utf-8",
+    )
     return {
         temporary_parquet_path: PRODUCTION_SECTOR_PARQUET_FILE_NAME,
         temporary_csv_path: PRODUCTION_SECTOR_CSV_FILE_NAME,
+        temporary_runtime_symbols_path: RUNTIME_SYMBOLS_FILE_NAME,
+        temporary_runtime_parquet_path: RUNTIME_SECTOR_PARQUET_FILE_NAME,
+        temporary_runtime_csv_path: RUNTIME_SECTOR_CSV_FILE_NAME,
     }
 
 
@@ -481,7 +520,7 @@ def sync_production_ff12_sector(
     data_directory: Path = DATA_DIRECTORY,
     publish_outputs: bool = True,
 ) -> ProductionFf12PromotionReport:
-    """Append promoted research FF12 rows and optionally publish outputs."""
+    """Append promoted candidate FF12 rows and optionally publish outputs."""
 
     resolved_data_directory = Path(data_directory)
     paths = ProductionFf12PromotionPaths(resolved_data_directory)
@@ -493,16 +532,16 @@ def sync_production_ff12_sector(
             source_label="production",
         )
     )
-    research_sector_frame, research_sector_source_path = _read_sector_frame_from_pair(
-        parquet_path=paths.research_sector_parquet_path,
-        csv_path=paths.research_sector_csv_path,
-        source_label="research",
+    candidate_sector_frame, candidate_sector_source_path = _read_sector_frame_from_pair(
+        parquet_path=paths.candidate_sector_parquet_path,
+        csv_path=paths.candidate_sector_csv_path,
+        source_label="production candidate",
     )
 
     build_result = build_promoted_production_ff12_sector_frame(
         production_symbols=production_symbols,
         production_sector_frame=production_sector_frame,
-        research_sector_frame=research_sector_frame,
+        candidate_sector_frame=candidate_sector_frame,
     )
 
     if publish_outputs:
@@ -515,6 +554,7 @@ def sync_production_ff12_sector(
             replacement_paths = _write_sector_outputs_to_temporary_directory(
                 temporary_directory=temporary_directory,
                 sector_frame=build_result.sector_frame,
+                production_symbols=production_symbols,
             )
             _replace_outputs_atomically(
                 data_directory=resolved_data_directory,
@@ -526,7 +566,7 @@ def sync_production_ff12_sector(
         "published" if publish_outputs else "validated",
         len(build_result.sector_frame),
         production_sector_source_path,
-        research_sector_source_path,
+        candidate_sector_source_path,
     )
     return ProductionFf12PromotionReport(
         published=publish_outputs,
@@ -540,7 +580,10 @@ def sync_production_ff12_sector(
             "production_symbols": str(paths.production_symbols_path),
             "production_sector_parquet": str(paths.production_sector_parquet_path),
             "production_sector_csv": str(paths.production_sector_csv_path),
-            "research_sector_parquet": str(paths.research_sector_parquet_path),
-            "research_sector_csv": str(paths.research_sector_csv_path),
+            "runtime_symbols": str(paths.runtime_symbols_path),
+            "runtime_sector_parquet": str(paths.runtime_sector_parquet_path),
+            "runtime_sector_csv": str(paths.runtime_sector_csv_path),
+            "candidate_sector_parquet": str(paths.candidate_sector_parquet_path),
+            "candidate_sector_csv": str(paths.candidate_sector_csv_path),
         },
     )

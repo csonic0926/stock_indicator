@@ -24,7 +24,9 @@ def test_load_multi_bucket_config_preserves_bucket_sigma_overrides(
                 "starting_cash": 60_000,
                 "margin": 1.5,
                 "withdraw": 0,
-                "ff12_data_path": "data/research_new_symbols_with_sector.parquet",
+                "ff12_data_path": (
+                    "data/production_candidate_symbols_with_sector.parquet"
+                ),
                 "symbol_seasoning": {
                     "enabled": True,
                     "eligibility_path": "data/production_symbol_eligibility.csv",
@@ -76,7 +78,7 @@ def test_load_multi_bucket_config_preserves_bucket_sigma_overrides(
     assert loaded_config.bucket_definitions["fish_tail_explore"].sigma == 0.0
     assert (
         loaded_config.ff12_data_path_text
-        == "data/research_new_symbols_with_sector.parquet"
+        == "data/production_candidate_symbols_with_sector.parquet"
     )
     assert loaded_config.symbol_seasoning is not None
     assert loaded_config.symbol_seasoning.enabled is True

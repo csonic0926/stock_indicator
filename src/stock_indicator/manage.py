@@ -39,7 +39,7 @@ LOGGER = logging.getLogger(__name__)
 
 DATA_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "data"
 # Live trading state (cron rolling pool + dashboard signal_trades mirror) is
-# kept under data/live_state/ so sim/research cleanups inside data/ cannot
+# kept under data/live_state/ so simulation cleanups inside data/ cannot
 # accidentally wipe production runtime files.
 LIVE_STATE_DIRECTORY = DATA_DIRECTORY / "live_state"
 # Store downloaded per-symbol CSVs under a dedicated subfolder to avoid mixing
@@ -47,8 +47,8 @@ LIVE_STATE_DIRECTORY = DATA_DIRECTORY / "live_state"
 STOCK_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
 
 # Named data sources for backtesting.  The cron job always uses "stock_data"
-# (daily 6-month cache).  Research and full backtests select a source via the
-# data_source= token in simulation commands.
+# (daily 6-month cache).  Exploratory and full backtests select a source via
+# the data_source= token in simulation commands.
 DATA_SOURCE_PATHS: dict[str, Path] = {
     "daily": DATA_DIRECTORY / "stock_data",
     "2010": DATA_DIRECTORY / "stock_data_2010_yf_clean",
@@ -60,9 +60,8 @@ DATA_SOURCE_PATHS: dict[str, Path] = {
 
 SYMBOL_LIST_PATHS: dict[str, Path] = {
     "current_stock_universe": DATA_DIRECTORY / "symbols.txt",
-    "production_old": DATA_DIRECTORY / "production_old_symbols.txt",
-    "research_new": DATA_DIRECTORY / "research_new_symbols.txt",
-    "2010_safe": DATA_DIRECTORY / "production_old_symbols.txt",
+    "production": DATA_DIRECTORY / "production_symbols.txt",
+    "production_candidate": DATA_DIRECTORY / "production_candidate_symbols.txt",
 }
 
 
@@ -707,7 +706,7 @@ class StockShell(cmd.Cmd):
 
     def do_update_universe_pipeline(self, argument_line: str) -> None:  # noqa: D401
         """update_universe_pipeline [--dry-run] [--maximum-drop-ratio RATIO]
-        Rebuild research-new symbol and FF12 sector data from the SEC pipeline."""
+        Rebuild production-candidate symbols and FF12 sector data."""
 
         try:
             argument_parts = shlex.split(argument_line)
@@ -764,8 +763,10 @@ class StockShell(cmd.Cmd):
 
         self.stdout.write(
             "update_universe_pipeline [--dry-run] [--maximum-drop-ratio RATIO]\n"
-            "Refresh the SEC-derived tradable universe, apply LLM/policy/quarantine layers, "
-            "and atomically rebuild research_new_symbols plus research_new_symbols_with_sector.\n"
+            "Refresh the SEC-derived tradable universe, apply LLM/policy/"
+            "quarantine layers, "
+            "and atomically rebuild production_candidate_symbols plus "
+            "production_candidate_symbols_with_sector.\n"
             "Parameters:\n"
             "  --dry-run: validate and print symbol diff without publishing outputs.\n"
             "  --maximum-drop-ratio RATIO: one-run safety threshold for controlled "
@@ -774,7 +775,7 @@ class StockShell(cmd.Cmd):
 
     def do_sync_production_ff12_sector(self, argument_line: str) -> None:  # noqa: D401
         """sync_production_ff12_sector [--dry-run]
-        Append promoted research FF12 rows into production sector outputs."""
+        Append promoted candidate FF12 rows into production sector outputs."""
 
         try:
             argument_parts = shlex.split(argument_line)
@@ -806,10 +807,11 @@ class StockShell(cmd.Cmd):
 
         self.stdout.write(
             "sync_production_ff12_sector [--dry-run]\n"
-            "Compare production_old_symbols.txt, production_old_symbols_with_sector, "
-            "and research_new_symbols_with_sector. Existing production rows stay "
-            "frozen; missing promoted symbols are appended from research sector "
-            "rows, then production parquet and CSV outputs are written atomically.\n"
+            "Compare production_symbols.txt, production_symbols_with_sector, "
+            "and production_candidate_symbols_with_sector. Existing production "
+            "rows stay frozen; missing promoted symbols are appended from "
+            "candidate sector rows, then production parquet and CSV outputs are "
+            "written atomically with symbols.txt runtime mirrors.\n"
             "Parameters:\n"
             "  --dry-run: validate and print the promotion diff without publishing.\n"
         )
@@ -2112,7 +2114,7 @@ class StockShell(cmd.Cmd):
         # Risk-score gate for simulation/backtest configs. Stop months
         # remove new entries from gated buckets. Optional reduce months are
         # supported only when `reduce_threshold` is explicitly present for
-        # legacy research runs; production stop-only configs omit it. Live
+        # legacy exploratory runs; production stop-only configs omit it. Live
         # order blocking belongs to dashboard.py, not cron/signal rolling.
         risk_score_stop_months: set[str] | None = None
         margin_overrides: dict[str, float] | None = None

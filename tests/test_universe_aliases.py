@@ -1,4 +1,4 @@
-"""Tests for production-old and research-new universe file separation."""
+"""Tests for production and production-candidate universe file separation."""
 
 from __future__ import annotations
 
@@ -11,10 +11,14 @@ import pandas
 from stock_indicator import manage
 
 DATA_DIRECTORY = Path("data")
-PRODUCTION_SYMBOLS_PATH = DATA_DIRECTORY / "production_old_symbols.txt"
-RESEARCH_SYMBOLS_PATH = DATA_DIRECTORY / "research_new_symbols.txt"
-PRODUCTION_SECTOR_PATH = DATA_DIRECTORY / "production_old_symbols_with_sector.parquet"
-RESEARCH_SECTOR_PATH = DATA_DIRECTORY / "research_new_symbols_with_sector.parquet"
+PRODUCTION_SYMBOLS_PATH = DATA_DIRECTORY / "production_symbols.txt"
+PRODUCTION_CANDIDATE_SYMBOLS_PATH = (
+    DATA_DIRECTORY / "production_candidate_symbols.txt"
+)
+PRODUCTION_SECTOR_PATH = DATA_DIRECTORY / "production_symbols_with_sector.parquet"
+PRODUCTION_CANDIDATE_SECTOR_PATH = (
+    DATA_DIRECTORY / "production_candidate_symbols_with_sector.parquet"
+)
 
 
 def _load_symbols(symbols_path: Path) -> list[str]:
@@ -43,40 +47,30 @@ def _assert_sector_file_covers_symbols(
 
 
 def test_symbol_list_aliases_point_to_separated_universes() -> None:
-    """Named symbol-list aliases should separate production from research."""
+    """Named symbol-list aliases should separate production contracts."""
 
+    assert manage.SYMBOL_LIST_PATHS["production"] == PRODUCTION_SYMBOLS_PATH.resolve()
     assert (
-        manage.SYMBOL_LIST_PATHS["production_old"]
-        == PRODUCTION_SYMBOLS_PATH.resolve()
-    )
-    assert (
-        manage.SYMBOL_LIST_PATHS["research_new"]
-        == RESEARCH_SYMBOLS_PATH.resolve()
-    )
-    assert (
-        manage.SYMBOL_LIST_PATHS["2010_safe"]
-        == PRODUCTION_SYMBOLS_PATH.resolve()
+        manage.SYMBOL_LIST_PATHS["production_candidate"]
+        == PRODUCTION_CANDIDATE_SYMBOLS_PATH.resolve()
     )
 
 
 def test_committed_multi_bucket_configs_select_expected_universes() -> None:
-    """Production and research configs should resolve to their intended universes."""
+    """Production and candidate configs should resolve to intended universes."""
 
     expected_config_values = {
         DATA_DIRECTORY / "multi_bucket_production.json": {
             "data_source": "daily",
-            "symbol_list": "production_old",
-            "ff12_data_path": "data/production_old_symbols_with_sector.parquet",
+            "symbol_list": "production",
+            "ff12_data_path": "data/production_symbols_with_sector.parquet",
         },
         DATA_DIRECTORY / "multi_bucket_triple_explore.json": {
             "data_source": "2010",
-            "symbol_list": "research_new",
-            "ff12_data_path": "data/research_new_symbols_with_sector.parquet",
-        },
-        DATA_DIRECTORY / "multi_bucket_triple_explore_old_universe.json": {
-            "data_source": "2010",
-            "symbol_list": "production_old",
-            "ff12_data_path": "data/production_old_symbols_with_sector.parquet",
+            "symbol_list": "production_candidate",
+            "ff12_data_path": (
+                "data/production_candidate_symbols_with_sector.parquet"
+            ),
         },
     }
     for config_path, expected_values in expected_config_values.items():
@@ -114,7 +108,7 @@ def test_production_config_uses_old_universe_risk_priority_path() -> None:
     }
 
 
-def test_production_default_symbol_file_is_old_universe_alias() -> None:
+def test_default_symbol_file_is_production_alias() -> None:
     """Default symbol file should remain a byte-for-byte production alias."""
 
     assert (DATA_DIRECTORY / "symbols.txt").read_text(encoding="utf-8") == (
@@ -123,15 +117,15 @@ def test_production_default_symbol_file_is_old_universe_alias() -> None:
 
 
 def test_sector_files_cover_expected_universes_with_standard_ff12_groups() -> None:
-    """Production and research sector files should cover all symbols with FF12 1-12."""
+    """Production and candidate sector files should cover all symbols."""
 
     production_sector_frame = _assert_sector_file_covers_symbols(
         PRODUCTION_SECTOR_PATH,
         PRODUCTION_SYMBOLS_PATH,
     )
-    research_sector_frame = _assert_sector_file_covers_symbols(
-        RESEARCH_SECTOR_PATH,
-        RESEARCH_SYMBOLS_PATH,
+    candidate_sector_frame = _assert_sector_file_covers_symbols(
+        PRODUCTION_CANDIDATE_SECTOR_PATH,
+        PRODUCTION_CANDIDATE_SYMBOLS_PATH,
     )
     production_source_values = {
         source_text.strip().lower()
@@ -147,7 +141,9 @@ def test_sector_files_cover_expected_universes_with_standard_ff12_groups() -> No
     assert "missing_sic_fallback" not in production_source_values
     assert "low" not in production_confidence_values
     assert len(production_sector_frame) == len(_load_symbols(PRODUCTION_SYMBOLS_PATH))
-    assert len(research_sector_frame) == len(_load_symbols(RESEARCH_SYMBOLS_PATH))
+    assert len(candidate_sector_frame) == len(
+        _load_symbols(PRODUCTION_CANDIDATE_SYMBOLS_PATH)
+    )
 
 
 def test_no_config_uses_custom_etf_ff12_group() -> None:

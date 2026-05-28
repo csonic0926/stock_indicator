@@ -7,8 +7,8 @@ from stock_indicator import cron
 from stock_indicator import strategy
 
 
-def test_run_daily_job_uses_production_old_universe_without_refresh() -> None:
-    """The shell cron wrapper must not refresh research universe files."""
+def test_run_daily_job_uses_production_universe_without_refresh() -> None:
+    """The shell cron wrapper must not refresh candidate universe files."""
 
     script_text = Path("run_daily_job.sh").read_text(encoding="utf-8")
     yahoo_update_position = script_text.index("update_all_data_from_yf")

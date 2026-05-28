@@ -341,8 +341,8 @@ def test_universe_pipeline_policy_include_bypasses_tradability_gate(
                 "match_field": "symbol",
                 "match_value": "GLD",
                 "override_decision": "include",
-                "override_semantic_type": "manual_research_include",
-                "override_reason": "Manual research include.",
+                "override_semantic_type": "manual_policy_include",
+                "override_reason": "Manual policy include.",
             }
         ],
     )
@@ -422,7 +422,7 @@ def test_validate_sector_contract_rejects_custom_ff_group() -> None:
             {
                 "ticker": "GLD",
                 "ff12": 13,
-                "ff12_source": "manual_research_include",
+                "ff12_source": "manual_policy_include",
                 "classification_confidence": "high",
             }
         ]

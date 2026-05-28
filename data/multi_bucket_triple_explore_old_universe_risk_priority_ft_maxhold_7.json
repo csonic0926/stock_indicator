@@ -95,8 +95,8 @@
       "reset_hold_on_reentry_signal": true
     }
   ],
-  "symbol_list": "production_old",
-  "ff12_data_path": "data/production_old_symbols_with_sector.parquet",
+  "symbol_list": "production",
+  "ff12_data_path": "data/production_symbols_with_sector.parquet",
   "risk_score_priority_overrides": {
     "scores": [
       25,

@@ -9,7 +9,7 @@ from stock_indicator import symbol_seasoning
 
 
 DATA_DIRECTORY = Path("data")
-PRODUCTION_SYMBOLS_PATH = DATA_DIRECTORY / "production_old_symbols.txt"
+PRODUCTION_SYMBOLS_PATH = DATA_DIRECTORY / "production_symbols.txt"
 PRODUCTION_ELIGIBILITY_PATH = DATA_DIRECTORY / "production_symbol_eligibility.csv"
 
 
@@ -25,8 +25,8 @@ def _load_production_symbols() -> set[str]:
     }
 
 
-def test_production_old_symbols_are_baseline_eligible() -> None:
-    """Every old production symbol should be eligible from 2010-01-01."""
+def test_production_symbols_are_baseline_eligible() -> None:
+    """Every baseline production symbol should be eligible from 2010-01-01."""
 
     eligibility_dates = symbol_seasoning.load_symbol_first_eligible_trade_dates(
         PRODUCTION_ELIGIBILITY_PATH
