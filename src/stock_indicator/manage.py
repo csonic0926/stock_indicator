@@ -124,11 +124,35 @@ def _resolve_repository_relative_path(path_text: object) -> Path:
 
 def load_symbol_seasoning_dates_for_config(
     seasoning_config: symbol_seasoning.SymbolSeasoningConfig,
+    *,
+    data_directory: Path | None = None,
+    allowed_symbols: set[str] | None = None,
 ) -> tuple[Path, dict[str, datetime.date]] | None:
     """Load symbol seasoning dates when the configured gate is enabled."""
 
     if not seasoning_config.enabled:
         return None
+    if (
+        seasoning_config.eligibility_source
+        == symbol_seasoning.PRICE_HISTORY_ELIGIBILITY_SOURCE
+    ):
+        if data_directory is None:
+            raise ValueError(
+                "symbol_seasoning.eligibility_source=price_history requires "
+                "a data directory"
+            )
+        symbol_first_eligible_trade_dates = (
+            symbol_seasoning.build_symbol_first_eligible_trade_dates_from_price_history(
+                data_directory,
+                allowed_symbols=allowed_symbols,
+                quarantine_calendar_days=(
+                    seasoning_config.default_new_symbol_quarantine_days
+                ),
+                quarantine_trading_bars=seasoning_config.quarantine_trading_bars,
+            )
+        )
+        return data_directory, symbol_first_eligible_trade_dates
+
     repository_root = Path(__file__).resolve().parent.parent.parent
     eligibility_path = symbol_seasoning.resolve_eligibility_path(
         seasoning_config,
@@ -2013,20 +2037,23 @@ class StockShell(cmd.Cmd):
                 config_document.get("symbol_seasoning")
             )
             seasoning_dates_result = load_symbol_seasoning_dates_for_config(
-                seasoning_config
+                seasoning_config,
+                data_directory=data_directory,
+                allowed_symbols=allowed_symbols,
             )
         except (FileNotFoundError, ValueError) as seasoning_error:
             self.stdout.write(f"{seasoning_error}\n")
             return
         symbol_first_eligible_trade_dates = None
         if seasoning_dates_result is not None:
-            eligibility_path, symbol_first_eligible_trade_dates = (
+            seasoning_source_path, symbol_first_eligible_trade_dates = (
                 seasoning_dates_result
             )
             self.stdout.write(
                 "Symbol seasoning: enabled "
                 f"records={len(symbol_first_eligible_trade_dates)} "
-                f"eligibility_path={eligibility_path}\n"
+                f"source={seasoning_config.eligibility_source} "
+                f"path={seasoning_source_path}\n"
             )
 
         # Parse adaptive TP/SL configuration.
@@ -4153,20 +4180,26 @@ class StockShell(cmd.Cmd):
 
         try:
             seasoning_dates_result = load_symbol_seasoning_dates_for_config(
-                config.symbol_seasoning or symbol_seasoning.SymbolSeasoningConfig()
+                config.symbol_seasoning or symbol_seasoning.SymbolSeasoningConfig(),
+                data_directory=data_directory,
+                allowed_symbols=allowed_symbols,
             )
         except (FileNotFoundError, ValueError) as seasoning_error:
             self.stdout.write(f"{seasoning_error}\n")
             return
         symbol_first_eligible_trade_dates = None
         if seasoning_dates_result is not None:
-            eligibility_path, symbol_first_eligible_trade_dates = (
+            seasoning_source_path, symbol_first_eligible_trade_dates = (
                 seasoning_dates_result
+            )
+            seasoning_config = (
+                config.symbol_seasoning or symbol_seasoning.SymbolSeasoningConfig()
             )
             self.stdout.write(
                 "Symbol seasoning: enabled "
                 f"records={len(symbol_first_eligible_trade_dates)} "
-                f"eligibility_path={eligibility_path}\n"
+                f"source={seasoning_config.eligibility_source} "
+                f"path={seasoning_source_path}\n"
             )
 
         if date_string is None:

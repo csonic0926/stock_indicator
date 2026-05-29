@@ -33,6 +33,8 @@ strategy tuning:
 | `symbol_seasoning.enabled` | `true` | Newly promoted symbols must pass the live-entry seasoning gate. |
 | `symbol_seasoning.eligibility_path` | `data/production_symbol_eligibility.csv` | Missing eligibility rows fail closed. |
 | `symbol_seasoning.default_new_symbol_quarantine_days` | `365` | Default helper seasons promoted symbols for 365 calendar days. |
+| `symbol_seasoning.eligibility_source` | omitted / `csv` in live configs | Live cron reads the audited CSV. Historical simulations may use `price_history` to recompute first-bar quarantine from the selected data source. |
+| `symbol_seasoning.quarantine_trading_bars` | `252` when `eligibility_source=price_history` | Blocks the first 252 observed price bars; combined with the 365-day gate by taking the later date. |
 
 Do **not** point the live config at candidate symbol files. Candidate outputs
 are staging inputs for audited promotion only.

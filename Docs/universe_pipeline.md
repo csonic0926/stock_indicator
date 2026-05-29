@@ -592,12 +592,15 @@ The production rule is **stable baseline plus audited additions**:
 7. A promoted symbol still cannot fire an entry until it has an audited row in
    `data/production_symbol_eligibility.csv` and the trade date is on or after
    `first_eligible_trade_date`.
-8. Baseline production symbols are eligible from `2010-01-01`; missing
-   eligibility rows fail closed and block entries.
-9. The default new-symbol seasoning helper is promotion date + 365 calendar
-   days. This is separate from the 252-row candidate maturity gate; the system
-   does **not** interpret 252 bars after promotion as the live-entry seasoning
-   rule.
+8. Production eligibility is data-derived from each symbol's first local price
+   bar plus the configured seasoning quarantine. The production audit CSV is
+   generated with both 365 calendar days and 252 trading bars; the later date
+   wins. This intentionally avoids a universe-wide hard floor such as
+   `2010-01-01`.
+9. Missing eligibility rows fail closed and block entries. Backtest configs may
+   set `symbol_seasoning.eligibility_source` to `price_history` so the selected
+   data source computes the same first-bar quarantine directly during the
+   simulation.
 
 ## Sources
 

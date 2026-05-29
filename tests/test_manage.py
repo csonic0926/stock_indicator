@@ -3455,6 +3455,47 @@ def test_multi_bucket_daily_signal_forwards_symbol_seasoning_dates(
     assert "Symbol seasoning: enabled records=1" in output_buffer.getvalue()
 
 
+def test_load_symbol_seasoning_dates_can_use_price_history(
+    tmp_path: Path,
+) -> None:
+    """Backtests should derive seasoning dates from the selected data source."""
+
+    import stock_indicator.manage as manage_module
+    from stock_indicator import symbol_seasoning
+
+    data_directory = tmp_path / "prices"
+    data_directory.mkdir()
+    (data_directory / "AAA.csv").write_text(
+        "\n".join(
+            [
+                "Date,open,high,low,close,volume",
+                "2020-01-01,1,1,1,1,100",
+                "2020-01-02,1,1,1,1,100",
+                "2020-01-03,1,1,1,1,100",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    seasoning_config = symbol_seasoning.SymbolSeasoningConfig(
+        enabled=True,
+        eligibility_source="price_history",
+        default_new_symbol_quarantine_days=0,
+        quarantine_trading_bars=2,
+    )
+
+    source_path, eligibility_dates = (
+        manage_module.load_symbol_seasoning_dates_for_config(
+            seasoning_config,
+            data_directory=data_directory,
+            allowed_symbols={"AAA", "MISSING"},
+        )
+    )
+
+    assert source_path == data_directory
+    assert eligibility_dates == {"AAA": datetime.date(2020, 1, 3)}
+
+
 def test_multi_bucket_daily_signal_applies_risk_score_priority_override(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
