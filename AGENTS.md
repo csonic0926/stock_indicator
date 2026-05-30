@@ -108,10 +108,10 @@ If this project has **user-facing text** (CLI, GUI, web responses):
 * **Start dashboard server** (after reboot or when needed):
 
   ```bash
-  source venv/bin/activate && uvicorn stock_indicator.dashboard:app --host 0.0.0.0 --port 8000 --app-dir src &
+  source venv/bin/activate && uvicorn stock_indicator.dashboard:app --host 0.0.0.0 --port 8080 --app-dir src &
   ```
 
-  Verify: `curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/` should return `200`.
+  Verify: `curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/` should return `200`.
 
 ---
 

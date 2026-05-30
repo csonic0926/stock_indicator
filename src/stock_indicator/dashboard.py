@@ -1926,10 +1926,13 @@ async function previewOrders() {
       const rankDisplay = o.exit_reason === 'max_hold'
         ? `max ${o.bars_held}/${o.max_hold}`
         : (o.dollar_volume_rank != null) ? '#' + o.dollar_volume_rank : '—';
-      const skipped = o.status === 'slot_full' || o.status === 'risk_score_stop';
+      const skipped = o.status === 'slot_full' || o.status === 'risk_score_stop' || o.status === 'min_hold_block';
       const rowStyle = skipped ? ' style="opacity:0.45"' : '';
+      const statusDetail = o.status === 'min_hold_block' && o.bars_held != null && o.min_hold != null
+        ? `min_hold_block ${o.bars_held}/${o.min_hold}`
+        : o.status;
       const sideLabel = skipped
-        ? `${o.side} <span style="font-size:0.75em; opacity:0.8">(${o.status})</span>`
+        ? `${o.side} <span style="font-size:0.75em; opacity:0.8">(${statusDetail})</span>`
         : o.exit_reason === 'max_hold'
         ? `${o.side} <span style="font-size:0.75em; opacity:0.8">(max_hold)</span>`
         : o.side;
