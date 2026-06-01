@@ -16,12 +16,16 @@ the patient, a funding/mark-to-market cliff is already visible, or Fed
 paralysis is actually being tested. Inflation, low rate space, or bubble
 valuation alone do not trigger Slow duration.
 
-To regenerate CSV: python3 scripts/historical_risk_scores.py
+To regenerate CSV and the latest monthly report:
+python3 scripts/historical_risk_scores.py
 """
 from __future__ import annotations
 
 import csv
+from datetime import date
 from pathlib import Path
+
+PRODUCTION_STOP_THRESHOLD = 75
 
 # Schema: (year_month, duration_score, breadth_score, key_event, confidence)
 HISTORICAL_RISK_ROWS: list[tuple[str, int, int, str, str]] = [
@@ -414,12 +418,32 @@ HISTORICAL_RISK_ROWS: list[tuple[str, int, int, str, str]] = [
     ('2026-03', 25, 25, 'AI capex stress-test begins', 'H'),
     ('2026-04', 25, 25, 'Month-start AI capex/inflation stress; Apr-30 Meta move not yet known', 'H'),
     ('2026-05', 25, 25, 'Month-start AI capex stress and sector rotation; later FSB/CPI releases not yet known', 'H'),
+    ('2026-06', 25, 25, 'Known Apr CPI/PCE inflation; FSB private-credit and AI-valuation risk', 'H'),
 ]
+
+RISK_REPORT_NOTES_BY_MONTH: dict[str, list[str]] = {
+    "2026-06": [
+        (
+            "Duration remains 25 because inflation and credit/AI stress are "
+            "visible, but banks are not yet the obvious patient and a funding "
+            "cliff is not already visible at month start."
+        ),
+        (
+            "Breadth remains 25 because the risk is mixed across inflation, "
+            "private credit, and AI valuation/capex concentration rather than "
+            "universal liquidation stress."
+        ),
+        (
+            "Risk score 50 maps to reduce exposure, not stop entries; the "
+            "dashboard gate stays open unless the score reaches 75."
+        ),
+    ],
+}
 
 
 def classify_recommendation(risk_score: int) -> str:
     """Return the production recommendation for a canonical risk score."""
-    if risk_score >= 75:
+    if risk_score >= PRODUCTION_STOP_THRESHOLD:
         return "stop"
     if risk_score >= 50:
         return "reduce"
@@ -476,14 +500,108 @@ def write_historical_risk_scores(output_path: Path) -> None:
             ])
 
 
+def build_risk_report_content(
+    row_tuple: tuple[str, int, int, str, str],
+    generated_date_text: str | None = None,
+) -> str:
+    """Build a month-specific Markdown risk report.
+
+    Args:
+        row_tuple: Risk score tuple in HISTORICAL_RISK_ROWS schema.
+        generated_date_text: Optional ISO date used to make tests deterministic.
+
+    Returns:
+        Markdown report content for one monthly risk assessment.
+    """
+    if generated_date_text is None:
+        generated_date_text = date.today().isoformat()
+
+    year_month, duration_score, breadth_score, key_event, confidence = row_tuple
+    risk_score = duration_score + breadth_score
+    recommendation = classify_recommendation(risk_score)
+    risk_gate_status = (
+        "stop"
+        if risk_score >= PRODUCTION_STOP_THRESHOLD
+        else "open"
+    )
+    risk_gate_sentence = (
+        "BUY orders are blocked by the dashboard risk-score gate."
+        if risk_gate_status == "stop"
+        else "BUY orders are not blocked by the dashboard risk-score gate."
+    )
+
+    report_lines = [
+        f"# Risk Report: {year_month}",
+        "",
+        f"- Generated date: {generated_date_text}",
+        "- Source: scripts/historical_risk_scores.py",
+        "- Lookahead rule: use only information visible at month start or earlier.",
+        "",
+        "## Score",
+        "",
+        f"- Duration score: {duration_score}",
+        f"- Breadth score: {breadth_score}",
+        f"- Risk score: {risk_score}",
+        f"- Recommendation: {recommendation}",
+        f"- Confidence: {confidence}",
+        "",
+        "## Key event",
+        "",
+        key_event,
+        "",
+        "## Assessment notes",
+        "",
+    ]
+    assessment_notes = RISK_REPORT_NOTES_BY_MONTH.get(year_month, [])
+    if assessment_notes:
+        for assessment_note in assessment_notes:
+            report_lines.append(f"- {assessment_note}")
+    else:
+        report_lines.append("- No expanded notes recorded for this month.")
+
+    report_lines.extend([
+        "",
+        "## Dashboard gate impact",
+        "",
+        (
+            f"- Gate status: {risk_gate_status} "
+            f"(stop threshold: {PRODUCTION_STOP_THRESHOLD})"
+        ),
+        f"- {risk_gate_sentence}",
+        "",
+    ])
+    return "\n".join(report_lines)
+
+
+def write_latest_risk_report(
+    report_directory: Path,
+    generated_date_text: str | None = None,
+) -> Path:
+    """Write the latest monthly risk report and return its path."""
+    validate_rows(HISTORICAL_RISK_ROWS)
+    latest_row_tuple = HISTORICAL_RISK_ROWS[-1]
+    latest_year_month = latest_row_tuple[0]
+    report_directory.mkdir(parents=True, exist_ok=True)
+    report_path = report_directory / f"{latest_year_month}.md"
+    report_content = build_risk_report_content(
+        latest_row_tuple,
+        generated_date_text=generated_date_text,
+    )
+    report_path.write_text(report_content, encoding="utf-8")
+    return report_path
+
+
 def main() -> int:
-    """Regenerate the historical risk-score CSV and print a compact summary."""
+    """Regenerate the historical CSV and latest monthly risk report."""
+    repository_root = Path(__file__).resolve().parent.parent
     output_path = (
-        Path(__file__).resolve().parent.parent
+        repository_root
         / "data"
         / "historical_risk_scores.csv"
     )
+    risk_report_directory = repository_root / "logs" / "risk_report"
     write_historical_risk_scores(output_path)
+    report_path = write_latest_risk_report(risk_report_directory)
     recommendation_counts: dict[str, int] = {}
     risk_score_counts: dict[int, int] = {}
     for row_tuple in HISTORICAL_RISK_ROWS:
@@ -494,6 +612,7 @@ def main() -> int:
         risk_score_counts[risk_score] = risk_score_counts.get(risk_score, 0) + 1
 
     print(f"Wrote {len(HISTORICAL_RISK_ROWS)} months to {output_path}")
+    print(f"Wrote latest risk report to {report_path}")
     print("Risk score distribution:")
     for risk_score in sorted(risk_score_counts):
         print(f"  {risk_score:3d}: {risk_score_counts[risk_score]:3d} months")
