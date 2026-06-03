@@ -3,7 +3,7 @@
 This document records the current production JSON contract so the live config
 does not drift through accidental `.json` edits.
 
-Last aligned with `data/multi_bucket_production.json`: 2026-05-28.
+Last aligned with `data/multi_bucket_production.json`: 2026-06-03.
 
 ---
 
@@ -45,8 +45,8 @@ are staging inputs for audited promotion only.
 
 | Field | Production value |
 |---|---:|
-| `max_position_count` | `6` |
-| `starting_cash` | `60000` |
+| `max_position_count` | `7` |
+| `starting_cash` | `70000` |
 | `margin` | `1.5` |
 | `withdraw` | `0` |
 | `start_date` | `2010-01-01` |
@@ -89,7 +89,7 @@ dollar_volume>0.02%,Top500,Pick5
 | Label | Strategy | Priority | Max positions | Fill remaining | Max hold | Sigma | Min SL | Reset hold on re-entry |
 |---|---|---:|---:|---|---:|---:|---:|---|
 | `fish_head_production` | `fish_head_vacuum_turn` | `1` | `6` | `false` | default engine behavior | `0.75` | `0.01` | `false` |
-| `fish_tail_explore` | `fish_tail_blow_off_top` | `1` | `6` | `false` | `7` | `0.0` | `0.01` | `false` |
+| `fish_tail_production` | `fish_tail_blow_off_top` | `1` | `6` | `false` | `7` | `0.0` | `0.01` | `false` |
 | `fish_head_b30_35` | `fish_head_b30_35` | `2` | `2` | `true` | `14` | `0.75` | `0.01` | `true` |
 
 Additional bucket-level settings:
@@ -100,17 +100,17 @@ Additional bucket-level settings:
 | `fish_head_production` | `free_fall_slope` | `-0.2` |
 | `fish_head_production` | `free_fall_near_delta` | `-0.05` |
 | `fish_head_production` | `pre_cross_signal_lookback` | `true` |
-| `fish_tail_explore` | `exit_alpha_factor` | `3` |
-| `fish_tail_explore` | `tp_regime_adjust` | `true` |
-| `fish_tail_explore` | `tp_slope_amplify` | `true` |
+| `fish_tail_production` | `exit_alpha_factor` | `3` |
+| `fish_tail_production` | `tp_regime_adjust` | `true` |
+| `fish_tail_production` | `tp_slope_amplify` | `true` |
 | `fish_head_b30_35` | `exit_alpha_factor` | `3` |
 | `fish_head_b30_35` | `free_fall_slope` | `-0.2` |
 | `fish_head_b30_35` | `free_fall_near_delta` | `-0.05` |
 | `fish_head_b30_35` | `pre_cross_signal_lookback` | `true` |
 
-The `fish_tail_explore` label is currently an active production bucket label.
-Do not interpret that label as permission to use candidate symbol files in live
-production.
+The `fish_tail_production` label is an active production bucket label. Do not
+interpret older `fish_tail_explore` log/state entries as permission to use
+candidate symbol files in live production.
 
 ---
 
@@ -126,7 +126,7 @@ Priority overrides are active for risk scores `25` and `50`:
 | Bucket label | Override priority |
 |---|---:|
 | `fish_head_production` | `1` |
-| `fish_tail_explore` | `2` |
+| `fish_tail_production` | `2` |
 | `fish_head_b30_35` | `3` |
 
 ---
@@ -137,7 +137,8 @@ Priority overrides are active for risk scores `25` and `50`:
 |---|---|
 | `data/multi_bucket_production_test.json` | Test/backtest helper. It uses `data_source=2010`, the production symbol list, and only the first two buckets. |
 | `data/multi_bucket_triple_explore.json` | Candidate-universe exploration config. It uses `symbol_list=production_candidate` and candidate sector rows. Do not use it for live signals. |
-| Historical max-hold variant configs | Scenario files only. Inspect their JSON fields before use; the filename alone is not a production contract. |
+| `data/multi_bucket_triple_explore_old_universe_risk_priority_ft_maxhold_7.json` | Research source promoted into the live production contract on 2026-06-03, with `data_source` kept as `daily` for live cron. |
+| Other historical max-hold variant configs | Scenario files only. Inspect their JSON fields before use; the filename alone is not a production contract. |
 
 ---
 

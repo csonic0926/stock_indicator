@@ -296,6 +296,109 @@ def test_preview_orders_allows_buy_orders_when_risk_score_is_below_stop(
     assert order["qty"] == 250
     assert "status" not in order
 
+
+def test_preview_orders_cold_start_keeps_old_positions_and_sizes_new_buy_by_seven(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Cold start should let old Futu positions unwind while new buys use 1/7 sizing."""
+    signal_date = "2026-06-02"
+    config_path = tmp_path / "multi_bucket_production.json"
+    log_directory = tmp_path / "logs"
+    log_directory.mkdir()
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 7,
+                "margin": 1.5,
+                "buckets": [
+                    {
+                        "label": "fish_head_production",
+                        "strategy_id": "fish_head_vacuum_turn",
+                        "dollar_volume_filter": (
+                            "dollar_volume>0.02%,Top500,Pick5"
+                        ),
+                    },
+                    {
+                        "label": "fish_head_b30_35",
+                        "strategy_id": "fish_head_b30_35",
+                        "dollar_volume_filter": (
+                            "dollar_volume>0.02%,Top500,Pick5"
+                        ),
+                        "max_hold": 14,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (log_directory / f"{signal_date}.log").write_text(
+        "[FROZEN_TP_SL] entry_date=2026-06-02 "
+        "bucket=fish_head_b30_35 strategy_id=fish_head_b30_35 "
+        "symbol=AAA dollar_volume_rank=1 tp_pct=0.070000 sl_pct=0.025000 "
+        "min_hold_sl=1 disable_sl_trigger=True max_hold=14 "
+        "reset_hold_on_reentry_signal=True\n"
+        "[FROZEN_TP_SL] entry_date=2026-06-02 "
+        "bucket=fish_head_b30_35 strategy_id=fish_head_b30_35 "
+        "symbol=BBB dollar_volume_rank=2 tp_pct=0.070000 sl_pct=0.025000 "
+        "min_hold_sl=1 disable_sl_trigger=True max_hold=14 "
+        "reset_hold_on_reentry_signal=True\n"
+        "[EXIT_SIGNAL] symbol=EXITOLD "
+        "buckets=fish_head_production strategies=fish_head_vacuum_turn\n",
+        encoding="utf-8",
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: FakeTradeContext(
+            total_assets=54_600.0,
+            positions=[
+                {"code": "US.OLD1", "qty": 1},
+                {"code": "US.OLD2", "qty": 1},
+                {"code": "US.OLD3", "qty": 1},
+                {"code": "US.OLD4", "qty": 1},
+                {"code": "US.OLD5", "qty": 1},
+                {"code": "US.EXITOLD", "qty": 9},
+            ],
+            deals=[],
+        ),
+    )
+
+    preview = dashboard.api_preview_orders()
+
+    assert preview["max_positions"] == 7
+    assert preview["held_count"] == 6
+    buy_orders = [
+        order for order in preview["orders"] if order["side"] == "BUY"
+    ]
+    sell_orders = [
+        order for order in preview["orders"] if order["side"] == "SELL"
+    ]
+
+    assert buy_orders[0]["symbol"] == "AAA"
+    assert buy_orders[0]["qty"] == 150
+    assert "status" not in buy_orders[0]
+    assert buy_orders[1]["symbol"] == "BBB"
+    assert buy_orders[1]["status"] == "slot_full"
+    assert "max_positions=7 already filled" in buy_orders[1]["skip_reason"]
+    assert sell_orders == [
+        {
+            "side": "SELL",
+            "symbol": "EXITOLD",
+            "qty": 9,
+            "price": 10.0,
+            "order_type": "MARKET",
+            "exit_reason": "signal",
+        }
+    ]
+
+
 def test_dashboard_buy_remark_uses_compact_v2_schema() -> None:
     """BUY remarks should fit Futu limits and round-trip live metadata."""
     order = {
@@ -321,6 +424,28 @@ def test_dashboard_buy_remark_uses_compact_v2_schema() -> None:
     assert metadata["disable_sl_trigger"] is True
     assert metadata["max_hold"] == 14
     assert metadata["reset_hold_on_reentry_signal"] is True
+    assert metadata["supports_tp_sl"] is True
+
+
+def test_dashboard_buy_remark_uses_live_fish_tail_production_bucket() -> None:
+    """Fish-tail BUY remarks should parse to the promoted production bucket."""
+    order = {
+        "side": "BUY",
+        "strategy_id": "fish_tail_blow_off_top",
+        "tp_pct": 0.0586,
+        "sl_pct": 0.0420,
+        "min_hold_sl": 1,
+        "disable_sl_trigger": True,
+        "max_hold": 7,
+        "reset_hold_on_reentry_signal": False,
+    }
+
+    remark_text = dashboard._format_dashboard_order_remark(order)
+    metadata = parse_futu_order_remark(remark_text)
+
+    assert metadata["strategy_id"] == "fish_tail_blow_off_top"
+    assert metadata["bucket"] == "fish_tail_production"
+    assert metadata["max_hold"] == 7
     assert metadata["supports_tp_sl"] is True
 
 

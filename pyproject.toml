@@ -7,9 +7,15 @@ name = "stock-indicator"
 version = "0.1.0"
 description = "Stock indicators and trading simulation"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 dependencies = [
+    "fastapi",
+    "futu_api",
+    "numpy",
     "pandas",
+    "pydantic",
+    "pyarrow",
     "yfinance",
-    "requests"
+    "requests",
+    "uvicorn"
 ]

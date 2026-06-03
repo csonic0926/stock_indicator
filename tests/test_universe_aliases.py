@@ -92,12 +92,14 @@ def test_production_config_uses_old_universe_risk_priority_path() -> None:
         for bucket_document in config_document["buckets"]
     }
 
-    assert bucket_by_label["fish_tail_explore"]["max_hold"] == 7
+    assert config_document["max_position_count"] == 7
+    assert config_document["starting_cash"] == 70_000
+    assert bucket_by_label["fish_tail_production"]["max_hold"] == 7
     assert config_document["risk_score_priority_overrides"] == {
         "scores": [25, 50],
         "priorities": {
             "fish_head_production": 1,
-            "fish_tail_explore": 2,
+            "fish_tail_production": 2,
             "fish_head_b30_35": 3,
         },
     }

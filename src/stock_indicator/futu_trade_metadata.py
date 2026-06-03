@@ -17,7 +17,7 @@ REMARK_CODE_TO_STRATEGY_ID = {
 }
 STRATEGY_ID_TO_DEFAULT_BUCKET = {
     "fish_head_vacuum_turn": "fish_head_production",
-    "fish_tail_blow_off_top": "fish_tail_explore",
+    "fish_tail_blow_off_top": "fish_tail_production",
     "fish_head_b30_35": "fish_head_b30_35",
 }
 

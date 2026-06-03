@@ -10,9 +10,9 @@ REPOSITORY_ROOT="${REPO:-$SCRIPT_DIRECTORY}"
 SOURCE_DIRECTORY="${SRC:-$REPOSITORY_ROOT/src}"
 VIRTUAL_ENVIRONMENT_DIRECTORY="${VENV:-$REPOSITORY_ROOT/venv}"
 
-# Production multi-bucket config (live).  fish_head_vacuum_turn +
-# fish_tail_blow_off_top with per-bucket sigma + edge SL settings.
-# data_source = "daily" -> data/stock_data/ (yfinance daily cache).
+# Production multi-bucket config (live).  Mirrors the promoted
+# triple-bucket old-universe risk-priority setup, with data_source kept
+# as "daily" so cron reads data/stock_data/ (yfinance daily cache).
 PRODUCTION_CONFIG="$REPOSITORY_ROOT/data/multi_bucket_production.json"
 
 # Set up logging directories

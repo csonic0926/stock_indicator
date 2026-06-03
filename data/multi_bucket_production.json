@@ -1,13 +1,16 @@
 {
-  "max_position_count": 6,
-  "starting_cash": 60000,
+  "max_position_count": 7,
+  "starting_cash": 70000,
   "margin": 1.5,
   "withdraw": 0,
   "start_date": "2010-01-01",
   "data_source": "daily",
-  "symbol_list": "production",
   "min_hold": 5,
   "show_trade_details": false,
+  "risk_score_gate": {
+    "csv_path": "data/historical_risk_scores.csv",
+    "stop_threshold": 75
+  },
   "adaptive_tp_sl": {
     "window": 20,
     "sigma": 0.5,
@@ -28,7 +31,6 @@
     {
       "label": "fish_head_production",
       "strategy_id": "fish_head_vacuum_turn",
-      "skip_ff12_groups": [12],
       "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
       "priority": 1,
       "max_positions": 6,
@@ -49,9 +51,8 @@
       "reset_hold_on_reentry_signal": false
     },
     {
-      "label": "fish_tail_explore",
+      "label": "fish_tail_production",
       "strategy_id": "fish_tail_blow_off_top",
-      "skip_ff12_groups": [12],
       "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
       "priority": 1,
       "max_positions": 6,
@@ -72,7 +73,6 @@
     {
       "label": "fish_head_b30_35",
       "strategy_id": "fish_head_b30_35",
-      "skip_ff12_groups": [12],
       "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
       "priority": 2,
       "max_positions": 2,
@@ -95,10 +95,8 @@
       "reset_hold_on_reentry_signal": true
     }
   ],
-  "risk_score_gate": {
-    "csv_path": "data/historical_risk_scores.csv",
-    "stop_threshold": 75
-  },
+  "symbol_list": "production",
+  "ff12_data_path": "data/production_symbols_with_sector.parquet",
   "risk_score_priority_overrides": {
     "scores": [
       25,
@@ -106,11 +104,10 @@
     ],
     "priorities": {
       "fish_head_production": 1,
-      "fish_tail_explore": 2,
+      "fish_tail_production": 2,
       "fish_head_b30_35": 3
     }
   },
-  "ff12_data_path": "data/production_symbols_with_sector.parquet",
   "symbol_seasoning": {
     "enabled": true,
     "eligibility_path": "data/production_symbol_eligibility.csv",
