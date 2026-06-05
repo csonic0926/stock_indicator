@@ -81,3 +81,7 @@ data/stock_data_1989/
 data/stock_data_1994/
 data/stock_data_2014/
 data/backtest_universe_alpha_vantage/
+
+# Live runtime state; keep local per machine.
+data/live_state/*
+!data/live_state/.gitkeep
