@@ -692,6 +692,65 @@ def _count_weekday_bars_held(entry_date_text: str, signal_date_text: str) -> int
     return bars_held
 
 
+def _load_us_trading_days(
+    start_date_text: str, end_date_text: str
+) -> list[str] | None:
+    """Return US trading days in [start, end] as sorted 'YYYY-MM-DD' strings.
+
+    Uses Futu's market calendar so holidays/half-day closures are excluded the
+    same way they are absent from the sim's price DataFrame. Returns None on any
+    failure so callers fall back to a weekday approximation rather than blocking.
+    """
+    try:
+        from futu import OpenQuoteContext, TradeDateMarket
+
+        quote_context = OpenQuoteContext(host="127.0.0.1", port=11111)
+        try:
+            return_code, day_data = quote_context.request_trading_days(
+                market=TradeDateMarket.US,
+                start=start_date_text,
+                end=end_date_text,
+            )
+        finally:
+            quote_context.close()
+    except Exception as calendar_error:  # noqa: BLE001 - degrade gracefully
+        LOGGER.warning("Failed to load US trading days: %s", calendar_error)
+        return None
+    if return_code != 0 or not isinstance(day_data, list):
+        LOGGER.warning("Trading-day query returned code %s", return_code)
+        return None
+    days = [
+        str(entry.get("time"))
+        for entry in day_data
+        if isinstance(entry, dict) and entry.get("time")
+    ]
+    return sorted(days)
+
+
+def _count_trading_bars_held(
+    entry_date_text: str,
+    signal_date_text: str,
+    trading_days: list[str] | None,
+) -> int:
+    """Trading bars held since entry, matching the sim's ``bars_since_anchor``.
+
+    The sim sets the counter to 0 on the entry bar and increments once per
+    subsequent trading bar, gating exits on ``bars_since_anchor >= min_hold``.
+    To mirror that exactly this counts trading days strictly after the entry
+    date up to and including the signal date (entry-exclusive). ISO date
+    strings compare lexicographically in chronological order.
+
+    Falls back to the calendar-weekday count minus one (entry-exclusive) when
+    the trading calendar is unavailable.
+    """
+    if trading_days is not None:
+        return sum(
+            1 for day in trading_days
+            if entry_date_text < day <= signal_date_text
+        )
+    return max(0, _count_weekday_bars_held(entry_date_text, signal_date_text) - 1)
+
+
 def _load_current_bucket_exit_rules() -> dict[str, dict[str, Any]]:
     """Load per-bucket live exit rules keyed by bucket label and strategy id."""
     try:
@@ -920,6 +979,7 @@ def _build_max_hold_sell_orders(
     existing_sell_symbols: set[str],
     entry_signal_symbols: set[str],
     futu_open_entries: dict[str, dict[str, Any]] | None = None,
+    trading_days: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Build max-hold SELL orders from Futu live position and deal history."""
     if futu_open_entries is None:
@@ -944,9 +1004,10 @@ def _build_max_hold_sell_orders(
             continue
 
         try:
-            bars_held = _count_weekday_bars_held(
+            bars_held = _count_trading_bars_held(
                 str(entry_record.get("entry_date", "")),
                 signal_date_text,
+                trading_days,
             )
         except ValueError:
             LOGGER.warning(
@@ -1219,6 +1280,22 @@ def api_preview_orders():
             )
     production_min_hold = _load_production_min_hold()
 
+    # Trading calendar covering every open-entry hold window so min_hold and
+    # max_hold bar counts match the sim (actual trading bars, holidays/weekends
+    # excluded). None on failure -> _count_trading_bars_held falls back to a
+    # weekday approximation.
+    trading_days: list[str] | None = None
+    if signal_date_text and futu_open_entries:
+        entry_dates = [
+            str(entry.get("entry_date"))
+            for entry in futu_open_entries.values()
+            if entry.get("entry_date")
+        ]
+        if entry_dates:
+            trading_days = _load_us_trading_days(
+                min(entry_dates), signal_date_text
+            )
+
     for symbol in log.get("sell_actions", []):
         if symbol not in held_symbols:
             continue
@@ -1240,8 +1317,8 @@ def api_preview_orders():
         if production_min_hold > 0 and futu_entry is not None:
             entry_date_text = str(futu_entry.get("entry_date") or "")
             try:
-                bars_held = _count_weekday_bars_held(
-                    entry_date_text, signal_date_text
+                bars_held = _count_trading_bars_held(
+                    entry_date_text, signal_date_text, trading_days
                 )
             except ValueError:
                 bars_held = None
@@ -1278,6 +1355,7 @@ def api_preview_orders():
             existing_sell_symbols=existing_sell_symbols,
             entry_signal_symbols=set(log.get("entry_signals", [])),
             futu_open_entries=futu_open_entries,
+            trading_days=trading_days,
         )
     )
 
