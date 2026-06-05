@@ -48,13 +48,13 @@ STOCK_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
 
 # Named data sources for backtesting.  The cron job always uses "stock_data"
 # (daily 6-month cache).  Exploratory and full backtests select a source via
-# the data_source= token in simulation commands.
+# the data_source= token in simulation commands.  Retired historical dataset
+# directories are intentionally not listed here so commands fail loudly instead
+# of reading stale local research data.
 DATA_SOURCE_PATHS: dict[str, Path] = {
     "daily": DATA_DIRECTORY / "stock_data",
     "2010": DATA_DIRECTORY / "stock_data_2010_yf_clean",
     "2010_yf_clean": DATA_DIRECTORY / "stock_data_2010_yf_clean",
-    "2014": DATA_DIRECTORY / "stock_data_2014",
-    "1994": DATA_DIRECTORY / "stock_data_1994",
     "1994_clean": DATA_DIRECTORY / "stock_data_1994_clean",
 }
 
@@ -68,10 +68,10 @@ SYMBOL_LIST_PATHS: dict[str, Path] = {
 def resolve_data_source(source_name: str | None) -> Path:
     """Return the stock data directory for the given source name.
 
-    Falls back to ``stock_data_2014`` when *source_name* is ``None``.
+    Falls back to ``stock_data_2010_yf_clean`` when *source_name* is ``None``.
     """
     if source_name is None:
-        source_name = "2014"
+        source_name = "2010"
     path = DATA_SOURCE_PATHS.get(source_name)
     if path is None:
         raise ValueError(

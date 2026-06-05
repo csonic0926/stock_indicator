@@ -75,3 +75,9 @@ cron_logs/
 local_data/current_status.json
 db.sqlite3
 db.sqlite3-journal
+
+# Retired/generated research datasets; keep live daily cache in data/stock_data/
+data/stock_data_1989/
+data/stock_data_1994/
+data/stock_data_2014/
+data/backtest_universe_alpha_vantage/

@@ -1,6 +1,6 @@
 {
-  "max_position_count": 6,
-  "starting_cash": 60000,
+  "max_position_count": 7,
+  "starting_cash": 70000,
   "margin": 1.5,
   "withdraw": 0,
   "start_date": "2010-01-01",
