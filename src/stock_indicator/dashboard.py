@@ -840,6 +840,16 @@ def _load_futu_open_trade_entries(
     )
     open_lots_by_symbol: dict[str, list[dict[str, Any]]] = {}
 
+    # Futu returns deals newest-first; FIFO lot matching below assumes
+    # chronological (oldest-first) order, so sort by deal time ascending.
+    # Without this, a SELL can consume a newer lot instead of the older one,
+    # leaving a stale earlier entry as the "open" lot and corrupting both the
+    # resolved entry_date (min_hold/max_hold gate) and remaining_quantity.
+    for time_column in ("create_time", "updated_time", "dealt_time", "deal_time"):
+        if time_column in deal_data.columns:
+            deal_data = deal_data.sort_values(time_column, kind="stable")
+            break
+
     for _, deal_row in deal_data.iterrows():
         code_text = str(_row_value(deal_row, ["code"]) or "")
         symbol = code_text.replace("US.", "")
