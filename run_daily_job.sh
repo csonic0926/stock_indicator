@@ -37,7 +37,11 @@ START_DATE="$("$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -c 'from datetime impo
 # display path; per-bucket frozen values made them misleading (the
 # global TP/SL ignored per-bucket sigma / fixed_sl), so they are no
 # longer invoked.
+set +e
 "$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage \
     multi_bucket_daily_signal "$PRODUCTION_CONFIG" "$LATEST_DATE" \
     2>&1 | tee -a "$LOG_DIRECTORY/cron_stdout.log" \
     >> "$DATE_LOG_DIRECTORY/$LATEST_DATE.log"
+SIGNAL_EXIT_CODE=$?
+set -e
+exit "$SIGNAL_EXIT_CODE"
