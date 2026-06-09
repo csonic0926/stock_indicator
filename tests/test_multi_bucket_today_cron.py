@@ -362,6 +362,69 @@ def test_compute_today_signals_emits_all_dashboard_exit_signals(
     ] == [True, True]
 
 
+def test_held_exit_debug_uses_bucket_exit_alpha_factor(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Held-position fallback exits should match bucket sell configuration."""
+
+    config = _build_test_config()
+    first_bucket = config.bucket_definitions["fish_head_production"]
+    first_bucket.exit_alpha_factor = 3.0
+    captured_exit_alpha_factors: list[float | None] = []
+
+    def fake_compute_signals_for_date(**_: Any) -> dict[str, Any]:
+        """Return no direct exits so held fallback debug is used."""
+
+        return {
+            "filtered_symbols": [],
+            "entry_signals": [],
+            "exit_signals": [],
+        }
+
+    def fake_filter_debug_values(
+        *_: Any,
+        exit_alpha_factor: float | None = None,
+    ) -> dict[str, bool]:
+        """Capture the production-only exit-alpha factor."""
+
+        captured_exit_alpha_factors.append(exit_alpha_factor)
+        return {"exit": False}
+
+    monkeypatch.setattr(
+        strategy,
+        "compute_signals_for_date",
+        fake_compute_signals_for_date,
+    )
+    monkeypatch.setattr(
+        multi_bucket_today.daily_job,
+        "filter_debug_values",
+        fake_filter_debug_values,
+    )
+
+    multi_bucket_today.compute_today_signals(
+        config=config,
+        eval_date=pandas.Timestamp("2026-06-05"),
+        held_positions={
+            "fish_head_vacuum_turn": [
+                {"symbol": "WMT", "entry_date": "2026-05-26"},
+            ],
+        },
+        state={
+            "schema_version": multi_bucket_today.SCHEMA_VERSION,
+            "winners": [],
+            "losers": [],
+            "pending_rolling": [],
+            "closed_trades": [],
+            "accepted_entries": [],
+        },
+        data_directory=tmp_path,
+        allowed_symbols=None,
+    )
+
+    assert captured_exit_alpha_factors[0] == 3.0
+
+
 def test_exit_alpha_factor_uses_recursive_simulation_formula() -> None:
     """Raw exit should use the same recursive EMA(alpha) as simulation."""
 

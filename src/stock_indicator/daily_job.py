@@ -482,6 +482,7 @@ def filter_debug_values(
     evaluation_date_string: str,
     buy_strategy_name: str,
     sell_strategy_name: str,
+    exit_alpha_factor: float | None = None,
 ) -> Dict[str, float | bool | None]:
     """Return indicator debug values for ``symbol_name`` on ``evaluation_date_string``.
 
@@ -621,6 +622,11 @@ def filter_debug_values(
             sell_arguments["near_range"] = sell_near_range
         if sell_above_range is not None:
             sell_arguments["above_range"] = sell_above_range
+        if (
+            sell_base_name == "ema_sma_cross_testing"
+            and exit_alpha_factor is not None
+        ):
+            sell_arguments["exit_alpha_factor"] = exit_alpha_factor
         sell_function(sell_price_history_frame, **sell_arguments)
         strategy.rename_signal_columns(
             sell_price_history_frame, sell_base_name, sell_strategy_name

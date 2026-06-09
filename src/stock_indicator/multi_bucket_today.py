@@ -1160,6 +1160,7 @@ def compute_today_signals(
                         eval_date_string,
                         bucket_def.buy_strategy_name,
                         bucket_def.sell_strategy_name,
+                        exit_alpha_factor=bucket_def.exit_alpha_factor,
                     )
                 except Exception:  # noqa: BLE001
                     debug_values = {}
