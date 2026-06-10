@@ -1404,6 +1404,7 @@ class StockShell(cmd.Cmd):
                             "ema_angle": entry_detail.ema_angle,
                             "d_ema_angle": entry_detail.d_ema_angle,
                             "slope_60": entry_detail.slope_60,
+                            "fuel_drawdown": entry_detail.fuel_drawdown,
                             "signal_bar_open": entry_detail.signal_bar_open,
                             "entry_price": entry_detail.price,
                             "exit_date": detail.date.date(),
@@ -1457,6 +1458,7 @@ class StockShell(cmd.Cmd):
                     "ema_angle",
                     "d_ema_angle",
                     "slope_60",
+                    "fuel_drawdown",
                     "signal_bar_open",
                     "entry_price",
                     "exit_date",
@@ -1958,6 +1960,18 @@ class StockShell(cmd.Cmd):
                     and raw_bucket["v_filter_threshold"] is not None
                     else None
                 ),
+                fuel_drawdown_max=(
+                    float(raw_bucket["fuel_drawdown_max"])
+                    if "fuel_drawdown_max" in raw_bucket
+                    and raw_bucket["fuel_drawdown_max"] is not None
+                    else None
+                ),
+                fuel_priority_threshold=(
+                    float(raw_bucket["fuel_priority_threshold"])
+                    if "fuel_priority_threshold" in raw_bucket
+                    and raw_bucket["fuel_priority_threshold"] is not None
+                    else None
+                ),
                 pre_cross_signal_lookback=bool(
                     raw_bucket.get("pre_cross_signal_lookback", False)
                 ),
@@ -2393,6 +2407,7 @@ class StockShell(cmd.Cmd):
                             "ema_angle": entry_detail.ema_angle,
                             "d_ema_angle": entry_detail.d_ema_angle,
                             "slope_60": entry_detail.slope_60,
+                            "fuel_drawdown": entry_detail.fuel_drawdown,
                             "signal_bar_open": entry_detail.signal_bar_open,
                             "entry_price": entry_detail.price,
                             "exit_date": detail.date.date(),
@@ -2451,6 +2466,7 @@ class StockShell(cmd.Cmd):
                     "ema_angle",
                     "d_ema_angle",
                     "slope_60",
+                    "fuel_drawdown",
                     "signal_bar_open",
                     "entry_price",
                     "exit_date",
@@ -3009,6 +3025,7 @@ class StockShell(cmd.Cmd):
                         "ema_angle": entry_detail.ema_angle,
                         "d_ema_angle": entry_detail.d_ema_angle,
                         "slope_60": entry_detail.slope_60,
+                        "fuel_drawdown": entry_detail.fuel_drawdown,
                         "signal_bar_open": entry_detail.signal_bar_open,
                         "exit_date": detail.date.date(),
                         "result": detail.result,
@@ -3057,6 +3074,7 @@ class StockShell(cmd.Cmd):
                 "ema_angle",
                 "d_ema_angle",
                 "slope_60",
+                "fuel_drawdown",
                 "signal_bar_open",
                 "exit_date",
                 "result",

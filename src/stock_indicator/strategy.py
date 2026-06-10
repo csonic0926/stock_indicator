@@ -582,6 +582,13 @@ class TradeDetail:
     # negative slope (post-vacuum), fish_tail on extreme positive (post-rally),
     # fish_body across the middle. Useful for slope-based regime filtering.
     slope_60: float | None = None
+    # Squeeze-fuel context: maximum drawdown (running-max basis, negative
+    # fraction) over the pre-surge window [T-60, T-11] bars before the
+    # signal date. Deep values (e.g. <= -0.15) mean the surge was preceded
+    # by a decline that trapped shorts — a forced-cover chain stands behind
+    # the rally (project_ft_fuel_drawdown_signal_2026_06_10). None when the
+    # symbol has fewer than 60 bars of history before the signal.
+    fuel_drawdown: float | None = None
     # Previous-bar (T-1) above_price_volume_ratio. Used by the V filter
     # (project_v_bottom_third_bucket_hypothesis_2026_05_08) to detect a
     # one-bar cross-down through a threshold — captures rapid V-bottom
@@ -715,6 +722,25 @@ class ComplexStrategySetDefinition:
     # slope_max which skip OUTSIDE the band.
     slope_dead_zone_min: float | None = None
     slope_dead_zone_max: float | None = None
+    # Squeeze-fuel gate (project_ft_fuel_drawdown_signal_2026_06_10): keep
+    # the candidate ONLY when fuel_drawdown <= this threshold — i.e. the
+    # pre-surge window [-60, -11] bars before the signal drew down at least
+    # this deep (threshold is negative, e.g. -0.15 requires a >=15% prior
+    # decline). Narrative: a blow-off surge preceded by a deep decline has
+    # trapped shorts behind it (forced-cover chain, fh-grade low freedom);
+    # a surge without prior decline is pure voluntary FOMO. Candidates with
+    # insufficient history (fuel_drawdown is None) are skipped — the gate
+    # demands positive evidence of fuel. When None, gate is inactive.
+    fuel_drawdown_max: float | None = None
+    # Squeeze-fuel contention boost (project_ft_fuel_drawdown_signal_
+    # 2026_06_10): candidates whose fuel_drawdown <= this threshold are
+    # promoted ONE bucket-priority tier in same-day slot contention.
+    # Unlike fuel_drawdown_max (hard gate — changes trade count and
+    # destroys the shallow-ft ballast), this only reorders contested
+    # days: every candidate still enters when slots are free, but when
+    # they are scarce the seat goes to the candidate with a forced-cover
+    # chain behind it. When None, no boost.
+    fuel_priority_threshold: float | None = None
     # V filter (project_v_bottom_third_bucket_hypothesis_2026_05_08): keep
     # the candidate ONLY when above_price_volume_ratio crosses DOWN
     # through the threshold within one bar — i.e. at signal date T,
@@ -1496,6 +1522,15 @@ def run_complex_simulation(
             trade_detail_pair = artifacts.trade_detail_pairs.get(trade)
             if trade_detail_pair is not None:
                 entry_detail = trade_detail_pair[0]
+                # Squeeze-fuel contention boost: promote one tier on
+                # contested days (see fuel_priority_threshold).
+                if (
+                    set_definitions[label].fuel_priority_threshold is not None
+                    and entry_detail.fuel_drawdown is not None
+                    and entry_detail.fuel_drawdown
+                    <= set_definitions[label].fuel_priority_threshold
+                ):
+                    bucket_priority_value -= 1
                 if priority_mode == "s4":
                     ratio_value = (
                         entry_detail.above_price_volume_ratio
@@ -2028,6 +2063,7 @@ def run_complex_simulation(
                         and _bucket_def_slope.slope_dead_zone_max is not None
                     )
                     or _bucket_def_slope.v_filter_threshold is not None
+                    or _bucket_def_slope.fuel_drawdown_max is not None
                 )
                 if _need_detail:
                     _detail_pair = artifacts_by_set[label].trade_detail_pairs.get(
@@ -2082,6 +2118,16 @@ def run_complex_simulation(
                                 or _entry_above_pv_prev is None
                                 or _entry_above_pv_prev <= _bucket_def_slope.v_filter_threshold
                                 or _entry_above_pv >= _bucket_def_slope.v_filter_threshold
+                            ):
+                                continue
+                        # Squeeze-fuel gate: keep ONLY when the pre-surge
+                        # window drew down at least to the threshold.
+                        if _bucket_def_slope.fuel_drawdown_max is not None:
+                            _entry_fuel_drawdown = _detail_pair[0].fuel_drawdown
+                            if (
+                                _entry_fuel_drawdown is None
+                                or _entry_fuel_drawdown
+                                > _bucket_def_slope.fuel_drawdown_max
                             ):
                                 continue
                 if use_evict_oldest and trade_sym:
@@ -5262,6 +5308,33 @@ def _generate_strategy_evaluation_artifacts(
             above_pv_previous_for_signal = _lookup_signal_value(
                 "above_price_volume_ratio_previous"
             )
+
+            def _compute_fuel_drawdown_for_signal() -> float | None:
+                """Maximum drawdown over the pre-surge window [T-60, T-11].
+
+                Running-max basis restarts at the window start so the value
+                measures the decline contained inside the window itself —
+                the squeeze fuel stored immediately before the surge — not
+                distance from an older all-time high. Returns None when the
+                symbol lacks 60 bars of history before the signal date.
+                """
+                if "close" not in price_data_frame.columns:
+                    return None
+                if signal_date not in price_data_frame.index:
+                    return None
+                signal_position = price_data_frame.index.get_loc(signal_date)
+                window_start = signal_position - 60
+                if window_start < 0:
+                    return None
+                window_closes = price_data_frame["close"].iloc[
+                    window_start : signal_position - 10
+                ]
+                if window_closes.empty or window_closes.isna().any():
+                    return None
+                running_maximum = window_closes.cummax()
+                return float((window_closes / running_maximum - 1.0).min())
+
+            fuel_drawdown_for_signal = _compute_fuel_drawdown_for_signal()
             sma_angle_confirmation_value = _lookup_confirmation_value("sma_angle")
             entry_detail = TradeDetail(
                 date=completed_trade.entry_date,
@@ -5288,6 +5361,7 @@ def _generate_strategy_evaluation_artifacts(
                 ema_angle=ema_angle_for_signal,
                 d_ema_angle=d_ema_angle_for_signal,
                 slope_60=slope_60_for_signal,
+                fuel_drawdown=fuel_drawdown_for_signal,
                 above_price_volume_ratio_previous=above_pv_previous_for_signal,
                 sma_angle_confirmation=sma_angle_confirmation_value,
                 signal_bar_open=completed_trade.signal_bar_open,
