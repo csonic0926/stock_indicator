@@ -2146,6 +2146,25 @@ class StockShell(cmd.Cmd):
                 f"{sl_desc}\n"
             )
 
+        # WR-synced sizing: entry margin tracks the portfolio's rolling win
+        # rate continuously (bounded Kelly). Mutually exclusive with the
+        # risk-score reduce margin overrides (enforced inside
+        # run_complex_simulation).
+        wr_synced_sizing_config: strategy.WRSyncedSizingConfig | None = None
+        raw_wr_synced_sizing = config_document.get("wr_synced_sizing")
+        if raw_wr_synced_sizing is not None:
+            wr_synced_sizing_config = strategy.WRSyncedSizingConfig(
+                window=int(raw_wr_synced_sizing.get("window", 40)),
+                wr_floor=float(raw_wr_synced_sizing.get("wr_floor", 0.45)),
+                wr_healthy=float(raw_wr_synced_sizing.get("wr_healthy", 0.60)),
+            )
+            self.stdout.write(
+                "WR-synced sizing: "
+                f"window={wr_synced_sizing_config.window} "
+                f"wr_floor={wr_synced_sizing_config.wr_floor} "
+                f"wr_healthy={wr_synced_sizing_config.wr_healthy}\n"
+            )
+
         export_state_at_date_ts: pandas.Timestamp | None = None
         exported_state_holder: Dict[str, Any] | None = None
         if export_state_on_date_str is not None:
@@ -2275,6 +2294,7 @@ class StockShell(cmd.Cmd):
                     symbol_first_eligible_trade_dates=(
                         symbol_first_eligible_trade_dates
                     ),
+                    wr_synced_sizing=wr_synced_sizing_config,
                 )
         except ValueError as error:
             self.stdout.write(f"{error}\n")

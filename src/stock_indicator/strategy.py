@@ -1300,6 +1300,86 @@ def _resolve_bucket_entry_priority(
     return priority_overrides_for_month.get(bucket_label, default_priority)
 
 
+@dataclass
+class WRSyncedSizingConfig:
+    """Continuously sync position sizing with the portfolio's rolling win rate.
+
+    The system's edge is alpha = (WR - 50%) x magnitude with an empirically
+    stable P/L ratio (~1.0-1.4 across buckets and decades), so the rolling
+    win rate is a sufficient statistic for edge health and sizing needs no
+    P&L input (project_wr_synced_sizing_design_2026_06_11). Each month's
+    entry margin becomes:
+
+        margin x clip((WR_rolling - wr_floor) / (wr_healthy - wr_floor), 0, 1)
+
+    where WR_rolling counts the last `window` trades CLOSED strictly before
+    the month starts (no lookahead). This is bounded Kelly: for even-money
+    bets Kelly stake is linear in WR. Anchors are not free parameters:
+    wr_floor ~ where the edge nets negative after friction, wr_healthy ~ the
+    system's long-run realized WR. Until `window` trades have closed, sizing
+    stays at full margin (warm-up). Because trade selection is slot-count
+    based and independent of capital, entries continue (at reduced or zero
+    size) while WR is depressed — the outcome stream never stops, so the
+    detector keeps observing and sizing recovers as soon as WR does
+    (built-in shadow mode; no separate restart mechanism needed).
+    """
+
+    window: int = 40
+    wr_floor: float = 0.45
+    wr_healthy: float = 0.60
+
+
+def compute_wr_synced_margin_overrides(
+    slot_trades: List["Trade"],
+    margin_multiplier: float,
+    sizing_config: WRSyncedSizingConfig,
+) -> dict[str, float]:
+    """Build a per-month margin override map from rolling win rate.
+
+    Returns entries only for months whose multiplier is below 1.0; months
+    absent from the map fall back to the configured full margin (matching
+    the margin_overrides contract in simulator.py).
+    """
+
+    if sizing_config.wr_healthy <= sizing_config.wr_floor:
+        raise ValueError(
+            "wr_synced_sizing requires wr_healthy > wr_floor, got "
+            f"floor={sizing_config.wr_floor} healthy={sizing_config.wr_healthy}"
+        )
+    closed_outcomes = sorted(
+        (trade.exit_date, 1.0 if trade.profit > 0 else 0.0)
+        for trade in slot_trades
+        if not math.isnan(trade.entry_price) and not math.isnan(trade.exit_price)
+    )
+    if not closed_outcomes:
+        return {}
+    first_month = min(trade.entry_date for trade in slot_trades).to_period("M")
+    last_month = max(exit_date for exit_date, _ in closed_outcomes).to_period("M")
+    overrides: dict[str, float] = {}
+    rolling_window: deque[float] = deque(maxlen=sizing_config.window)
+    outcome_index = 0
+    month = first_month
+    while month <= last_month:
+        month_start = month.to_timestamp()
+        # Absorb trades closed strictly BEFORE this month begins.
+        while (
+            outcome_index < len(closed_outcomes)
+            and closed_outcomes[outcome_index][0] < month_start
+        ):
+            rolling_window.append(closed_outcomes[outcome_index][1])
+            outcome_index += 1
+        if len(rolling_window) >= sizing_config.window:
+            rolling_win_rate = sum(rolling_window) / len(rolling_window)
+            multiplier = (rolling_win_rate - sizing_config.wr_floor) / (
+                sizing_config.wr_healthy - sizing_config.wr_floor
+            )
+            multiplier = min(1.0, max(0.0, multiplier))
+            if multiplier < 1.0:
+                overrides[str(month)] = margin_multiplier * multiplier
+        month += 1
+    return overrides
+
+
 def _is_symbol_trade_date_eligible(
     symbol_first_eligible_trade_dates: dict[str, datetime.date] | None,
     symbol_name: str,
@@ -1346,6 +1426,7 @@ def run_complex_simulation(
     margin_overrides: dict[str, float] | None = None,
     bucket_priority_overrides_by_month: dict[str, dict[str, int]] | None = None,
     symbol_first_eligible_trade_dates: dict[str, datetime.date] | None = None,
+    wr_synced_sizing: WRSyncedSizingConfig | None = None,
 ) -> ComplexSimulationMetrics:
     """Evaluate multiple strategy sets under a shared configuration.
 
@@ -1372,6 +1453,12 @@ def run_complex_simulation(
         raise ValueError("maximum_position_count must be positive")
     if not set_definitions:
         raise ValueError("set_definitions must not be empty")
+    if wr_synced_sizing is not None and margin_overrides:
+        raise ValueError(
+            "wr_synced_sizing cannot be combined with risk-score margin "
+            "overrides (reduce); both write per-month margins and their "
+            "per-trade gating semantics conflict"
+        )
 
     effective_interest_rate = (
         margin_interest_annual_rate if margin_multiplier != 1.0 else 0.0
@@ -2523,6 +2610,25 @@ def run_complex_simulation(
                 open_position_counts_by_set[label] += 1
                 accepted_trades_by_set[label].append(trade)
 
+    # WR-synced sizing: trade SELECTION above is slot-count based and does
+    # not read capital, so the accepted trade set and every outcome are
+    # sizing-invariant. The margin schedule can therefore be computed
+    # exactly here, after selection and before accounting, from the
+    # portfolio-wide stream of closed-trade outcomes. Month M's margin
+    # uses only trades closed strictly before M (no lookahead).
+    wr_margin_overrides: dict[str, float] | None = None
+    if wr_synced_sizing is not None:
+        all_accepted_slot_trades = [
+            adaptive_slot_trade_map.get(id(trade), trade)
+            for label in accepted_trades_by_set
+            for trade in accepted_trades_by_set[label]
+        ]
+        wr_margin_overrides = compute_wr_synced_margin_overrides(
+            all_accepted_slot_trades,
+            margin_multiplier,
+            wr_synced_sizing,
+        )
+
     metrics_by_set: Dict[str, StrategyMetrics] = {}
     aggregated_trades: List[Trade] = []
     aggregated_slot_trades: List[Trade] = []
@@ -2655,6 +2761,11 @@ def run_complex_simulation(
             if set_definitions[label].gate_enabled
             else None
         )
+        # WR-synced sizing is portfolio-level and ungated: it applies to
+        # every bucket's accounting (mutually exclusive with risk-reduce
+        # margin_overrides, enforced at entry to this function).
+        if wr_margin_overrides is not None:
+            bucket_margin_overrides = wr_margin_overrides
         # Per-bucket sim uses the GLOBAL maximum_position_count (not the
         # bucket's per-bucket cap) so position sizing matches actual
         # portfolio allocation. Previously this used the per-bucket cap
@@ -2791,6 +2902,12 @@ def run_complex_simulation(
             )
             else None
         )
+        # WR-synced sizing replaces the risk-reduce override map for the
+        # aggregated portfolio sim and applies to ALL trades (no gating).
+        aggregated_margin_overrides = margin_overrides
+        if wr_margin_overrides is not None:
+            aggregated_margin_overrides = wr_margin_overrides
+            aggregated_gated_arg = None
         aggregated_annual_returns = calculate_annual_returns(
             aggregated_slot_trades,
             starting_cash,
@@ -2804,7 +2921,7 @@ def run_complex_simulation(
                 aggregated_closing_price_series_by_symbol
             ),
             settlement_lag_days=1,
-            margin_overrides=margin_overrides,
+            margin_overrides=aggregated_margin_overrides,
             gated_trade_ids=aggregated_gated_arg,
         )
         aggregated_annual_trade_counts = calculate_annual_trade_counts(
@@ -2817,7 +2934,7 @@ def run_complex_simulation(
             withdraw_amount,
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
-            margin_overrides=margin_overrides,
+            margin_overrides=aggregated_margin_overrides,
             gated_trade_ids=aggregated_gated_arg,
         )
         aggregated_maximum_drawdown = calculate_max_drawdown(
@@ -2829,7 +2946,7 @@ def run_complex_simulation(
             withdraw_amount,
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
-            margin_overrides=margin_overrides,
+            margin_overrides=aggregated_margin_overrides,
             gated_trade_ids=aggregated_gated_arg,
         )
         last_exit_date = max(trade.exit_date for trade in aggregated_slot_trades)
