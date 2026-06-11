@@ -95,12 +95,22 @@ def test_production_config_uses_old_universe_risk_priority_path() -> None:
     assert config_document["max_position_count"] == 7
     assert config_document["starting_cash"] == 70_000
     assert bucket_by_label["fish_tail_production"]["max_hold"] == 7
+    # 4-bucket quad + priority ladder, live since 2026-06-11
+    # (commit 3fca84fb5): squeeze cap 2 / sigma 0.75 / fuel gate -0.15.
+    assert bucket_by_label["fish_tail_squeeze"]["max_positions"] == 2
+    assert bucket_by_label["fish_tail_squeeze"]["sigma"] == 0.75
+    assert bucket_by_label["fish_tail_squeeze"]["fuel_drawdown_max"] == -0.15
+    assert bucket_by_label["fish_head_production"]["priority"] == 1
+    assert bucket_by_label["fish_tail_squeeze"]["priority"] == 1
+    assert bucket_by_label["fish_tail_production"]["priority"] == 2
+    assert bucket_by_label["fish_head_b30_35"]["priority"] == 3
     assert config_document["risk_score_priority_overrides"] == {
         "scores": [25, 50],
         "priorities": {
             "fish_head_production": 1,
-            "fish_tail_production": 2,
-            "fish_head_b30_35": 3,
+            "fish_tail_squeeze": 2,
+            "fish_tail_production": 3,
+            "fish_head_b30_35": 4,
         },
     }
     assert config_document["symbol_seasoning"] == {

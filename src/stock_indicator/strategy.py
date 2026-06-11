@@ -582,6 +582,10 @@ class TradeDetail:
     # negative slope (post-vacuum), fish_tail on extreme positive (post-rally),
     # fish_body across the middle. Useful for slope-based regime filtering.
     slope_60: float | None = None
+    # Phantom-gate flag (action 2): this entry occupied its slot and ran
+    # to exit normally, but deployed zero capital because the ft-family
+    # regime score was above threshold at entry time.
+    phantom: bool = False
     # Squeeze-fuel context: maximum drawdown (running-max basis, negative
     # fraction) over the pre-surge window [T-60, T-11] bars before the
     # signal date. Deep values (e.g. <= -0.15) mean the surge was preceded
@@ -1337,9 +1341,22 @@ class WRSyncedSizingConfig:
     # (Baker-McHale shrinkage / de Prado bet-sizing-in-z, see
     # project_wr_synced_sizing_design_2026_06_11). wr_floor/wr_healthy
     # are ignored in z_score mode and vice versa.
+    # "expectancy_z": ramp in the t-like statistic of rolling expectancy
+    # z = mean(r) / (sigma_ref / sqrt(n)) where sigma_ref is the std of
+    # the `sigma_ref_window` trades BEFORE the rolling window (a frozen
+    # baseline). Normalizing by the current window's own std would make
+    # the detector vol-invariant and deaf exactly when loss magnitude
+    # explodes (2008: window mean -1~-3% but window std ~10% -> z -0.4);
+    # the frozen-sigma form keeps abnormal magnitude in the numerator.
+    # This channel sees magnitude events (crash) and ignores frequency
+    # events (grind); it gives mania a pass because expectancy there is
+    # strongly positive. "dual_z": min(z_score, expectancy_z) multipliers
+    # — frequency channel guards the grind, magnitude channel guards the
+    # crash tail, both pass mania. Same z_floor/z_healthy for both.
     curve: str = "linear"
     z_floor: float = -3.0
     z_healthy: float = -1.5
+    sigma_ref_window: int = 252
 
 
 def compute_wr_synced_margin_overrides(
@@ -1354,9 +1371,10 @@ def compute_wr_synced_margin_overrides(
     the margin_overrides contract in simulator.py).
     """
 
-    if sizing_config.curve not in ("linear", "z_score"):
+    valid_curves = ("linear", "z_score", "expectancy_z", "dual_z")
+    if sizing_config.curve not in valid_curves:
         raise ValueError(
-            f"wr_synced_sizing.curve must be 'linear' or 'z_score', "
+            f"wr_synced_sizing.curve must be one of {valid_curves}, "
             f"got {sizing_config.curve!r}"
         )
     if sizing_config.curve == "linear":
@@ -1370,17 +1388,29 @@ def compute_wr_synced_margin_overrides(
             "wr_synced_sizing requires z_healthy > z_floor, got "
             f"floor={sizing_config.z_floor} healthy={sizing_config.z_healthy}"
         )
+
+    def _ramp(value: float, floor: float, healthy: float) -> float:
+        return min(1.0, max(0.0, (value - floor) / (healthy - floor)))
+
     closed_outcomes = sorted(
-        (trade.exit_date, 1.0 if trade.profit > 0 else 0.0)
+        (
+            trade.exit_date,
+            1.0 if trade.profit > 0 else 0.0,
+            trade.profit / trade.entry_price if trade.entry_price > 0 else 0.0,
+        )
         for trade in slot_trades
         if not math.isnan(trade.entry_price) and not math.isnan(trade.exit_price)
     )
     if not closed_outcomes:
         return {}
     first_month = min(trade.entry_date for trade in slot_trades).to_period("M")
-    last_month = max(exit_date for exit_date, _ in closed_outcomes).to_period("M")
+    last_month = max(exit_date for exit_date, _, _ in closed_outcomes).to_period("M")
+    uses_expectancy = sizing_config.curve in ("expectancy_z", "dual_z")
     overrides: dict[str, float] = {}
-    rolling_window: deque[float] = deque(maxlen=sizing_config.window)
+    rolling_wins: deque[float] = deque(maxlen=sizing_config.window)
+    # Full chronological return history; the trailing slice before the
+    # rolling window provides the frozen baseline sigma.
+    return_history: list[float] = []
     outcome_index = 0
     month = first_month
     while month <= last_month:
@@ -1390,30 +1420,133 @@ def compute_wr_synced_margin_overrides(
             outcome_index < len(closed_outcomes)
             and closed_outcomes[outcome_index][0] < month_start
         ):
-            rolling_window.append(closed_outcomes[outcome_index][1])
+            rolling_wins.append(closed_outcomes[outcome_index][1])
+            return_history.append(closed_outcomes[outcome_index][2])
             outcome_index += 1
-        if len(rolling_window) >= sizing_config.window:
-            rolling_win_rate = sum(rolling_window) / len(rolling_window)
-            if sizing_config.curve == "z_score":
+        window_size = len(rolling_wins)
+        if window_size >= sizing_config.window:
+            rolling_win_rate = sum(rolling_wins) / window_size
+            multipliers: list[float] = []
+            if sizing_config.curve == "linear":
+                multipliers.append(
+                    _ramp(
+                        rolling_win_rate,
+                        sizing_config.wr_floor,
+                        sizing_config.wr_healthy,
+                    )
+                )
+            if sizing_config.curve in ("z_score", "dual_z"):
                 # Binomial z-statistic of the deviation from the 50%
                 # breakeven null: sigma(WR) under the null = 0.5/sqrt(n).
                 z_statistic = (
-                    (rolling_win_rate - 0.5)
-                    * math.sqrt(len(rolling_window))
-                    / 0.5
+                    (rolling_win_rate - 0.5) * math.sqrt(window_size) / 0.5
                 )
-                multiplier = (z_statistic - sizing_config.z_floor) / (
-                    sizing_config.z_healthy - sizing_config.z_floor
+                multipliers.append(
+                    _ramp(
+                        z_statistic,
+                        sizing_config.z_floor,
+                        sizing_config.z_healthy,
+                    )
                 )
-            else:
-                multiplier = (rolling_win_rate - sizing_config.wr_floor) / (
-                    sizing_config.wr_healthy - sizing_config.wr_floor
-                )
-            multiplier = min(1.0, max(0.0, multiplier))
-            if multiplier < 1.0:
-                overrides[str(month)] = margin_multiplier * multiplier
+            if uses_expectancy:
+                reference_returns = return_history[
+                    -(window_size + sizing_config.sigma_ref_window) : -window_size
+                ]
+                if len(reference_returns) >= sizing_config.sigma_ref_window:
+                    reference_mean = sum(reference_returns) / len(reference_returns)
+                    reference_sigma = math.sqrt(
+                        sum(
+                            (value - reference_mean) ** 2
+                            for value in reference_returns
+                        )
+                        / (len(reference_returns) - 1)
+                    )
+                    if reference_sigma > 0:
+                        window_returns = return_history[-window_size:]
+                        window_mean = sum(window_returns) / window_size
+                        expectancy_z = window_mean / (
+                            reference_sigma / math.sqrt(window_size)
+                        )
+                        multipliers.append(
+                            _ramp(
+                                expectancy_z,
+                                sizing_config.z_floor,
+                                sizing_config.z_healthy,
+                            )
+                        )
+            if multipliers:
+                multiplier = min(multipliers)
+                if multiplier < 1.0:
+                    overrides[str(month)] = margin_multiplier * multiplier
         month += 1
     return overrides
+
+
+@dataclass
+class PhantomScoreGateConfig:
+    """Regime phantom gate for the fish_tail family (action 2, 2026-06-12).
+
+    A fuzzy score over the sensor bucket's last `window` closed trades
+    (real AND phantom — the phantom stream keeps the sensor alive so the
+    system notices recovery) decides whether new entries in the gated
+    buckets deploy capital. Entries above the threshold become PHANTOM:
+    they occupy their slot, run to exit under normal strategy rules and
+    feed the rolling pools and this score, but carry zero capital. Slot
+    occupancy is preserved deliberately — the shallow-ft ballast effect
+    (blocking marginal entries elsewhere) survives while regime exposure
+    goes to zero. Score is event-driven: computed at each gated entry
+    from closes strictly before that entry's date (no lookahead, no
+    calendar batching).
+
+        score = w_wr   * clip((0.60 - WR) * 10, 0, 1)
+              + w_notp * clip((noTP_share - 0.80) / 0.20, 0, 1)
+              + w_mh   * clip((mh_share - 0.40) / 0.20, 0, 1)
+
+    Anchors come from the system's own phenomenology: 0.60 = long-run
+    signal WR (healthy), 0.50 = expectancy-zero WR; 0.80 = healthy ft
+    no-TP share (TP fires ~20% of trades under sigma=0); 0.40/0.60 =
+    healthy/degraded max_hold share (weakly discriminating — default
+    weight 0, kept for ablation).
+    """
+
+    sensor_bucket: str = "fish_tail_production"
+    gated_buckets: tuple[str, ...] = (
+        "fish_tail_production",
+        "fish_tail_squeeze",
+    )
+    window: int = 12
+    score_threshold: float = 0.5
+    weight_wr: float = 0.5
+    weight_no_tp: float = 0.5
+    weight_max_hold: float = 0.0
+
+
+def compute_regime_phantom_score(
+    outcomes: list[tuple[bool, str]],
+    gate_config: PhantomScoreGateConfig,
+) -> float:
+    """Score the sensor bucket's recent closed trades (win, exit_reason)."""
+
+    if not outcomes:
+        return 0.0
+    count = len(outcomes)
+    win_rate = sum(1.0 for win, _ in outcomes if win) / count
+    no_tp_share = (
+        sum(1.0 for _, reason in outcomes if "take_profit" not in reason)
+        / count
+    )
+    max_hold_share = (
+        sum(1.0 for _, reason in outcomes if reason == "max_hold") / count
+    )
+
+    def _ramp(value: float, healthy: float, saturated: float) -> float:
+        return min(1.0, max(0.0, (value - healthy) / (saturated - healthy)))
+
+    return (
+        gate_config.weight_wr * _ramp(-win_rate, -0.60, -0.50)
+        + gate_config.weight_no_tp * _ramp(no_tp_share, 0.80, 1.00)
+        + gate_config.weight_max_hold * _ramp(max_hold_share, 0.40, 0.60)
+    )
 
 
 def _is_symbol_trade_date_eligible(
@@ -1463,6 +1596,7 @@ def run_complex_simulation(
     bucket_priority_overrides_by_month: dict[str, dict[str, int]] | None = None,
     symbol_first_eligible_trade_dates: dict[str, datetime.date] | None = None,
     wr_synced_sizing: WRSyncedSizingConfig | None = None,
+    phantom_score_gate: PhantomScoreGateConfig | None = None,
 ) -> ComplexSimulationMetrics:
     """Evaluate multiple strategy sets under a shared configuration.
 
@@ -1494,6 +1628,19 @@ def run_complex_simulation(
             "wr_synced_sizing cannot be combined with risk-score margin "
             "overrides (reduce); both write per-month margins and their "
             "per-trade gating semantics conflict"
+        )
+    if phantom_score_gate is not None and (
+        margin_overrides or wr_synced_sizing is not None
+    ):
+        raise ValueError(
+            "phantom_score_gate cannot be combined with risk-score margin "
+            "reduce or wr_synced_sizing; all three write margin overrides "
+            "with conflicting per-trade gating semantics"
+        )
+    if phantom_score_gate is not None and adaptive_tp_sl is None:
+        raise ValueError(
+            "phantom_score_gate requires adaptive TP/SL mode (its sensor "
+            "reads adaptive exit reasons)"
         )
 
     effective_interest_rate = (
@@ -1729,6 +1876,10 @@ def run_complex_simulation(
     # here and only flushed into adaptive_closed_winners / adaptive_closed_losers
     # when an entry event on a LATER date is processed.
     pending_rolling_updates: list[tuple[pandas.Timestamp, float]] = []
+    # Phantom-gate sensor stream: (close_date, win, exit_reason) of the
+    # sensor bucket's adaptive closes, in close order. Consulted at each
+    # gated entry with strictly-earlier closes only (no lookahead).
+    phantom_sensor_closes: list[tuple[pandas.Timestamp, bool, str]] = []
     # For evict_oldest: track the latest active signal date for each open
     # trade.  This is intentionally separate from Trade.entry_date: accounting
     # and holding-period statistics keep the original entry date, while
@@ -2099,6 +2250,23 @@ def run_complex_simulation(
                         open_symbol_counts[closed_sym] = max(
                             0, open_symbol_counts[closed_sym] - 1
                         )
+                    # Phantom-gate sensor stream: record the SENSOR
+                    # bucket's adaptive (actual exit semantics, TP/SL
+                    # included) outcome. Phantom trades are normal loop
+                    # trades, so they feed this too — the sensor stays
+                    # alive while capital is parked.
+                    if (
+                        phantom_score_gate is not None
+                        and close_label == phantom_score_gate.sensor_bucket
+                    ):
+                        _sensor_trade = adaptive_trade_map.get(orig_trade_id)
+                        if _sensor_trade is not None:
+                            phantom_sensor_closes.append((
+                                close_date,
+                                _sensor_trade.exit_price
+                                > _sensor_trade.entry_price,
+                                _sensor_trade.exit_reason,
+                            ))
                     # Update rolling stats using the RAW (original) trade's
                     # result, not the adaptive-adjusted one.  This ensures
                     # the rolling window reflects true signal quality, not
@@ -2556,6 +2724,35 @@ def run_complex_simulation(
                 if max_same_symbol < 999:
                     open_symbol_counts[trade_sym] = open_symbol_counts.get(trade_sym, 0) + 1
                 accepted_trades_by_set[label].append(adjusted)
+                # Phantom gate (action 2, adaptive path): the trade is
+                # fully accepted — slot taken, runs to exit, feeds the
+                # rolling pools and the sensor — but is flagged to carry
+                # zero capital when the ft-family regime score is above
+                # threshold. Sensor reads closes strictly before this
+                # entry date (no lookahead).
+                if (
+                    phantom_score_gate is not None
+                    and label in phantom_score_gate.gated_buckets
+                ):
+                    recent_sensor_outcomes = [
+                        (sensor_win, sensor_reason)
+                        for sensor_close_date, sensor_win, sensor_reason
+                        in phantom_sensor_closes
+                        if sensor_close_date < event_date
+                    ][-phantom_score_gate.window:]
+                    if len(
+                        recent_sensor_outcomes
+                    ) >= phantom_score_gate.window and (
+                        compute_regime_phantom_score(
+                            recent_sensor_outcomes, phantom_score_gate
+                        )
+                        > phantom_score_gate.score_threshold
+                    ):
+                        _phantom_pair = artifacts_by_set[
+                            label
+                        ].trade_detail_pairs.get(trade)
+                        if _phantom_pair is not None:
+                            _phantom_pair[0].phantom = True
 
                 # Schedule close event.
                 adaptive_close_counter += 1
@@ -2645,6 +2842,37 @@ def run_complex_simulation(
                 open_trade_keys[trade_key] = label
                 open_position_counts_by_set[label] += 1
                 accepted_trades_by_set[label].append(trade)
+                # Phantom gate (action 2): the trade is fully accepted —
+                # slot taken, runs to exit, feeds rolling pools and the
+                # sensor — but is flagged to carry zero capital when the
+                # ft-family regime score is above threshold. Sensor reads
+                # closes strictly before this entry date (no lookahead).
+                if (
+                    phantom_score_gate is not None
+                    and label in phantom_score_gate.gated_buckets
+                ):
+                    recent_sensor_outcomes = [
+                        (sensor_win, sensor_reason)
+                        for sensor_close_date, sensor_win, sensor_reason
+                        in phantom_sensor_closes
+                        if sensor_close_date < event_date
+                    ][-phantom_score_gate.window:]
+                    if len(
+                        recent_sensor_outcomes
+                    ) >= phantom_score_gate.window and (
+                        compute_regime_phantom_score(
+                            recent_sensor_outcomes, phantom_score_gate
+                        )
+                        > phantom_score_gate.score_threshold
+                    ):
+                        _phantom_original = adaptive_original_trade.get(
+                            id(trade), trade
+                        )
+                        _phantom_pair = artifacts_by_set[
+                            label
+                        ].trade_detail_pairs.get(_phantom_original)
+                        if _phantom_pair is not None:
+                            _phantom_pair[0].phantom = True
 
     # WR-synced sizing: trade SELECTION above is slot-count based and does
     # not read capital, so the accepted trade set and every outcome are
@@ -2666,6 +2894,9 @@ def run_complex_simulation(
         )
 
     metrics_by_set: Dict[str, StrategyMetrics] = {}
+    # Slot-trade ids flagged phantom (zero capital) across all buckets,
+    # consumed by the aggregated portfolio accounting.
+    aggregated_phantom_slot_trade_ids: set[int] = set()
     aggregated_trades: List[Trade] = []
     aggregated_slot_trades: List[Trade] = []
     # Trade-id set of slot trades from gated buckets only. Used by the
@@ -2693,6 +2924,7 @@ def run_complex_simulation(
         holding_period_list: List[int] = []
         detail_pairs_with_label: List[Tuple[TradeDetail, TradeDetail]] = []
         filtered_trade_symbol_lookup: Dict[Trade, str] = {}
+        phantom_slot_trade_ids_for_set: set[int] = set()
 
         for trade in trades_for_set:
             trade_profit_list.append(trade.profit)
@@ -2709,6 +2941,10 @@ def run_complex_simulation(
                 original_trade, ""
             )
             entry_detail, exit_detail = artifacts.trade_detail_pairs[original_trade]
+            if entry_detail.phantom:
+                phantom_slot_trade_ids_for_set.add(
+                    id(adaptive_slot_trade_map.get(id(trade), trade))
+                )
             # When adaptive TP/SL modified the trade, update the exit detail
             # to reflect the adjusted exit date, price, reason, and holding.
             _applied = adaptive_tp_sl_applied.get(id(trade))
@@ -2802,6 +3038,28 @@ def run_complex_simulation(
         # margin_overrides, enforced at entry to this function).
         if wr_margin_overrides is not None:
             bucket_margin_overrides = wr_margin_overrides
+        # Phantom gate: flagged trades get a zero slot weight in every
+        # month while all other trades keep the configured margin. The
+        # all-months zero map + gated_trade_ids reuses the simulator's
+        # existing per-trade margin machinery.
+        bucket_gated_trade_ids: set[int] | None = None
+        if phantom_slot_trade_ids_for_set and slot_trades_for_set:
+            phantom_span_start = min(
+                t.entry_date for t in slot_trades_for_set
+            ).to_period("M")
+            phantom_span_end = max(
+                t.exit_date for t in slot_trades_for_set
+            ).to_period("M")
+            bucket_margin_overrides = {
+                str(month): 0.0
+                for month in pandas.period_range(
+                    phantom_span_start, phantom_span_end, freq="M"
+                )
+            }
+            bucket_gated_trade_ids = phantom_slot_trade_ids_for_set
+            aggregated_phantom_slot_trade_ids.update(
+                phantom_slot_trade_ids_for_set
+            )
         # Per-bucket sim uses the GLOBAL maximum_position_count (not the
         # bucket's per-bucket cap) so position sizing matches actual
         # portfolio allocation. Previously this used the per-bucket cap
@@ -2822,6 +3080,7 @@ def run_complex_simulation(
             closing_price_series_by_symbol=artifacts.closing_price_series_by_symbol,
             settlement_lag_days=1,
             margin_overrides=bucket_margin_overrides,
+            gated_trade_ids=bucket_gated_trade_ids,
         )
         annual_trade_counts = calculate_annual_trade_counts(trades_for_set)
         final_balance = simulate_portfolio_balance(
@@ -2832,6 +3091,7 @@ def run_complex_simulation(
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
             margin_overrides=bucket_margin_overrides,
+            gated_trade_ids=bucket_gated_trade_ids,
         )
         # Propagate commission data from Trade objects (set by
         # simulate_portfolio_balance) back to the corresponding TradeDetails.
@@ -2855,6 +3115,7 @@ def run_complex_simulation(
             margin_multiplier=margin_multiplier,
             margin_interest_annual_rate=effective_interest_rate,
             margin_overrides=bucket_margin_overrides,
+            gated_trade_ids=bucket_gated_trade_ids,
         )
         if slot_trades_for_set:
             last_trade_exit_date = max(
@@ -2944,6 +3205,22 @@ def run_complex_simulation(
         if wr_margin_overrides is not None:
             aggregated_margin_overrides = wr_margin_overrides
             aggregated_gated_arg = None
+        # Phantom gate: zero slot weight for flagged trades only
+        # (mutually exclusive with reduce/wr-sizing, enforced upstream).
+        if aggregated_phantom_slot_trade_ids:
+            phantom_span_start = min(
+                t.entry_date for t in aggregated_slot_trades
+            ).to_period("M")
+            phantom_span_end = max(
+                t.exit_date for t in aggregated_slot_trades
+            ).to_period("M")
+            aggregated_margin_overrides = {
+                str(month): 0.0
+                for month in pandas.period_range(
+                    phantom_span_start, phantom_span_end, freq="M"
+                )
+            }
+            aggregated_gated_arg = aggregated_phantom_slot_trade_ids
         aggregated_annual_returns = calculate_annual_returns(
             aggregated_slot_trades,
             starting_cash,

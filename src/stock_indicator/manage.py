@@ -1405,6 +1405,7 @@ class StockShell(cmd.Cmd):
                             "d_ema_angle": entry_detail.d_ema_angle,
                             "slope_60": entry_detail.slope_60,
                             "fuel_drawdown": entry_detail.fuel_drawdown,
+                            "phantom": entry_detail.phantom,
                             "signal_bar_open": entry_detail.signal_bar_open,
                             "entry_price": entry_detail.price,
                             "exit_date": detail.date.date(),
@@ -1459,6 +1460,7 @@ class StockShell(cmd.Cmd):
                     "d_ema_angle",
                     "slope_60",
                     "fuel_drawdown",
+                    "phantom",
                     "signal_bar_open",
                     "entry_price",
                     "exit_date",
@@ -2182,6 +2184,44 @@ class StockShell(cmd.Cmd):
                 f"{curve_description}\n"
             )
 
+        # Phantom score gate (action 2): ft-family regime score decides
+        # whether gated-bucket entries deploy capital (slot still taken).
+        phantom_score_gate_config: strategy.PhantomScoreGateConfig | None = None
+        raw_phantom_gate = config_document.get("ft_family_phantom_gate")
+        if raw_phantom_gate is not None:
+            phantom_score_gate_config = strategy.PhantomScoreGateConfig(
+                sensor_bucket=str(
+                    raw_phantom_gate.get(
+                        "sensor_bucket", "fish_tail_production"
+                    )
+                ),
+                gated_buckets=tuple(
+                    raw_phantom_gate.get(
+                        "gated_buckets",
+                        ["fish_tail_production", "fish_tail_squeeze"],
+                    )
+                ),
+                window=int(raw_phantom_gate.get("window", 12)),
+                score_threshold=float(
+                    raw_phantom_gate.get("score_threshold", 0.5)
+                ),
+                weight_wr=float(raw_phantom_gate.get("weight_wr", 0.5)),
+                weight_no_tp=float(raw_phantom_gate.get("weight_no_tp", 0.5)),
+                weight_max_hold=float(
+                    raw_phantom_gate.get("weight_max_hold", 0.0)
+                ),
+            )
+            self.stdout.write(
+                "Phantom score gate: "
+                f"sensor={phantom_score_gate_config.sensor_bucket} "
+                f"gated={list(phantom_score_gate_config.gated_buckets)} "
+                f"window={phantom_score_gate_config.window} "
+                f"threshold={phantom_score_gate_config.score_threshold} "
+                f"weights=(wr={phantom_score_gate_config.weight_wr}, "
+                f"no_tp={phantom_score_gate_config.weight_no_tp}, "
+                f"max_hold={phantom_score_gate_config.weight_max_hold})\n"
+            )
+
         export_state_at_date_ts: pandas.Timestamp | None = None
         exported_state_holder: Dict[str, Any] | None = None
         if export_state_on_date_str is not None:
@@ -2312,6 +2352,7 @@ class StockShell(cmd.Cmd):
                         symbol_first_eligible_trade_dates
                     ),
                     wr_synced_sizing=wr_synced_sizing_config,
+                    phantom_score_gate=phantom_score_gate_config,
                 )
         except ValueError as error:
             self.stdout.write(f"{error}\n")
@@ -2445,6 +2486,7 @@ class StockShell(cmd.Cmd):
                             "d_ema_angle": entry_detail.d_ema_angle,
                             "slope_60": entry_detail.slope_60,
                             "fuel_drawdown": entry_detail.fuel_drawdown,
+                            "phantom": entry_detail.phantom,
                             "signal_bar_open": entry_detail.signal_bar_open,
                             "entry_price": entry_detail.price,
                             "exit_date": detail.date.date(),
@@ -2504,6 +2546,7 @@ class StockShell(cmd.Cmd):
                     "d_ema_angle",
                     "slope_60",
                     "fuel_drawdown",
+                    "phantom",
                     "signal_bar_open",
                     "entry_price",
                     "exit_date",
@@ -3063,6 +3106,7 @@ class StockShell(cmd.Cmd):
                         "d_ema_angle": entry_detail.d_ema_angle,
                         "slope_60": entry_detail.slope_60,
                         "fuel_drawdown": entry_detail.fuel_drawdown,
+                        "phantom": entry_detail.phantom,
                         "signal_bar_open": entry_detail.signal_bar_open,
                         "exit_date": detail.date.date(),
                         "result": detail.result,
@@ -3112,6 +3156,7 @@ class StockShell(cmd.Cmd):
                 "d_ema_angle",
                 "slope_60",
                 "fuel_drawdown",
+                "phantom",
                 "signal_bar_open",
                 "exit_date",
                 "result",
