@@ -97,3 +97,43 @@ def test_invalid_anchor_ordering_raises() -> None:
     trades = daily_trades("2020-01-02", [True] * 12)
     with pytest.raises(ValueError):
         compute_wr_synced_margin_overrides(trades, 1.5, config)
+
+
+def test_z_curve_ignores_insignificant_dips() -> None:
+    config = WRSyncedSizingConfig(window=40, curve="z_score")
+    # WR 0.45 over 40 trades: z = (-0.05)*sqrt(40)/0.5 = -0.63 — noise.
+    outcomes = [True] * 18 + [False] * 22
+    trades = daily_trades("2020-01-01", outcomes)
+    trades.append(make_trade("2020-03-02", "2020-03-09", True))
+    assert compute_wr_synced_margin_overrides(trades, 1.5, config) == {}
+
+
+def test_z_curve_scales_on_significant_degradation() -> None:
+    config = WRSyncedSizingConfig(window=40, curve="z_score")
+    # WR 0.30 over 40 trades: z = (-0.20)*sqrt(40)/0.5 = -2.5298
+    # multiplier = (z - (-3.0)) / (-1.5 - (-3.0)) = 0.4701/1.5 = 0.3134
+    outcomes = [True] * 12 + [False] * 28
+    trades = daily_trades("2020-01-01", outcomes)
+    trades.append(make_trade("2020-03-02", "2020-03-09", True))
+    overrides = compute_wr_synced_margin_overrides(trades, 1.5, config)
+    import math
+    z = (0.30 - 0.5) * math.sqrt(40) / 0.5
+    expected = 1.5 * (z - (-3.0)) / 1.5
+    assert overrides["2020-03"] == pytest.approx(expected)
+
+
+def test_z_curve_zeroes_below_floor() -> None:
+    config = WRSyncedSizingConfig(window=40, curve="z_score")
+    # WR 0.20: z = -3.79 < z_floor -> margin 0.
+    outcomes = [True] * 8 + [False] * 32
+    trades = daily_trades("2020-01-01", outcomes)
+    trades.append(make_trade("2020-03-02", "2020-03-09", True))
+    overrides = compute_wr_synced_margin_overrides(trades, 1.5, config)
+    assert overrides["2020-03"] == pytest.approx(0.0)
+
+
+def test_invalid_curve_name_raises() -> None:
+    config = WRSyncedSizingConfig(window=10, curve="sigmoid")
+    trades = daily_trades("2020-01-02", [True] * 12)
+    with pytest.raises(ValueError):
+        compute_wr_synced_margin_overrides(trades, 1.5, config)

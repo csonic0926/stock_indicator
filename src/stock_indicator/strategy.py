@@ -1327,6 +1327,19 @@ class WRSyncedSizingConfig:
     window: int = 40
     wr_floor: float = 0.45
     wr_healthy: float = 0.60
+    # Sizing curve. "linear": ramp in raw WR between wr_floor and
+    # wr_healthy (original form). "z_score": ramp in the binomial
+    # z-statistic z = (WR - 0.5) * sqrt(n) / 0.5 between z_floor and
+    # z_healthy — sizing reacts to statistical EVIDENCE of edge
+    # degradation, not to raw WR wiggle. With window=40 the WR estimate
+    # carries ~7.9% sampling noise, wider than half the raw ramp; the
+    # z curve stays at full margin until the deviation is significant
+    # (Baker-McHale shrinkage / de Prado bet-sizing-in-z, see
+    # project_wr_synced_sizing_design_2026_06_11). wr_floor/wr_healthy
+    # are ignored in z_score mode and vice versa.
+    curve: str = "linear"
+    z_floor: float = -3.0
+    z_healthy: float = -1.5
 
 
 def compute_wr_synced_margin_overrides(
@@ -1341,10 +1354,21 @@ def compute_wr_synced_margin_overrides(
     the margin_overrides contract in simulator.py).
     """
 
-    if sizing_config.wr_healthy <= sizing_config.wr_floor:
+    if sizing_config.curve not in ("linear", "z_score"):
         raise ValueError(
-            "wr_synced_sizing requires wr_healthy > wr_floor, got "
-            f"floor={sizing_config.wr_floor} healthy={sizing_config.wr_healthy}"
+            f"wr_synced_sizing.curve must be 'linear' or 'z_score', "
+            f"got {sizing_config.curve!r}"
+        )
+    if sizing_config.curve == "linear":
+        if sizing_config.wr_healthy <= sizing_config.wr_floor:
+            raise ValueError(
+                "wr_synced_sizing requires wr_healthy > wr_floor, got "
+                f"floor={sizing_config.wr_floor} healthy={sizing_config.wr_healthy}"
+            )
+    elif sizing_config.z_healthy <= sizing_config.z_floor:
+        raise ValueError(
+            "wr_synced_sizing requires z_healthy > z_floor, got "
+            f"floor={sizing_config.z_floor} healthy={sizing_config.z_healthy}"
         )
     closed_outcomes = sorted(
         (trade.exit_date, 1.0 if trade.profit > 0 else 0.0)
@@ -1370,9 +1394,21 @@ def compute_wr_synced_margin_overrides(
             outcome_index += 1
         if len(rolling_window) >= sizing_config.window:
             rolling_win_rate = sum(rolling_window) / len(rolling_window)
-            multiplier = (rolling_win_rate - sizing_config.wr_floor) / (
-                sizing_config.wr_healthy - sizing_config.wr_floor
-            )
+            if sizing_config.curve == "z_score":
+                # Binomial z-statistic of the deviation from the 50%
+                # breakeven null: sigma(WR) under the null = 0.5/sqrt(n).
+                z_statistic = (
+                    (rolling_win_rate - 0.5)
+                    * math.sqrt(len(rolling_window))
+                    / 0.5
+                )
+                multiplier = (z_statistic - sizing_config.z_floor) / (
+                    sizing_config.z_healthy - sizing_config.z_floor
+                )
+            else:
+                multiplier = (rolling_win_rate - sizing_config.wr_floor) / (
+                    sizing_config.wr_healthy - sizing_config.wr_floor
+                )
             multiplier = min(1.0, max(0.0, multiplier))
             if multiplier < 1.0:
                 overrides[str(month)] = margin_multiplier * multiplier
