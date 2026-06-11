@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas
+import pytest
 
 from stock_indicator import multi_bucket_today, strategy, symbol_seasoning
 
@@ -499,3 +500,67 @@ def test_exit_alpha_factor_uses_recursive_simulation_formula() -> None:
             "ema_sma_cross_testing_raw_exit_signal",
         ]
     ) is True
+
+
+def test_fuel_gate_blocks_shallow_and_missing_fuel() -> None:
+    bucket_def = strategy.ComplexStrategySetDefinition(
+        label="fish_tail_squeeze",
+        buy_strategy_name="b",
+        sell_strategy_name="s",
+        strategy_identifier="fish_tail_blow_off_top",
+        fuel_drawdown_max=-0.15,
+    )
+    # Deep pre-surge drawdown passes.
+    assert multi_bucket_today.passes_per_bucket_entry_filters(
+        bucket_def, slope_60=0.2, near_delta=0.0, fuel_drawdown=-0.20
+    )
+    # Shallow drawdown blocked.
+    assert not multi_bucket_today.passes_per_bucket_entry_filters(
+        bucket_def, slope_60=0.2, near_delta=0.0, fuel_drawdown=-0.05
+    )
+    # Missing history blocked (gate demands positive evidence).
+    assert not multi_bucket_today.passes_per_bucket_entry_filters(
+        bucket_def, slope_60=0.2, near_delta=0.0, fuel_drawdown=None
+    )
+    # Gate inactive when threshold not configured.
+    ungated = strategy.ComplexStrategySetDefinition(
+        label="fish_tail_production",
+        buy_strategy_name="b",
+        sell_strategy_name="s",
+        strategy_identifier="fish_tail_blow_off_top",
+    )
+    assert multi_bucket_today.passes_per_bucket_entry_filters(
+        ungated, slope_60=0.2, near_delta=0.0, fuel_drawdown=None
+    )
+
+
+def test_compute_fuel_drawdown_for_today_matches_simulator_window(
+    tmp_path,
+) -> None:
+    import numpy
+    dates = pandas.bdate_range("2025-01-01", periods=120)
+    closes = numpy.full(len(dates), 100.0)
+    # Drawdown trough inside the [-60, -11] window before the signal bar.
+    closes[70:80] = 78.0  # 22% below the running max of 100
+    frame = pandas.DataFrame({
+        "Date": dates,
+        "close": closes,
+        "high": closes,
+        "low": closes,
+        "open": closes,
+        "volume": 1_000_000,
+    })
+    (tmp_path / "TEST.csv").write_text(frame.to_csv(index=False))
+    signal_date = str(dates[110].date())
+    fuel = multi_bucket_today.compute_fuel_drawdown_for_today(
+        tmp_path, "TEST", signal_date
+    )
+    assert fuel == pytest.approx(-0.22)
+    # Insufficient history returns None.
+    early_signal = str(dates[40].date())
+    assert (
+        multi_bucket_today.compute_fuel_drawdown_for_today(
+            tmp_path, "TEST", early_signal
+        )
+        is None
+    )

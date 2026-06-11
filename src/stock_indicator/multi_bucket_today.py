@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 import pandas
 
-from . import daily_job, strategy, symbol_seasoning
+from . import daily_job, futu_trade_metadata, strategy, symbol_seasoning
 from .strategy_sets import (
     load_strategy_entry_filters,
     load_strategy_set_mapping,
@@ -542,6 +542,12 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
                 and raw_bucket["v_filter_threshold"] is not None
                 else None
             ),
+            fuel_drawdown_max=(
+                float(raw_bucket["fuel_drawdown_max"])
+                if "fuel_drawdown_max" in raw_bucket
+                and raw_bucket["fuel_drawdown_max"] is not None
+                else None
+            ),
             pre_cross_signal_lookback=bool(
                 raw_bucket.get("pre_cross_signal_lookback", False)
             ),
@@ -816,12 +822,50 @@ def append_rolling_update(
         state["losers"] = losers
 
 
+def compute_fuel_drawdown_for_today(
+    data_directory: Path,
+    symbol_name: str,
+    signal_date_string: str,
+) -> float | None:
+    """Mirror strategy.py:_compute_fuel_drawdown_for_signal for live cron.
+
+    Maximum drawdown (running-max basis) over the pre-surge window
+    [T-60, T-11] bars before the signal date, computed from the daily
+    price cache. Returns None when the cache lacks 60 bars of history
+    before the signal date or the symbol file is missing — the fuel
+    gate then skips the candidate (it demands positive evidence).
+    """
+    csv_path = data_directory / f"{symbol_name}.csv"
+    if not csv_path.exists():
+        return None
+    try:
+        frame = pandas.read_csv(csv_path, parse_dates=["Date"])
+    except (OSError, ValueError):
+        return None
+    if "close" not in frame.columns or "Date" not in frame.columns:
+        return None
+    frame = frame.set_index("Date").sort_index()
+    signal_timestamp = pandas.Timestamp(signal_date_string)
+    if signal_timestamp not in frame.index:
+        return None
+    signal_position = frame.index.get_loc(signal_timestamp)
+    window_start = signal_position - 60
+    if window_start < 0:
+        return None
+    window_closes = frame["close"].iloc[window_start : signal_position - 10]
+    if window_closes.empty or window_closes.isna().any():
+        return None
+    running_maximum = window_closes.cummax()
+    return float((window_closes / running_maximum - 1.0).min())
+
+
 def passes_per_bucket_entry_filters(
     bucket_def: strategy.ComplexStrategySetDefinition,
     slope_60: float | None,
     near_delta: float | None,
     above_pv: float | None = None,
     above_pv_previous: float | None = None,
+    fuel_drawdown: float | None = None,
 ) -> bool:
     """Mirror simulator strategy.py:1684-1780 entry filters.
 
@@ -868,6 +912,14 @@ def passes_per_bucket_entry_filters(
             or above_pv_previous is None
             or above_pv_previous <= bucket_def.v_filter_threshold
             or above_pv >= bucket_def.v_filter_threshold
+        ):
+            return False
+    # Squeeze-fuel gate: keep ONLY when the pre-surge window drew down
+    # at least to the threshold (mirrors strategy.py event-loop gate).
+    if bucket_def.fuel_drawdown_max is not None:
+        if (
+            fuel_drawdown is None
+            or fuel_drawdown > bucket_def.fuel_drawdown_max
         ):
             return False
     return True
@@ -1145,11 +1197,29 @@ def compute_today_signals(
     for bucket_label, bucket_def in config.bucket_definitions.items():
         strategy_identifier = bucket_def.strategy_identifier
         held_for_strategy = held_positions.get(strategy_identifier, [])
+        # Buckets may share a strategy_id (fish_tail_squeeze reuses
+        # fish_tail_blow_off_top's detection). Each held entry belongs
+        # to exactly ONE bucket: its recorded "bucket" field, or the
+        # strategy's default bucket for legacy entries written before
+        # the field existed. Without this filter a shared strategy_id
+        # would process the same held list once per bucket — double
+        # exit records and double rolling updates.
+        default_bucket_for_strategy = (
+            futu_trade_metadata.STRATEGY_ID_TO_DEFAULT_BUCKET.get(
+                strategy_identifier, bucket_label
+            )
+        )
+        held_for_bucket = [
+            held_entry
+            for held_entry in held_for_strategy
+            if held_entry.get("bucket", default_bucket_for_strategy)
+            == bucket_label
+        ]
         signals = per_bucket_signals[bucket_label]
         filter_exit_set = set(signals.get("exit_signals", []))
         retained: List[Dict[str, str]] = []
         bucket_exit_messages: List[str] = []
-        for held_entry in held_for_strategy:
+        for held_entry in held_for_bucket:
             held_symbol = held_entry.get("symbol", "")
             entry_date_string = held_entry.get("entry_date", "")
             has_exit = held_symbol in filter_exit_set
@@ -1182,7 +1252,11 @@ def compute_today_signals(
                 same_day_close_count_global += 1
             else:
                 retained.append(held_entry)
-        new_held_per_strategy[strategy_identifier] = retained
+        # Merge (not overwrite): buckets sharing a strategy_id each
+        # contribute their own retained slice.
+        new_held_per_strategy.setdefault(strategy_identifier, []).extend(
+            retained
+        )
         if bucket_exit_messages:
             log_lines.append(
                 f"[exit] bucket={bucket_label} symbols={bucket_exit_messages}"
@@ -1259,12 +1333,24 @@ def compute_today_signals(
             above_pv_previous_value = debug_values.get(
                 "above_price_volume_ratio_previous"
             )
+            # Fuel drawdown only loads price history when the bucket
+            # actually gates on it (fish_tail_squeeze).
+            fuel_drawdown_value = (
+                compute_fuel_drawdown_for_today(
+                    data_directory,
+                    symbol_name,
+                    signal_lookup_date_string,
+                )
+                if bucket_def.fuel_drawdown_max is not None
+                else None
+            )
             if not passes_per_bucket_entry_filters(
                 bucket_def,
                 slope_60_value,
                 near_delta_value,
                 above_pv=above_pv_value,
                 above_pv_previous=above_pv_previous_value,
+                fuel_drawdown=fuel_drawdown_value,
             ):
                 continue
             (
@@ -1322,9 +1408,19 @@ def compute_today_signals(
     held_total_after_today = sum(len(positions) for positions in new_held_per_strategy.values())
     bucket_held_before: Dict[str, int] = {}
     for bucket_label, bucket_def in config.bucket_definitions.items():
-        bucket_held_before[bucket_label] = len(
-            held_positions.get(bucket_def.strategy_identifier, [])
+        default_bucket_for_strategy = (
+            futu_trade_metadata.STRATEGY_ID_TO_DEFAULT_BUCKET.get(
+                bucket_def.strategy_identifier, bucket_label
+            )
         )
+        bucket_held_before[bucket_label] = len([
+            held_entry
+            for held_entry in held_positions.get(
+                bucket_def.strategy_identifier, []
+            )
+            if held_entry.get("bucket", default_bucket_for_strategy)
+            == bucket_label
+        ])
     held_symbol_counts_after: Dict[str, int] = {}
     for retained_entries in new_held_per_strategy.values():
         for retained_entry in retained_entries:
@@ -1377,7 +1473,17 @@ def compute_today_signals(
     # ------------------------------------------------------------------
     accepted_per_strategy: Dict[str, List[Dict[str, str]]] = {
         strategy_identifier: [
-            {"symbol": entry["symbol"], "entry_date": entry.get("entry_date", "")}
+            {
+                "symbol": entry["symbol"],
+                "entry_date": entry.get("entry_date", ""),
+                # Preserve bucket attribution so buckets sharing a
+                # strategy_id keep their held positions separable.
+                **(
+                    {"bucket": entry["bucket"]}
+                    if entry.get("bucket")
+                    else {}
+                ),
+            }
             for entry in retained
         ]
         for strategy_identifier, retained in new_held_per_strategy.items()
@@ -1386,6 +1492,7 @@ def compute_today_signals(
         accepted_per_strategy.setdefault(record.strategy_id, []).append({
             "symbol": record.symbol,
             "entry_date": record.entry_date,
+            "bucket": record.bucket_label,
         })
 
     # ------------------------------------------------------------------

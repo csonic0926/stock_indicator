@@ -20,6 +20,27 @@ STRATEGY_ID_TO_DEFAULT_BUCKET = {
     "fish_tail_blow_off_top": "fish_tail_production",
     "fish_head_b30_35": "fish_head_b30_35",
 }
+# Bucket-keyed remark codes. Needed because buckets can share a
+# strategy_id (fish_tail_squeeze reuses fish_tail_blow_off_top's
+# detection) while carrying different live-management semantics
+# (sigma/TP, entry gate). The strategy-keyed maps above stay for
+# legacy remarks; codes must not collide across the two schemes.
+BUCKET_LABEL_TO_REMARK_CODE = {
+    "fish_head_production": "h",
+    "fish_tail_production": "t",
+    "fish_head_b30_35": "b",
+    "fish_tail_squeeze": "q",
+}
+REMARK_CODE_TO_BUCKET_LABEL = {
+    remark_code: bucket_label
+    for bucket_label, remark_code in BUCKET_LABEL_TO_REMARK_CODE.items()
+}
+BUCKET_LABEL_TO_STRATEGY_ID = {
+    "fish_head_production": "fish_head_vacuum_turn",
+    "fish_tail_production": "fish_tail_blow_off_top",
+    "fish_head_b30_35": "fish_head_b30_35",
+    "fish_tail_squeeze": "fish_tail_blow_off_top",
+}
 
 
 def _pct_to_basis_points(percent_value: Any) -> int | None:
@@ -65,10 +86,19 @@ def format_futu_order_remark(order: dict[str, Any]) -> str:
     Futu restricts remarks to 64 UTF-8 bytes, so the wire schema is compact:
     si2|s=h|tp=658|sl=417|ms=1|ds=1|mh=14|rr=1
     """
-    strategy_identifier = str(order.get("strategy_id") or "")
-    strategy_code = STRATEGY_ID_TO_REMARK_CODE.get(strategy_identifier)
+    # Prefer the bucket-keyed code: buckets can share a strategy_id while
+    # carrying different live-management semantics. Orders without a
+    # bucket_label fall back to the legacy strategy-keyed code.
+    bucket_label = str(order.get("bucket_label") or order.get("bucket") or "")
+    strategy_code = BUCKET_LABEL_TO_REMARK_CODE.get(bucket_label)
     if strategy_code is None:
-        raise ValueError(f"unsupported strategy_id for Futu remark: {strategy_identifier}")
+        strategy_identifier = str(order.get("strategy_id") or "")
+        strategy_code = STRATEGY_ID_TO_REMARK_CODE.get(strategy_identifier)
+    if strategy_code is None:
+        raise ValueError(
+            "unsupported bucket/strategy for Futu remark: "
+            f"bucket={bucket_label!r} strategy={order.get('strategy_id')!r}"
+        )
 
     take_profit_basis_points = _pct_to_basis_points(order.get("tp_pct"))
     stop_loss_basis_points = _pct_to_basis_points(order.get("sl_pct"))
@@ -128,11 +158,20 @@ def _parse_v2_tokens(token_texts: list[str]) -> dict[str, Any]:
             raw_values[key_text] = value_text
 
     strategy_code = raw_values.get("s", "")
-    strategy_identifier = REMARK_CODE_TO_STRATEGY_ID.get(strategy_code)
     metadata: dict[str, Any] = {"remark_version": "si2"}
-    if strategy_identifier is not None:
-        metadata["strategy_id"] = strategy_identifier
-        metadata["bucket"] = STRATEGY_ID_TO_DEFAULT_BUCKET.get(strategy_identifier)
+    # Bucket-keyed resolution first ("q" only exists here); legacy codes
+    # h/t/b resolve to the same buckets as before via either path.
+    bucket_label = REMARK_CODE_TO_BUCKET_LABEL.get(strategy_code)
+    if bucket_label is not None:
+        metadata["bucket"] = bucket_label
+        metadata["strategy_id"] = BUCKET_LABEL_TO_STRATEGY_ID.get(bucket_label)
+    else:
+        strategy_identifier = REMARK_CODE_TO_STRATEGY_ID.get(strategy_code)
+        if strategy_identifier is not None:
+            metadata["strategy_id"] = strategy_identifier
+            metadata["bucket"] = STRATEGY_ID_TO_DEFAULT_BUCKET.get(
+                strategy_identifier
+            )
 
     take_profit_pct = _basis_points_to_pct(raw_values.get("tp", ""))
     stop_loss_pct = _basis_points_to_pct(raw_values.get("sl", ""))

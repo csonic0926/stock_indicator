@@ -2160,11 +2160,16 @@ class StockShell(cmd.Cmd):
                 curve=str(raw_wr_synced_sizing.get("curve", "linear")),
                 z_floor=float(raw_wr_synced_sizing.get("z_floor", -3.0)),
                 z_healthy=float(raw_wr_synced_sizing.get("z_healthy", -1.5)),
+                sigma_ref_window=int(
+                    raw_wr_synced_sizing.get("sigma_ref_window", 252)
+                ),
             )
-            if wr_synced_sizing_config.curve == "z_score":
+            if wr_synced_sizing_config.curve in ("z_score", "expectancy_z", "dual_z"):
                 curve_description = (
-                    f"curve=z_score z_floor={wr_synced_sizing_config.z_floor} "
-                    f"z_healthy={wr_synced_sizing_config.z_healthy}"
+                    f"curve={wr_synced_sizing_config.curve} "
+                    f"z_floor={wr_synced_sizing_config.z_floor} "
+                    f"z_healthy={wr_synced_sizing_config.z_healthy} "
+                    f"sigma_ref_window={wr_synced_sizing_config.sigma_ref_window}"
                 )
             else:
                 curve_description = (
@@ -4319,10 +4324,18 @@ class StockShell(cmd.Cmd):
             strategy_identifier = accepted_entry.get("strategy_id", "")
             if not strategy_identifier:
                 continue
-            held_positions.setdefault(strategy_identifier, []).append({
+            held_position_record = {
                 "symbol": accepted_entry.get("symbol", ""),
                 "entry_date": accepted_entry.get("entry_date", ""),
-            })
+            }
+            # Bucket attribution keeps buckets that share a strategy_id
+            # (fish_tail_squeeze / fish_tail_production) separable in
+            # compute_today_signals' held-position handling.
+            if accepted_entry.get("bucket"):
+                held_position_record["bucket"] = accepted_entry["bucket"]
+            held_positions.setdefault(strategy_identifier, []).append(
+                held_position_record
+            )
 
         try:
             with strategy.override_ff12_group_source_path(ff12_data_path):
