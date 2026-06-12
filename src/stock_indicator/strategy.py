@@ -1561,6 +1561,34 @@ def compute_regime_phantom_score(
     )
 
 
+def compute_dynamic_breakeven_win_rate(
+    winner_pcts: "deque[float]",
+    loser_pcts: "deque[float]",
+    required_count: int,
+) -> float | None:
+    """Sensor-local arithmetic breakeven: WR* = ML / (MP + ML).
+
+    The static 0.50 floor silently assumed P/L = 1.0; the true breakeven
+    moves with the realized payoff ratio (P/L 1.5 markets break even at
+    WR 0.40, P/L 0.8 markets at 0.56). MP/ML come from the SENSOR
+    bucket's own stream — using the global pool would price ft's life
+    line with fish_head's magnitudes (the pooled-stream lesson again).
+    Returns None until both sides hold `required_count` observations
+    (no static fallback: the floor simply stays dark while warming).
+    """
+
+    if (
+        len(winner_pcts) < required_count
+        or len(loser_pcts) < required_count
+    ):
+        return None
+    mean_win = sum(winner_pcts) / len(winner_pcts)
+    mean_loss = sum(loser_pcts) / len(loser_pcts)
+    if mean_win + mean_loss <= 0:
+        return None
+    return mean_loss / (mean_win + mean_loss)
+
+
 def _is_symbol_trade_date_eligible(
     symbol_first_eligible_trade_dates: dict[str, datetime.date] | None,
     symbol_name: str,
@@ -1904,9 +1932,17 @@ def run_complex_simulation(
     # after absorbing that close. Parallel to phantom_sensor_closes.
     # EMA uses alpha=2/(N+1), adjust=False seeding (pandas convention);
     # SMA over the trailing N closes (None until warm).
-    phantom_cross_states: list[tuple[float, float | None]] = []
+    # State tuple per sensor close: (ema, sma, dynamic_breakeven).
+    phantom_cross_states: list[tuple[float, float | None, float | None]] = []
     phantom_cross_ema: float | None = None
     phantom_cross_window: deque[float] = deque(
+        maxlen=phantom_score_gate.window if phantom_score_gate else 1
+    )
+    # Sensor-local magnitude state for the dynamic breakeven floor.
+    phantom_winner_pcts: deque[float] = deque(
+        maxlen=phantom_score_gate.window if phantom_score_gate else 1
+    )
+    phantom_loser_pcts: deque[float] = deque(
         maxlen=phantom_score_gate.window if phantom_score_gate else 1
     )
     # For evict_oldest: track the latest active signal date for each open
@@ -2316,8 +2352,32 @@ def run_complex_simulation(
                                 >= phantom_score_gate.window
                                 else None
                             )
+                            _sensor_pct = (
+                                (
+                                    _sensor_trade.exit_price
+                                    - _sensor_trade.entry_price
+                                )
+                                / _sensor_trade.entry_price
+                                if _sensor_trade.entry_price > 0
+                                else 0.0
+                            )
+                            if _sensor_pct > 0:
+                                phantom_winner_pcts.append(_sensor_pct)
+                            elif _sensor_pct < 0:
+                                phantom_loser_pcts.append(abs(_sensor_pct))
+                            _breakeven_value = (
+                                compute_dynamic_breakeven_win_rate(
+                                    phantom_winner_pcts,
+                                    phantom_loser_pcts,
+                                    phantom_score_gate.window,
+                                )
+                            )
                             phantom_cross_states.append(
-                                (phantom_cross_ema, _sma_value)
+                                (
+                                    phantom_cross_ema,
+                                    _sma_value,
+                                    _breakeven_value,
+                                )
                             )
                     # Update rolling stats using the RAW (original) trade's
                     # result, not the adaptive-adjusted one.  This ensures
@@ -2796,12 +2856,17 @@ def run_complex_simulation(
                             key=lambda close_record: close_record[0],
                         ) - 1
                         if _state_index >= 0:
-                            _ema_value, _sma_value = phantom_cross_states[
-                                _state_index
-                            ]
+                            (
+                                _ema_value,
+                                _sma_value,
+                                _breakeven_value,
+                            ) = phantom_cross_states[_state_index]
                             if _sma_value is not None and (
                                 _ema_value < _sma_value
-                                or _sma_value < 0.50
+                                or (
+                                    _breakeven_value is not None
+                                    and _sma_value < _breakeven_value
+                                )
                             ):
                                 _gate_phantom = True
                     else:

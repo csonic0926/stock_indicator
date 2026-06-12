@@ -108,3 +108,27 @@ def test_wr_cross_ema_sma_semantics_match_pandas() -> None:
             assert sum(window) / len(window) == pytest.approx(
                 expected_sma.iloc[i]
             )
+
+
+def test_dynamic_breakeven_moves_with_payoff_ratio() -> None:
+    from collections import deque
+    from stock_indicator.strategy import compute_dynamic_breakeven_win_rate
+    # P/L = 1.0 -> breakeven 0.50 (the old static line is the special case)
+    even = compute_dynamic_breakeven_win_rate(
+        deque([0.04] * 10), deque([0.04] * 10), 10
+    )
+    assert even == pytest.approx(0.50)
+    # P/L = 1.5 -> breakeven 0.40: WR 0.45 is ALIVE in a fat-payoff market
+    fat = compute_dynamic_breakeven_win_rate(
+        deque([0.06] * 10), deque([0.04] * 10), 10
+    )
+    assert fat == pytest.approx(0.40)
+    # P/L = 0.8 -> breakeven 0.556: WR 0.52 is DEAD in a thin-payoff market
+    thin = compute_dynamic_breakeven_win_rate(
+        deque([0.04] * 10), deque([0.05] * 10), 10
+    )
+    assert thin == pytest.approx(0.05 / 0.09)
+    # Warmup: either side short -> None (floor stays dark, no static fallback)
+    assert compute_dynamic_breakeven_win_rate(
+        deque([0.04] * 9), deque([0.04] * 10), 10
+    ) is None
