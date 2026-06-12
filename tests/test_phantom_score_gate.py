@@ -68,3 +68,43 @@ def test_ablation_weights_activate_max_hold() -> None:
 
 def test_empty_window_scores_zero() -> None:
     assert compute_regime_phantom_score([], CFG) == 0.0
+
+
+def test_wr_cross_curve_validation() -> None:
+    import pytest as _pytest
+    from stock_indicator import strategy as _strategy
+    cfg = PhantomScoreGateConfig(curve="nonsense")
+    with _pytest.raises(ValueError):
+        _strategy.run_complex_simulation(
+            data_directory=None,  # never reached: validation fires first
+            set_definitions={"x": _strategy.ComplexStrategySetDefinition(
+                label="x", buy_strategy_name="b", sell_strategy_name="s",
+                strategy_identifier="fish_tail_blow_off_top")},
+            maximum_position_count=7,
+            adaptive_tp_sl=_strategy.AdaptiveTPSLConfig(),
+            phantom_score_gate=cfg,
+        )
+
+
+def test_wr_cross_ema_sma_semantics_match_pandas() -> None:
+    """The incremental EMA/SMA must match pandas ewm/rolling conventions."""
+    import pandas as _pd
+    wins = [1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0, 0]
+    n = 5
+    series = _pd.Series([float(w) for w in wins])
+    expected_ema = series.ewm(span=n, adjust=False).mean()
+    expected_sma = series.rolling(n).mean()
+    # Replicate the in-loop incremental computation.
+    alpha = 2.0 / (n + 1.0)
+    ema = None
+    window: list[float] = []
+    for i, w in enumerate(wins):
+        v = float(w)
+        ema = v if ema is None else alpha * v + (1.0 - alpha) * ema
+        window.append(v)
+        window = window[-n:]
+        assert ema == pytest.approx(expected_ema.iloc[i])
+        if len(window) >= n:
+            assert sum(window) / len(window) == pytest.approx(
+                expected_sma.iloc[i]
+            )

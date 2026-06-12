@@ -2210,6 +2210,7 @@ class StockShell(cmd.Cmd):
                 weight_max_hold=float(
                     raw_phantom_gate.get("weight_max_hold", 0.0)
                 ),
+                curve=str(raw_phantom_gate.get("curve", "score")),
             )
             self.stdout.write(
                 "Phantom score gate: "
@@ -2217,6 +2218,7 @@ class StockShell(cmd.Cmd):
                 f"gated={list(phantom_score_gate_config.gated_buckets)} "
                 f"window={phantom_score_gate_config.window} "
                 f"threshold={phantom_score_gate_config.score_threshold} "
+                f"curve={phantom_score_gate_config.curve} "
                 f"weights=(wr={phantom_score_gate_config.weight_wr}, "
                 f"no_tp={phantom_score_gate_config.weight_no_tp}, "
                 f"max_hold={phantom_score_gate_config.weight_max_hold})\n"

@@ -7,6 +7,7 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 import datetime
+import bisect
 import heapq
 import inspect
 import logging
@@ -1519,6 +1520,17 @@ class PhantomScoreGateConfig:
     weight_wr: float = 0.5
     weight_no_tp: float = 0.5
     weight_max_hold: float = 0.0
+    # Gate curve. "score": fuzzy three-channel score above (original).
+    # "wr_cross": the system's own cross grammar applied to the WR
+    # series — EMA_N vs SMA_N of the sensor's win stream (same window,
+    # two kernels: the exponential kernel leads, so the cross reads the
+    # ACCELERATION of win rate with only first-derivative delay), OR'd
+    # with the arithmetic floor SMA_N < 0.50 (breakeven — catches a
+    # stabilized-but-dead level the derivative cannot see). Zero
+    # calibrated anchors: `window` is the single free parameter
+    # (N-response showed a plateau at 8-12; 10 = plateau middle).
+    # score_threshold/weights are ignored in wr_cross mode.
+    curve: str = "score"
 
 
 def compute_regime_phantom_score(
@@ -1641,6 +1653,14 @@ def run_complex_simulation(
         raise ValueError(
             "phantom_score_gate requires adaptive TP/SL mode (its sensor "
             "reads adaptive exit reasons)"
+        )
+    if phantom_score_gate is not None and phantom_score_gate.curve not in (
+        "score",
+        "wr_cross",
+    ):
+        raise ValueError(
+            "phantom_score_gate.curve must be 'score' or 'wr_cross', "
+            f"got {phantom_score_gate.curve!r}"
         )
 
     effective_interest_rate = (
@@ -1880,6 +1900,15 @@ def run_complex_simulation(
     # sensor bucket's adaptive closes, in close order. Consulted at each
     # gated entry with strictly-earlier closes only (no lookahead).
     phantom_sensor_closes: list[tuple[pandas.Timestamp, bool, str]] = []
+    # wr_cross state: per sensor close, (ema, sma) of the win stream
+    # after absorbing that close. Parallel to phantom_sensor_closes.
+    # EMA uses alpha=2/(N+1), adjust=False seeding (pandas convention);
+    # SMA over the trailing N closes (None until warm).
+    phantom_cross_states: list[tuple[float, float | None]] = []
+    phantom_cross_ema: float | None = None
+    phantom_cross_window: deque[float] = deque(
+        maxlen=phantom_score_gate.window if phantom_score_gate else 1
+    )
     # For evict_oldest: track the latest active signal date for each open
     # trade.  This is intentionally separate from Trade.entry_date: accounting
     # and holding-period statistics keep the original entry date, while
@@ -2261,12 +2290,35 @@ def run_complex_simulation(
                     ):
                         _sensor_trade = adaptive_trade_map.get(orig_trade_id)
                         if _sensor_trade is not None:
+                            _sensor_win = (
+                                _sensor_trade.exit_price
+                                > _sensor_trade.entry_price
+                            )
                             phantom_sensor_closes.append((
                                 close_date,
-                                _sensor_trade.exit_price
-                                > _sensor_trade.entry_price,
+                                _sensor_win,
                                 _sensor_trade.exit_reason,
                             ))
+                            # Incremental EMA/SMA for wr_cross mode.
+                            _win_value = 1.0 if _sensor_win else 0.0
+                            _alpha = 2.0 / (phantom_score_gate.window + 1.0)
+                            phantom_cross_ema = (
+                                _win_value
+                                if phantom_cross_ema is None
+                                else _alpha * _win_value
+                                + (1.0 - _alpha) * phantom_cross_ema
+                            )
+                            phantom_cross_window.append(_win_value)
+                            _sma_value = (
+                                sum(phantom_cross_window)
+                                / len(phantom_cross_window)
+                                if len(phantom_cross_window)
+                                >= phantom_score_gate.window
+                                else None
+                            )
+                            phantom_cross_states.append(
+                                (phantom_cross_ema, _sma_value)
+                            )
                     # Update rolling stats using the RAW (original) trade's
                     # result, not the adaptive-adjusted one.  This ensures
                     # the rolling window reflects true signal quality, not
@@ -2734,20 +2786,41 @@ def run_complex_simulation(
                     phantom_score_gate is not None
                     and label in phantom_score_gate.gated_buckets
                 ):
-                    recent_sensor_outcomes = [
-                        (sensor_win, sensor_reason)
-                        for sensor_close_date, sensor_win, sensor_reason
-                        in phantom_sensor_closes
-                        if sensor_close_date < event_date
-                    ][-phantom_score_gate.window:]
-                    if len(
-                        recent_sensor_outcomes
-                    ) >= phantom_score_gate.window and (
-                        compute_regime_phantom_score(
-                            recent_sensor_outcomes, phantom_score_gate
-                        )
-                        > phantom_score_gate.score_threshold
-                    ):
+                    _gate_phantom = False
+                    if phantom_score_gate.curve == "wr_cross":
+                        # State after the last sensor close strictly
+                        # BEFORE this entry date (no lookahead).
+                        _state_index = bisect.bisect_left(
+                            phantom_sensor_closes,
+                            event_date,
+                            key=lambda close_record: close_record[0],
+                        ) - 1
+                        if _state_index >= 0:
+                            _ema_value, _sma_value = phantom_cross_states[
+                                _state_index
+                            ]
+                            if _sma_value is not None and (
+                                _ema_value < _sma_value
+                                or _sma_value < 0.50
+                            ):
+                                _gate_phantom = True
+                    else:
+                        recent_sensor_outcomes = [
+                            (sensor_win, sensor_reason)
+                            for sensor_close_date, sensor_win, sensor_reason
+                            in phantom_sensor_closes
+                            if sensor_close_date < event_date
+                        ][-phantom_score_gate.window:]
+                        if len(
+                            recent_sensor_outcomes
+                        ) >= phantom_score_gate.window and (
+                            compute_regime_phantom_score(
+                                recent_sensor_outcomes, phantom_score_gate
+                            )
+                            > phantom_score_gate.score_threshold
+                        ):
+                            _gate_phantom = True
+                    if _gate_phantom:
                         _phantom_pair = artifacts_by_set[
                             label
                         ].trade_detail_pairs.get(trade)
