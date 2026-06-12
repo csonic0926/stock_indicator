@@ -1586,7 +1586,12 @@ def compute_dynamic_breakeven_win_rate(
     mean_loss = sum(loser_pcts) / len(loser_pcts)
     if mean_win + mean_loss <= 0:
         return None
-    return mean_loss / (mean_win + mean_loss)
+    # Greedy cap: the line may RELAX below 0.50 in fat-payoff regimes
+    # (releasing good years) but never tightens above it — the local
+    # 10-observation MP/ML estimate is too noisy to justify demanding
+    # better than coin-flip (X3 showed the uncapped line over-fires in
+    # thin-payoff stretches: 1998/2003/2022 taxes, phantoms 1775->1904).
+    return min(mean_loss / (mean_win + mean_loss), 0.50)
 
 
 def _is_symbol_trade_date_eligible(
