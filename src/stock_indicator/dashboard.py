@@ -1731,21 +1731,33 @@ function renderTrades() {
 
 // Build symbol -> bucket short-name map from cron signal logs only. Local
 // adaptive_state is diagnostic and must not label live positions.
+function shortBucket(b) {
+  return (b || '').replace('_production', '').replace('_explore', '');
+}
+
 function buildBucketMap(log, adaptive) {
   const m = {};
-  const shorten = (b) => (b || '').replace('_production', '').replace('_explore', '');
   for (const e of (log.entry_signal_records || [])) {
-    if (e.symbol && e.bucket) m[e.symbol] = shorten(e.bucket);
+    if (e.symbol && e.bucket) m[e.symbol] = shortBucket(e.bucket);
   }
   for (const e of (log.frozen_entries || [])) {
-    if (e.symbol && e.bucket) m[e.symbol] = shorten(e.bucket);
+    if (e.symbol && e.bucket) m[e.symbol] = shortBucket(e.bucket);
   }
   return m;
 }
 
 function tagWithBucket(symbol, type, bucketMap) {
   const b = bucketMap[symbol];
-  const suffix = b ? ` <span style="opacity:0.7; font-size:0.8em">[${b}]</span>` : '';
+  return tagWithBucketLabel(symbol, type, b);
+}
+
+// Per-record bucket label: needed because the same symbol can fire in
+// two buckets on one day (e.g. MU in fish_tail_squeeze AND
+// fish_tail_production) — a symbol-keyed map collapses them.
+function tagWithBucketLabel(symbol, type, bucketLabel, extraText) {
+  let labelText = bucketLabel || '';
+  if (extraText) labelText += (labelText ? ' · ' : '') + extraText;
+  const suffix = labelText ? ` <span style="opacity:0.7; font-size:0.8em">[${labelText}]</span>` : '';
   return `<span class="tag ${type}">${symbol}${suffix}</span>`;
 }
 
@@ -1871,10 +1883,20 @@ function render(state, futu) {
   html = '';
   const bucketMap = buildBucketMap(log, adaptive);
   html += '<div class="signal-row"><strong style="color:var(--text2)">ENTRY (raw):</strong> ';
-  html += (log.entry_signals && log.entry_signals.length) ? log.entry_signals.map(s => tagWithBucket(s, 'neutral', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
+  if (log.entry_signal_records && log.entry_signal_records.length) {
+    // Render per record (not via the symbol-keyed map): one symbol can
+    // legitimately fire in two buckets on the same day.
+    html += log.entry_signal_records.map(e => tagWithBucketLabel(e.symbol, 'neutral', shortBucket(e.bucket))).join('');
+  } else {
+    html += (log.entry_signals && log.entry_signals.length) ? log.entry_signals.map(s => tagWithBucket(s, 'neutral', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
+  }
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">BUY (cron accepted):</strong> ';
   html += (log.accepted_buy_actions && log.accepted_buy_actions.length) ? log.accepted_buy_actions.map(s => tagWithBucket(s, 'buy', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
+  html += '</div>';
+  const rejectedRecords = ((log.slot_allocation||{}).rejected) || [];
+  html += '<div class="signal-row"><strong style="color:var(--text2)">REJECTED (cron):</strong> ';
+  html += rejectedRecords.length ? rejectedRecords.map(r => tagWithBucketLabel(r.symbol, 'neutral', shortBucket(r.bucket), r.reason || '?')).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">SELL:</strong> ';
   html += (log.sell_actions && log.sell_actions.length) ? log.sell_actions.map(s => tagWithBucket(s, 'sell', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
@@ -1938,10 +1960,20 @@ async function loadDate(d) {
   // [ENTRY_SIGNAL] / [FROZEN_TP_SL] lines (no current accepted_entries lookup).
   const bucketMap = buildBucketMap(log, {});
   html += '<div class="signal-row"><strong style="color:var(--text2)">ENTRY (raw):</strong> ';
-  html += (log.entry_signals && log.entry_signals.length) ? log.entry_signals.map(s => tagWithBucket(s, 'neutral', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
+  if (log.entry_signal_records && log.entry_signal_records.length) {
+    // Render per record (not via the symbol-keyed map): one symbol can
+    // legitimately fire in two buckets on the same day.
+    html += log.entry_signal_records.map(e => tagWithBucketLabel(e.symbol, 'neutral', shortBucket(e.bucket))).join('');
+  } else {
+    html += (log.entry_signals && log.entry_signals.length) ? log.entry_signals.map(s => tagWithBucket(s, 'neutral', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
+  }
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">BUY (cron accepted):</strong> ';
   html += (log.accepted_buy_actions && log.accepted_buy_actions.length) ? log.accepted_buy_actions.map(s => tagWithBucket(s, 'buy', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
+  html += '</div>';
+  const rejectedRecords = ((log.slot_allocation||{}).rejected) || [];
+  html += '<div class="signal-row"><strong style="color:var(--text2)">REJECTED (cron):</strong> ';
+  html += rejectedRecords.length ? rejectedRecords.map(r => tagWithBucketLabel(r.symbol, 'neutral', shortBucket(r.bucket), r.reason || '?')).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">SELL:</strong> ';
   html += (log.sell_actions && log.sell_actions.length) ? log.sell_actions.map(s => tagWithBucket(s, 'sell', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
