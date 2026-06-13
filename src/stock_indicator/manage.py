@@ -2186,42 +2186,42 @@ class StockShell(cmd.Cmd):
 
         # Phantom score gate (action 2): ft-family regime score decides
         # whether gated-bucket entries deploy capital (slot still taken).
-        phantom_score_gate_config: strategy.PhantomScoreGateConfig | None = None
-        raw_phantom_gate = config_document.get("ft_family_phantom_gate")
-        if raw_phantom_gate is not None:
-            phantom_score_gate_config = strategy.PhantomScoreGateConfig(
+        wr_gate_config: strategy.WRGateConfig | None = None
+        raw_wr_gate = config_document.get("ft_family_wr_gate")
+        if raw_wr_gate is not None:
+            wr_gate_config = strategy.WRGateConfig(
                 sensor_bucket=str(
-                    raw_phantom_gate.get(
+                    raw_wr_gate.get(
                         "sensor_bucket", "fish_tail_production"
                     )
                 ),
                 gated_buckets=tuple(
-                    raw_phantom_gate.get(
+                    raw_wr_gate.get(
                         "gated_buckets",
                         ["fish_tail_production", "fish_tail_squeeze"],
                     )
                 ),
-                window=int(raw_phantom_gate.get("window", 12)),
+                window=int(raw_wr_gate.get("window", 12)),
                 score_threshold=float(
-                    raw_phantom_gate.get("score_threshold", 0.5)
+                    raw_wr_gate.get("score_threshold", 0.5)
                 ),
-                weight_wr=float(raw_phantom_gate.get("weight_wr", 0.5)),
-                weight_no_tp=float(raw_phantom_gate.get("weight_no_tp", 0.5)),
+                weight_wr=float(raw_wr_gate.get("weight_wr", 0.5)),
+                weight_no_tp=float(raw_wr_gate.get("weight_no_tp", 0.5)),
                 weight_max_hold=float(
-                    raw_phantom_gate.get("weight_max_hold", 0.0)
+                    raw_wr_gate.get("weight_max_hold", 0.0)
                 ),
-                curve=str(raw_phantom_gate.get("curve", "score")),
+                curve=str(raw_wr_gate.get("curve", "score")),
             )
             self.stdout.write(
                 "Phantom score gate: "
-                f"sensor={phantom_score_gate_config.sensor_bucket} "
-                f"gated={list(phantom_score_gate_config.gated_buckets)} "
-                f"window={phantom_score_gate_config.window} "
-                f"threshold={phantom_score_gate_config.score_threshold} "
-                f"curve={phantom_score_gate_config.curve} "
-                f"weights=(wr={phantom_score_gate_config.weight_wr}, "
-                f"no_tp={phantom_score_gate_config.weight_no_tp}, "
-                f"max_hold={phantom_score_gate_config.weight_max_hold})\n"
+                f"sensor={wr_gate_config.sensor_bucket} "
+                f"gated={list(wr_gate_config.gated_buckets)} "
+                f"window={wr_gate_config.window} "
+                f"threshold={wr_gate_config.score_threshold} "
+                f"curve={wr_gate_config.curve} "
+                f"weights=(wr={wr_gate_config.weight_wr}, "
+                f"no_tp={wr_gate_config.weight_no_tp}, "
+                f"max_hold={wr_gate_config.weight_max_hold})\n"
             )
 
         export_state_at_date_ts: pandas.Timestamp | None = None
@@ -2354,7 +2354,7 @@ class StockShell(cmd.Cmd):
                         symbol_first_eligible_trade_dates
                     ),
                     wr_synced_sizing=wr_synced_sizing_config,
-                    phantom_score_gate=phantom_score_gate_config,
+                    wr_gate=wr_gate_config,
                 )
         except ValueError as error:
             self.stdout.write(f"{error}\n")

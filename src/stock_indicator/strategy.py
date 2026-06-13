@@ -1484,7 +1484,7 @@ def compute_wr_synced_margin_overrides(
 
 
 @dataclass
-class PhantomScoreGateConfig:
+class WRGateConfig:
     """Regime phantom gate for the fish_tail family (action 2, 2026-06-12).
 
     A fuzzy score over the sensor bucket's last `window` closed trades
@@ -1533,9 +1533,9 @@ class PhantomScoreGateConfig:
     curve: str = "score"
 
 
-def compute_regime_phantom_score(
+def compute_wr_gate_score(
     outcomes: list[tuple[bool, str]],
-    gate_config: PhantomScoreGateConfig,
+    gate_config: WRGateConfig,
 ) -> float:
     """Score the sensor bucket's recent closed trades (win, exit_reason)."""
 
@@ -1641,7 +1641,7 @@ def run_complex_simulation(
     bucket_priority_overrides_by_month: dict[str, dict[str, int]] | None = None,
     symbol_first_eligible_trade_dates: dict[str, datetime.date] | None = None,
     wr_synced_sizing: WRSyncedSizingConfig | None = None,
-    phantom_score_gate: PhantomScoreGateConfig | None = None,
+    wr_gate: WRGateConfig | None = None,
 ) -> ComplexSimulationMetrics:
     """Evaluate multiple strategy sets under a shared configuration.
 
@@ -1674,26 +1674,26 @@ def run_complex_simulation(
             "overrides (reduce); both write per-month margins and their "
             "per-trade gating semantics conflict"
         )
-    if phantom_score_gate is not None and (
+    if wr_gate is not None and (
         margin_overrides or wr_synced_sizing is not None
     ):
         raise ValueError(
-            "phantom_score_gate cannot be combined with risk-score margin "
+            "wr_gate cannot be combined with risk-score margin "
             "reduce or wr_synced_sizing; all three write margin overrides "
             "with conflicting per-trade gating semantics"
         )
-    if phantom_score_gate is not None and adaptive_tp_sl is None:
+    if wr_gate is not None and adaptive_tp_sl is None:
         raise ValueError(
-            "phantom_score_gate requires adaptive TP/SL mode (its sensor "
+            "wr_gate requires adaptive TP/SL mode (its sensor "
             "reads adaptive exit reasons)"
         )
-    if phantom_score_gate is not None and phantom_score_gate.curve not in (
+    if wr_gate is not None and wr_gate.curve not in (
         "score",
         "wr_cross",
     ):
         raise ValueError(
-            "phantom_score_gate.curve must be 'score' or 'wr_cross', "
-            f"got {phantom_score_gate.curve!r}"
+            "wr_gate.curve must be 'score' or 'wr_cross', "
+            f"got {wr_gate.curve!r}"
         )
 
     effective_interest_rate = (
@@ -1932,23 +1932,23 @@ def run_complex_simulation(
     # Phantom-gate sensor stream: (close_date, win, exit_reason) of the
     # sensor bucket's adaptive closes, in close order. Consulted at each
     # gated entry with strictly-earlier closes only (no lookahead).
-    phantom_sensor_closes: list[tuple[pandas.Timestamp, bool, str]] = []
+    wr_gate_sensor_closes: list[tuple[pandas.Timestamp, bool, str]] = []
     # wr_cross state: per sensor close, (ema, sma) of the win stream
-    # after absorbing that close. Parallel to phantom_sensor_closes.
+    # after absorbing that close. Parallel to wr_gate_sensor_closes.
     # EMA uses alpha=2/(N+1), adjust=False seeding (pandas convention);
     # SMA over the trailing N closes (None until warm).
     # State tuple per sensor close: (ema, sma, dynamic_breakeven).
-    phantom_cross_states: list[tuple[float, float | None, float | None]] = []
-    phantom_cross_ema: float | None = None
-    phantom_cross_window: deque[float] = deque(
-        maxlen=phantom_score_gate.window if phantom_score_gate else 1
+    wr_gate_cross_states: list[tuple[float, float | None, float | None]] = []
+    wr_gate_cross_ema: float | None = None
+    wr_gate_cross_window: deque[float] = deque(
+        maxlen=wr_gate.window if wr_gate else 1
     )
     # Sensor-local magnitude state for the dynamic breakeven floor.
-    phantom_winner_pcts: deque[float] = deque(
-        maxlen=phantom_score_gate.window if phantom_score_gate else 1
+    wr_gate_winner_pcts: deque[float] = deque(
+        maxlen=wr_gate.window if wr_gate else 1
     )
-    phantom_loser_pcts: deque[float] = deque(
-        maxlen=phantom_score_gate.window if phantom_score_gate else 1
+    wr_gate_loser_pcts: deque[float] = deque(
+        maxlen=wr_gate.window if wr_gate else 1
     )
     # For evict_oldest: track the latest active signal date for each open
     # trade.  This is intentionally separate from Trade.entry_date: accounting
@@ -2326,8 +2326,8 @@ def run_complex_simulation(
                     # trades, so they feed this too — the sensor stays
                     # alive while capital is parked.
                     if (
-                        phantom_score_gate is not None
-                        and close_label == phantom_score_gate.sensor_bucket
+                        wr_gate is not None
+                        and close_label == wr_gate.sensor_bucket
                     ):
                         _sensor_trade = adaptive_trade_map.get(orig_trade_id)
                         if _sensor_trade is not None:
@@ -2335,26 +2335,26 @@ def run_complex_simulation(
                                 _sensor_trade.exit_price
                                 > _sensor_trade.entry_price
                             )
-                            phantom_sensor_closes.append((
+                            wr_gate_sensor_closes.append((
                                 close_date,
                                 _sensor_win,
                                 _sensor_trade.exit_reason,
                             ))
                             # Incremental EMA/SMA for wr_cross mode.
                             _win_value = 1.0 if _sensor_win else 0.0
-                            _alpha = 2.0 / (phantom_score_gate.window + 1.0)
-                            phantom_cross_ema = (
+                            _alpha = 2.0 / (wr_gate.window + 1.0)
+                            wr_gate_cross_ema = (
                                 _win_value
-                                if phantom_cross_ema is None
+                                if wr_gate_cross_ema is None
                                 else _alpha * _win_value
-                                + (1.0 - _alpha) * phantom_cross_ema
+                                + (1.0 - _alpha) * wr_gate_cross_ema
                             )
-                            phantom_cross_window.append(_win_value)
+                            wr_gate_cross_window.append(_win_value)
                             _sma_value = (
-                                sum(phantom_cross_window)
-                                / len(phantom_cross_window)
-                                if len(phantom_cross_window)
-                                >= phantom_score_gate.window
+                                sum(wr_gate_cross_window)
+                                / len(wr_gate_cross_window)
+                                if len(wr_gate_cross_window)
+                                >= wr_gate.window
                                 else None
                             )
                             _sensor_pct = (
@@ -2367,19 +2367,19 @@ def run_complex_simulation(
                                 else 0.0
                             )
                             if _sensor_pct > 0:
-                                phantom_winner_pcts.append(_sensor_pct)
+                                wr_gate_winner_pcts.append(_sensor_pct)
                             elif _sensor_pct < 0:
-                                phantom_loser_pcts.append(abs(_sensor_pct))
+                                wr_gate_loser_pcts.append(abs(_sensor_pct))
                             _breakeven_value = (
                                 compute_dynamic_breakeven_win_rate(
-                                    phantom_winner_pcts,
-                                    phantom_loser_pcts,
-                                    phantom_score_gate.window,
+                                    wr_gate_winner_pcts,
+                                    wr_gate_loser_pcts,
+                                    wr_gate.window,
                                 )
                             )
-                            phantom_cross_states.append(
+                            wr_gate_cross_states.append(
                                 (
-                                    phantom_cross_ema,
+                                    wr_gate_cross_ema,
                                     _sma_value,
                                     _breakeven_value,
                                 )
@@ -2848,15 +2848,15 @@ def run_complex_simulation(
                 # threshold. Sensor reads closes strictly before this
                 # entry date (no lookahead).
                 if (
-                    phantom_score_gate is not None
-                    and label in phantom_score_gate.gated_buckets
+                    wr_gate is not None
+                    and label in wr_gate.gated_buckets
                 ):
                     _gate_phantom = False
-                    if phantom_score_gate.curve == "wr_cross":
+                    if wr_gate.curve == "wr_cross":
                         # State after the last sensor close strictly
                         # BEFORE this entry date (no lookahead).
                         _state_index = bisect.bisect_left(
-                            phantom_sensor_closes,
+                            wr_gate_sensor_closes,
                             event_date,
                             key=lambda close_record: close_record[0],
                         ) - 1
@@ -2865,7 +2865,7 @@ def run_complex_simulation(
                                 _ema_value,
                                 _sma_value,
                                 _breakeven_value,
-                            ) = phantom_cross_states[_state_index]
+                            ) = wr_gate_cross_states[_state_index]
                             if _sma_value is not None and (
                                 _ema_value < _sma_value
                                 or (
@@ -2878,16 +2878,16 @@ def run_complex_simulation(
                         recent_sensor_outcomes = [
                             (sensor_win, sensor_reason)
                             for sensor_close_date, sensor_win, sensor_reason
-                            in phantom_sensor_closes
+                            in wr_gate_sensor_closes
                             if sensor_close_date < event_date
-                        ][-phantom_score_gate.window:]
+                        ][-wr_gate.window:]
                         if len(
                             recent_sensor_outcomes
-                        ) >= phantom_score_gate.window and (
-                            compute_regime_phantom_score(
-                                recent_sensor_outcomes, phantom_score_gate
+                        ) >= wr_gate.window and (
+                            compute_wr_gate_score(
+                                recent_sensor_outcomes, wr_gate
                             )
-                            > phantom_score_gate.score_threshold
+                            > wr_gate.score_threshold
                         ):
                             _gate_phantom = True
                     if _gate_phantom:
@@ -2991,22 +2991,22 @@ def run_complex_simulation(
                 # ft-family regime score is above threshold. Sensor reads
                 # closes strictly before this entry date (no lookahead).
                 if (
-                    phantom_score_gate is not None
-                    and label in phantom_score_gate.gated_buckets
+                    wr_gate is not None
+                    and label in wr_gate.gated_buckets
                 ):
                     recent_sensor_outcomes = [
                         (sensor_win, sensor_reason)
                         for sensor_close_date, sensor_win, sensor_reason
-                        in phantom_sensor_closes
+                        in wr_gate_sensor_closes
                         if sensor_close_date < event_date
-                    ][-phantom_score_gate.window:]
+                    ][-wr_gate.window:]
                     if len(
                         recent_sensor_outcomes
-                    ) >= phantom_score_gate.window and (
-                        compute_regime_phantom_score(
-                            recent_sensor_outcomes, phantom_score_gate
+                    ) >= wr_gate.window and (
+                        compute_wr_gate_score(
+                            recent_sensor_outcomes, wr_gate
                         )
-                        > phantom_score_gate.score_threshold
+                        > wr_gate.score_threshold
                     ):
                         _phantom_original = adaptive_original_trade.get(
                             id(trade), trade
@@ -3187,16 +3187,16 @@ def run_complex_simulation(
         # existing per-trade margin machinery.
         bucket_gated_trade_ids: set[int] | None = None
         if phantom_slot_trade_ids_for_set and slot_trades_for_set:
-            phantom_span_start = min(
+            wr_gate_span_start = min(
                 t.entry_date for t in slot_trades_for_set
             ).to_period("M")
-            phantom_span_end = max(
+            wr_gate_span_end = max(
                 t.exit_date for t in slot_trades_for_set
             ).to_period("M")
             bucket_margin_overrides = {
                 str(month): 0.0
                 for month in pandas.period_range(
-                    phantom_span_start, phantom_span_end, freq="M"
+                    wr_gate_span_start, wr_gate_span_end, freq="M"
                 )
             }
             bucket_gated_trade_ids = phantom_slot_trade_ids_for_set
@@ -3351,16 +3351,16 @@ def run_complex_simulation(
         # Phantom gate: zero slot weight for flagged trades only
         # (mutually exclusive with reduce/wr-sizing, enforced upstream).
         if aggregated_phantom_slot_trade_ids:
-            phantom_span_start = min(
+            wr_gate_span_start = min(
                 t.entry_date for t in aggregated_slot_trades
             ).to_period("M")
-            phantom_span_end = max(
+            wr_gate_span_end = max(
                 t.exit_date for t in aggregated_slot_trades
             ).to_period("M")
             aggregated_margin_overrides = {
                 str(month): 0.0
                 for month in pandas.period_range(
-                    phantom_span_start, phantom_span_end, freq="M"
+                    wr_gate_span_start, wr_gate_span_end, freq="M"
                 )
             }
             aggregated_gated_arg = aggregated_phantom_slot_trade_ids

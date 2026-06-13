@@ -132,7 +132,7 @@
     "eligibility_path": "data/production_symbol_eligibility.csv",
     "default_new_symbol_quarantine_days": 365
   },
-  "ft_family_phantom_gate": {
+  "ft_family_wr_gate": {
     "sensor_bucket": "fish_tail_production",
     "gated_buckets": [
       "fish_tail_production",
