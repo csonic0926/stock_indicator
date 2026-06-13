@@ -1,0 +1,147 @@
+{
+  "max_position_count": 7,
+  "starting_cash": 70000,
+  "margin": 1.5,
+  "withdraw": 0,
+  "start_date": "2010-01-01",
+  "data_source": "2010",
+  "min_hold": 5,
+  "show_trade_details": false,
+  "risk_score_gate": {
+    "csv_path": "data/historical_risk_scores.csv",
+    "stop_threshold": 75
+  },
+  "adaptive_tp_sl": {
+    "window": 20,
+    "sigma": 0.5,
+    "sl_sigma": 1.0,
+    "min_sl": 0.03,
+    "fixed_sl": null,
+    "override_min_hold_tp_only": true,
+    "min_hold_tp": 1,
+    "override_min_hold_sl_only": true,
+    "min_hold_sl": 1,
+    "disable_sl_trigger": true,
+    "delayed_rolling_update": true,
+    "tp_regime_adjust": false,
+    "tp_regime_ratio_min": 0.5,
+    "tp_regime_ratio_max": 2.0
+  },
+  "buckets": [
+    {
+      "label": "fish_head_production",
+      "strategy_id": "fish_head_vacuum_turn",
+      "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+      "priority": 1,
+      "max_positions": 6,
+      "exit_alpha_factor": 3,
+      "sigma": 0.75,
+      "min_sl": 0.01,
+      "fixed_sl": null,
+      "fixed_tp": null,
+      "free_fall_slope": -0.2,
+      "free_fall_near_delta": -0.05,
+      "override_min_hold_tp_only": true,
+      "min_hold_tp": 1,
+      "override_min_hold_sl_only": true,
+      "min_hold_sl": 1,
+      "tp_regime_adjust": false,
+      "tp_slope_amplify": false,
+      "pre_cross_signal_lookback": true,
+      "reset_hold_on_reentry_signal": false
+    },
+    {
+      "label": "fish_tail_squeeze",
+      "strategy_id": "fish_tail_blow_off_top",
+      "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+      "priority": 1,
+      "max_positions": 2,
+      "exit_alpha_factor": 3,
+      "sigma": 0.75,
+      "min_sl": 0.01,
+      "fixed_sl": null,
+      "fixed_tp": null,
+      "override_min_hold_tp_only": true,
+      "min_hold_tp": 1,
+      "override_min_hold_sl_only": true,
+      "min_hold_sl": 1,
+      "tp_regime_adjust": true,
+      "tp_slope_amplify": true,
+      "max_hold": 7,
+      "reset_hold_on_reentry_signal": false,
+      "fuel_drawdown_max": -0.15
+    },
+    {
+      "label": "fish_tail_production",
+      "strategy_id": "fish_tail_blow_off_top",
+      "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+      "priority": 2,
+      "max_positions": 6,
+      "exit_alpha_factor": 3,
+      "sigma": 0.0,
+      "min_sl": 0.01,
+      "fixed_sl": null,
+      "fixed_tp": null,
+      "override_min_hold_tp_only": true,
+      "min_hold_tp": 1,
+      "override_min_hold_sl_only": true,
+      "min_hold_sl": 1,
+      "tp_regime_adjust": true,
+      "tp_slope_amplify": true,
+      "max_hold": 7,
+      "reset_hold_on_reentry_signal": false
+    },
+    {
+      "label": "fish_head_b30_35",
+      "strategy_id": "fish_head_b30_35",
+      "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+      "priority": 3,
+      "max_positions": 2,
+      "fill_remaining": true,
+      "exit_alpha_factor": 3,
+      "sigma": 0.75,
+      "min_sl": 0.01,
+      "fixed_sl": null,
+      "fixed_tp": null,
+      "free_fall_slope": -0.2,
+      "free_fall_near_delta": -0.05,
+      "override_min_hold_tp_only": true,
+      "min_hold_tp": 1,
+      "override_min_hold_sl_only": true,
+      "min_hold_sl": 1,
+      "tp_regime_adjust": false,
+      "tp_slope_amplify": false,
+      "pre_cross_signal_lookback": true,
+      "max_hold": 14,
+      "reset_hold_on_reentry_signal": true
+    }
+  ],
+  "symbol_list": "production",
+  "ff12_data_path": "data/production_symbols_with_sector.parquet",
+  "risk_score_priority_overrides": {
+    "scores": [
+      25,
+      50
+    ],
+    "priorities": {
+      "fish_head_production": 1,
+      "fish_tail_squeeze": 2,
+      "fish_tail_production": 3,
+      "fish_head_b30_35": 4
+    }
+  },
+  "symbol_seasoning": {
+    "enabled": true,
+    "eligibility_path": "data/production_symbol_eligibility.csv",
+    "default_new_symbol_quarantine_days": 365
+  },
+  "ft_family_phantom_gate": {
+    "sensor_bucket": "fish_tail_production",
+    "gated_buckets": [
+      "fish_tail_production",
+      "fish_tail_squeeze"
+    ],
+    "window": 4,
+    "curve": "wr_cross"
+  }
+}
