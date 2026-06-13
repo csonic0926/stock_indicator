@@ -2211,17 +2211,25 @@ class StockShell(cmd.Cmd):
                     raw_wr_gate.get("weight_max_hold", 0.0)
                 ),
                 curve=str(raw_wr_gate.get("curve", "score")),
+                risk_score_activation_threshold=(
+                    int(raw_wr_gate["risk_score_activation_threshold"])
+                    if raw_wr_gate.get("risk_score_activation_threshold")
+                    is not None
+                    else None
+                ),
+            )
+            activation_description = (
+                "always-on"
+                if wr_gate_config.risk_score_activation_threshold is None
+                else f"risk_score>={wr_gate_config.risk_score_activation_threshold}"
             )
             self.stdout.write(
-                "Phantom score gate: "
+                "WR-gate: "
                 f"sensor={wr_gate_config.sensor_bucket} "
                 f"gated={list(wr_gate_config.gated_buckets)} "
                 f"window={wr_gate_config.window} "
-                f"threshold={wr_gate_config.score_threshold} "
                 f"curve={wr_gate_config.curve} "
-                f"weights=(wr={wr_gate_config.weight_wr}, "
-                f"no_tp={wr_gate_config.weight_no_tp}, "
-                f"max_hold={wr_gate_config.weight_max_hold})\n"
+                f"activation={activation_description}\n"
             )
 
         export_state_at_date_ts: pandas.Timestamp | None = None
@@ -2237,6 +2245,9 @@ class StockShell(cmd.Cmd):
         # order blocking belongs to dashboard.py, not cron/signal rolling.
         risk_score_stop_months: set[str] | None = None
         margin_overrides: dict[str, float] | None = None
+        # Months in which the WR-gate is active (risk score >= its
+        # activation threshold). Empty/None means always-on.
+        wr_gate_active_months: set[str] = set()
         raw_gate = config_document.get("risk_score_gate")
         if raw_gate is not None:
             gate_csv_path_text = str(raw_gate.get("csv_path", ""))
@@ -2282,6 +2293,14 @@ class StockShell(cmd.Cmd):
                         and score >= reduce_threshold
                     ):
                         margin_overrides[row["year_month"]] = reduce_margin
+                    if (
+                        wr_gate_config is not None
+                        and wr_gate_config.risk_score_activation_threshold
+                        is not None
+                        and score
+                        >= wr_gate_config.risk_score_activation_threshold
+                    ):
+                        wr_gate_active_months.add(row["year_month"])
             reduce_description = (
                 "disabled"
                 if reduce_threshold is None
@@ -2355,6 +2374,11 @@ class StockShell(cmd.Cmd):
                     ),
                     wr_synced_sizing=wr_synced_sizing_config,
                     wr_gate=wr_gate_config,
+                    wr_gate_active_months=(
+                        wr_gate_active_months
+                        if wr_gate_active_months
+                        else None
+                    ),
                 )
         except ValueError as error:
             self.stdout.write(f"{error}\n")

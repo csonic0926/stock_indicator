@@ -133,3 +133,11 @@ def test_dynamic_breakeven_moves_with_payoff_ratio() -> None:
     assert compute_dynamic_breakeven_win_rate(
         deque([0.04] * 9), deque([0.04] * 10), 10
     ) is None
+
+
+def test_risk_score_activation_threshold_field() -> None:
+    # Default is None (always-on); explicit threshold stored.
+    assert WRGateConfig().risk_score_activation_threshold is None
+    assert WRGateConfig(
+        risk_score_activation_threshold=50
+    ).risk_score_activation_threshold == 50

@@ -1531,6 +1531,18 @@ class WRGateConfig:
     # (N-response showed a plateau at 8-12; 10 = plateau middle).
     # score_threshold/weights are ignored in wr_cross mode.
     curve: str = "score"
+    # Risk-score activation: when set, the WR-gate only fires (marks
+    # phantom) in months whose risk score is >= this threshold. The gate
+    # is fully OFF in calmer months — entries deploy capital normally.
+    # Motivation: the full-time gate pays a bull-market false-kill tax
+    # because the WR cross (an endogenous edge-death detector) cannot
+    # tell a bull-market WR dip from a grind. Risk score (an exogenous
+    # macro-regime indicator) is consulted monthly — same mechanism as
+    # the system-wide stop — so the gate only operates when a crisis is
+    # actually present. None = always active (original behaviour). The
+    # activation months are resolved by manage.py from the same risk
+    # CSV and passed to run_complex_simulation.
+    risk_score_activation_threshold: int | None = None
 
 
 def compute_wr_gate_score(
@@ -1642,6 +1654,7 @@ def run_complex_simulation(
     symbol_first_eligible_trade_dates: dict[str, datetime.date] | None = None,
     wr_synced_sizing: WRSyncedSizingConfig | None = None,
     wr_gate: WRGateConfig | None = None,
+    wr_gate_active_months: set[str] | None = None,
 ) -> ComplexSimulationMetrics:
     """Evaluate multiple strategy sets under a shared configuration.
 
@@ -2850,6 +2863,14 @@ def run_complex_simulation(
                 if (
                     wr_gate is not None
                     and label in wr_gate.gated_buckets
+                    # Risk-score activation: when the gate is conditioned
+                    # on macro regime, it is OFF in months below the
+                    # threshold (entry deploys capital normally).
+                    and (
+                        wr_gate.risk_score_activation_threshold is None
+                        or wr_gate_active_months is None
+                        or event_date.strftime("%Y-%m") in wr_gate_active_months
+                    )
                 ):
                     _gate_phantom = False
                     if wr_gate.curve == "wr_cross":
