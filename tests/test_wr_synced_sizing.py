@@ -137,3 +137,57 @@ def test_invalid_curve_name_raises() -> None:
     trades = daily_trades("2020-01-02", [True] * 12)
     with pytest.raises(ValueError):
         compute_wr_synced_margin_overrides(trades, 1.5, config)
+
+
+def test_expectancy_z_deaf_to_frequency_but_hears_magnitude() -> None:
+    # 252 baseline trades of small returns, then 40 trades whose LOSSES
+    # are 5x bigger while WR stays ~50% — a magnitude event.
+    config = WRSyncedSizingConfig(
+        window=40, curve="expectancy_z", sigma_ref_window=252
+    )
+    trades = daily_trades("2018-01-01", [True, False] * 126)  # baseline
+    big_loss_phase = []
+    dates = pd.bdate_range("2019-01-01", periods=41)
+    for i in range(40):
+        win = i % 2 == 0
+        entry, exit_ = 10.0, (10.5 if win else 5.0)  # +5% wins, -50% losses
+        big_loss_phase.append(
+            Trade(
+                entry_date=dates[i],
+                exit_date=dates[i + 1],
+                entry_price=entry,
+                exit_price=exit_,
+                profit=exit_ - entry,
+                holding_period=5,
+            )
+        )
+    trades.extend(big_loss_phase)
+    trades.append(make_trade("2019-04-01", "2019-04-08", True))
+    overrides = compute_wr_synced_margin_overrides(trades, 1.5, config)
+    # Magnitude collapse must zero the margin even though WR = 50%.
+    assert overrides["2019-04"] == pytest.approx(0.0)
+
+
+def test_dual_z_takes_minimum_of_channels() -> None:
+    # Frequency event: WR collapses to 0.25 with normal magnitudes.
+    # WR-z fires hard; expectancy-z may or may not — dual must be <= WR-z.
+    config_dual = WRSyncedSizingConfig(window=40, curve="dual_z", sigma_ref_window=252)
+    config_wr = WRSyncedSizingConfig(window=40, curve="z_score")
+    trades = daily_trades("2018-01-01", [True, False] * 126)
+    trades.extend(daily_trades("2019-01-01", [True] + [False] * 3) * 0 or
+                  daily_trades("2019-01-01", ([True] + [False] * 3) * 10))
+    trades.append(make_trade("2019-04-01", "2019-04-08", True))
+    dual = compute_wr_synced_margin_overrides(trades, 1.5, config_dual)
+    wr_only = compute_wr_synced_margin_overrides(trades, 1.5, config_wr)
+    assert dual["2019-04"] <= wr_only["2019-04"] + 1e-9
+
+
+def test_expectancy_z_warmup_needs_reference_window() -> None:
+    # Only 100 trades of history (< window + sigma_ref_window): the
+    # expectancy channel must stay silent even through a magnitude crash.
+    config = WRSyncedSizingConfig(
+        window=40, curve="expectancy_z", sigma_ref_window=252
+    )
+    trades = daily_trades("2020-01-01", [False] * 100)
+    trades.append(make_trade("2020-07-01", "2020-07-08", True))
+    assert compute_wr_synced_margin_overrides(trades, 1.5, config) == {}
