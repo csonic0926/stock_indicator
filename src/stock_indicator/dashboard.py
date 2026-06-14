@@ -64,6 +64,7 @@ def _parse_log_key_value_tokens(line_body: str) -> dict[str, Any]:
             elif key_text in {
                 "disable_sl_trigger",
                 "reset_hold_on_reentry_signal",
+                "wr_degrading",
             }:
                 fields[key_text] = raw_value_text.lower() == "true"
             else:
@@ -449,7 +450,122 @@ PRODUCTION_CONFIG_PATH = (
     / "multi_bucket_production.json"
 )
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent.parent
-PREVIEW_SKIP_STATUSES = {"slot_full", "risk_score_stop", "min_hold_block"}
+PREVIEW_SKIP_STATUSES = {
+    "slot_full",
+    "risk_score_stop",
+    "min_hold_block",
+    "wr_gate_phantom",
+}
+
+# WR-gate phantom positions tracked by the ORDER LAYER (this module),
+# separate from cron's adaptive_state.json. A phantom is a degrading-regime
+# ft-family entry that won a slot but deploys zero capital: it occupies a
+# slot (blocking other buckets) while never placing a real Futu order. The
+# cron emits the endogenous wr_degrading flag; the dashboard ANDs it with
+# the month's risk score, records the phantom here, counts its slot as
+# occupied, and releases it when the position would have adaptively closed.
+PHANTOM_POSITIONS_PATH = LIVE_STATE_DIRECTORY / "phantom_positions.json"
+# Production data_source is "daily" -> data/stock_data. Phantom exit
+# detection replays the same per-symbol daily CSVs the cron sensor uses.
+PRODUCTION_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
+
+
+def _load_phantom_positions() -> list[dict[str, Any]]:
+    """Load the order layer's phantom-position list. Missing/corrupt file
+    yields an empty list (no phantom slots held) — the safe default."""
+    if not PHANTOM_POSITIONS_PATH.exists():
+        return []
+    try:
+        with PHANTOM_POSITIONS_PATH.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(payload, list):
+        return []
+    return [item for item in payload if isinstance(item, dict)]
+
+
+def _save_phantom_positions(positions: list[dict[str, Any]]) -> None:
+    """Persist the phantom list atomically (tmp + replace) so a crash
+    mid-write cannot corrupt slot accounting."""
+    import os as _os
+
+    PHANTOM_POSITIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = PHANTOM_POSITIONS_PATH.with_suffix(
+        PHANTOM_POSITIONS_PATH.suffix + ".tmp"
+    )
+    with temp_path.open("w", encoding="utf-8") as handle:
+        json.dump(positions, handle, indent=2)
+    _os.replace(temp_path, PHANTOM_POSITIONS_PATH)
+
+
+def _wr_gate_activation_threshold() -> int | None:
+    """Read ft_family_wr_gate.risk_score_activation_threshold from the
+    production config. None means the WR-gate is unconfigured (no phantom
+    behaviour) or always-on; phantom needs an explicit threshold to AND
+    against the month's risk score, so None disables phantom in the order
+    layer."""
+    try:
+        raw_gate = _load_production_config().get("ft_family_wr_gate")
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(raw_gate, dict):
+        return None
+    threshold = raw_gate.get("risk_score_activation_threshold")
+    if threshold is None:
+        return None
+    try:
+        return int(threshold)
+    except (TypeError, ValueError):
+        return None
+
+
+def _phantom_still_open(
+    phantom: dict[str, Any], eval_date_string: str
+) -> bool:
+    """Return whether a phantom position is still holding its slot as of
+    eval_date. Lazily resolves the fill date / entry price (signal+1 open)
+    in place — mirroring the cron's wr_gate_pending_ft lazy fill — then
+    replays the entry-relative bar path via the simulator's adaptive exit
+    logic. Closed iff a TP or max_hold exit fired by eval_date; signal
+    exits are not replay-detectable, so a phantom over-holds its slot to
+    max_hold at the latest (bounded, conservative — never frees early).
+    A missing price history or unresolved fill keeps the slot held."""
+    from stock_indicator import multi_bucket_today
+
+    signal_date = phantom.get("signal_date")
+    if not signal_date:
+        return True
+    fill_date = phantom.get("fill_date") or multi_bucket_today._execution_date_string(
+        signal_date
+    )
+    entry_price = phantom.get("entry_price")
+    if entry_price is None:
+        resolved = multi_bucket_today._read_open_price(
+            PRODUCTION_DATA_DIRECTORY, phantom["symbol"], fill_date
+        )
+        if resolved is not None:
+            phantom["fill_date"] = fill_date
+            phantom["entry_price"] = round(float(resolved), 4)
+            entry_price = phantom["entry_price"]
+    if entry_price is None:
+        # Fill not yet available (entry just signalled) -> obviously open.
+        return True
+    adaptive = multi_bucket_today.compute_adaptive_ft_close(
+        PRODUCTION_DATA_DIRECTORY,
+        phantom["symbol"],
+        fill_date,
+        float(entry_price),
+        eval_date_string,
+        float(phantom["tp_pct"]),
+        min_hold_tp=int(phantom["min_hold_tp"]),
+        max_hold=phantom.get("max_hold"),
+    )
+    if adaptive is None:
+        # Cannot determine -> keep the slot held (never free on uncertainty).
+        return True
+    _win, _pct, reason, _exit_ts = adaptive
+    return reason not in ("adaptive_take_profit", "max_hold")
 
 # TODO: review
 
@@ -1180,10 +1296,35 @@ def api_preview_orders():
     current_bucket_exit_rules = _load_current_bucket_exit_rules()
     orders = []
 
-    # Slot cap based on REAL Futu portfolio (this is the order layer's
-    # job — cron's signal layer emits Top N candidates regardless of
-    # holdings). slots_remaining counts down as each BUY is queued.
-    slots_remaining = max(0, max_positions - len(held_symbols))
+    # WR-gate phantom accounting (read-only here; persistence happens at
+    # execute). Resolve which previously-recorded phantoms still hold a
+    # slot as of today, and whether the gate is active this month (its
+    # risk-score activation threshold met). The phantom decision is the
+    # cron's wr_degrading flag ANDed with this month's risk score.
+    eval_date_string = log.get("date") or ""
+    wr_activation_threshold = _wr_gate_activation_threshold()
+    risk_score_value = risk_gate_state.get("risk_score")
+    wr_gate_active = (
+        wr_activation_threshold is not None
+        and isinstance(risk_score_value, int)
+        and risk_score_value >= wr_activation_threshold
+    )
+    open_phantom_symbols = {
+        phantom["symbol"]
+        for phantom in _load_phantom_positions()
+        if phantom.get("symbol")
+        and _phantom_still_open(phantom, eval_date_string)
+    }
+
+    # Slot cap based on REAL Futu portfolio PLUS phantom-held slots (this
+    # is the order layer's job — cron's signal layer emits Top N
+    # candidates regardless of holdings). Phantoms are not real Futu
+    # positions, so they must be subtracted explicitly or other buckets
+    # would reclaim a slot the phantom is meant to hold. slots_remaining
+    # counts down as each BUY (real or phantom) is queued.
+    slots_remaining = max(
+        0, max_positions - len(held_symbols) - len(open_phantom_symbols)
+    )
 
     # BUY orders (today's accepted entries from [FROZEN_TP_SL] lines).
     # Iteration order follows log emission, which mirrors cron's
@@ -1242,6 +1383,11 @@ def api_preview_orders():
             order_dict.pop("max_hold", None)
         if order_dict.get("reset_hold_on_reentry_signal") is None:
             order_dict.pop("reset_hold_on_reentry_signal", None)
+        # A candidate is a phantom when the cron flagged its win-rate cross
+        # as degrading AND this month's risk score has activated the gate.
+        # The flag is stamped gated-buckets-only by the cron, so non-gated
+        # buckets read wr_degrading=False and never phantom here.
+        is_phantom = wr_gate_active and bool(meta.get("wr_degrading"))
         if buy_orders_blocked_by_risk_score:
             order_dict["status"] = "risk_score_stop"
             order_dict["qty"] = 0
@@ -1254,8 +1400,31 @@ def api_preview_orders():
             order_dict["status"] = "slot_full"
             order_dict["skip_reason"] = (
                 f"max_positions={max_positions} already filled "
-                f"(Futu held: {len(held_symbols)})"
+                f"(Futu held: {len(held_symbols)}, "
+                f"phantom: {len(open_phantom_symbols)})"
             )
+        elif is_phantom:
+            # Phantom: hold the slot, deploy zero capital, place no real
+            # order. Carries phantom_record so execute can persist it to
+            # the order layer's phantom list (slot stays occupied until it
+            # adaptively closes).
+            order_dict["status"] = "wr_gate_phantom"
+            order_dict["qty"] = 0
+            order_dict["skip_reason"] = (
+                f"WR-gate phantom: wr_degrading=True and risk_score="
+                f"{risk_score_value} >= activation={wr_activation_threshold} "
+                f"for {risk_gate_state.get('year_month')} "
+                f"(slot held, no capital)"
+            )
+            order_dict["phantom_record"] = {
+                "symbol": symbol,
+                "signal_date": eval_date_string,
+                "bucket": meta.get("bucket"),
+                "tp_pct": meta.get("tp_pct"),
+                "min_hold_tp": meta.get("min_hold_tp"),
+                "max_hold": meta.get("max_hold"),
+            }
+            slots_remaining -= 1
         else:
             slots_remaining -= 1
         orders.append(order_dict)
@@ -1391,6 +1560,10 @@ def api_execute_orders(req: ExecuteRequest):
     if latest_dates:
         latest_gate_state = _load_risk_score_gate_state(latest_dates[0])
 
+    # Phantom records confirmed in this execute call, persisted after the
+    # loop alongside a prune of any phantom that has since closed.
+    confirmed_phantom_records: list[dict[str, Any]] = []
+
     for order in req.orders:
         symbol = order["symbol"]
         side = TrdSide.BUY if order["side"] == "BUY" else TrdSide.SELL
@@ -1401,6 +1574,12 @@ def api_execute_orders(req: ExecuteRequest):
         # risk-score stop, signal-exit min_hold gate). Skip without sending so
         # confirm cannot bypass the preview-layer guardrails.
         if order.get("status") in PREVIEW_SKIP_STATUSES:
+            # A phantom is recorded (not sent) so its slot stays occupied
+            # across days until it adaptively closes.
+            if order.get("status") == "wr_gate_phantom" and order.get(
+                "phantom_record"
+            ):
+                confirmed_phantom_records.append(order["phantom_record"])
             results.append({
                 "symbol": symbol,
                 "status": "skipped",
@@ -1501,6 +1680,30 @@ def api_execute_orders(req: ExecuteRequest):
                 "status": "error",
                 "error": str(exc),
             })
+
+    # Persist the phantom list: prune any phantom that has adaptively
+    # closed (frees its slot) and append this call's confirmed phantoms,
+    # deduped by (symbol, signal_date) so a re-execute cannot double-book a
+    # slot. Done once after the loop regardless of new phantoms so closed
+    # slots are released even on a phantom-free execute.
+    eval_date_string = latest_dates[0] if latest_dates else ""
+    existing_phantoms = _load_phantom_positions()
+    retained_phantoms = [
+        phantom
+        for phantom in existing_phantoms
+        if _phantom_still_open(phantom, eval_date_string)
+    ]
+    seen_phantom_keys = {
+        (phantom.get("symbol"), phantom.get("signal_date"))
+        for phantom in retained_phantoms
+    }
+    for record in confirmed_phantom_records:
+        key = (record.get("symbol"), record.get("signal_date"))
+        if key not in seen_phantom_keys:
+            retained_phantoms.append(record)
+            seen_phantom_keys.add(key)
+    if retained_phantoms != existing_phantoms:
+        _save_phantom_positions(retained_phantoms)
 
     trd_ctx.close()
     return {"results": results}

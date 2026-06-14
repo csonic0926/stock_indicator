@@ -895,3 +895,335 @@ def test_cron_dashboard_contract_names_layer_ownership() -> None:
     assert step_owners == ["Cron", "Dashboard", "Futu"]
     assert "Raw entries are strategy signals" in note_text
     assert "diagnostic" in note_text
+
+
+# ----------------------------------------------------------------------
+# WR-gate phantom (Step E): the order layer ANDs the cron's wr_degrading
+# flag with the month's risk score, holds a slot with zero capital, and
+# releases it when the position would have adaptively closed.
+# ----------------------------------------------------------------------
+
+
+def _write_phantom_csv(
+    data_directory: Path,
+    symbol: str,
+    rows: list[tuple[str, float, float, float]],
+) -> None:
+    """Write a per-symbol daily CSV (Date,open,high,low) compatible with
+    both _read_open_price and compute_adaptive_ft_close."""
+    data_directory.mkdir(parents=True, exist_ok=True)
+    lines = ["Date,open,high,low"]
+    for date_text, open_price, high_price, low_price in rows:
+        lines.append(f"{date_text},{open_price},{high_price},{low_price}")
+    (data_directory / f"{symbol}.csv").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
+
+
+def _write_phantom_fixture(
+    tmp_path: Path,
+    *,
+    signal_date: str,
+    risk_score: int,
+    wr_degrading: bool,
+    symbol: str = "PHX",
+    max_position_count: int = 6,
+) -> tuple[Path, Path]:
+    """Write a config WITH ft_family_wr_gate (activation 25) and a log
+    whose single gated-bucket FROZEN entry carries the wr_degrading flag."""
+    config_path = tmp_path / "multi_bucket_production.json"
+    risk_score_path = tmp_path / "historical_risk_scores.csv"
+    log_directory = tmp_path / "logs"
+    log_directory.mkdir(exist_ok=True)
+
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": max_position_count,
+                "risk_score_gate": {
+                    "csv_path": "historical_risk_scores.csv",
+                    "stop_threshold": 75,
+                },
+                "ft_family_wr_gate": {
+                    "sensor_bucket": "fish_tail_production",
+                    "gated_buckets": [
+                        "fish_tail_production",
+                        "fish_tail_squeeze",
+                    ],
+                    "window": 12,
+                    "curve": "wr_cross",
+                    "risk_score_activation_threshold": 25,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    risk_score_path.write_text(
+        "year_month,duration_score,breadth_score,risk_score,recommendation,key_event,confidence\n"
+        f"{signal_date[:7]},50,50,{risk_score},hold,test,H\n",
+        encoding="utf-8",
+    )
+    (log_directory / f"{signal_date}.log").write_text(
+        f"[ENTRY_SIGNAL] bucket=fish_tail_production "
+        f"strategy_id=fish_tail_blow_off_top symbol={symbol}\n"
+        f"accepted: [('{symbol}', 'fish_tail_production')]\n"
+        "rejected: []\n"
+        "max_position_count=6 held_before_today=0 same_day_closes=0\n"
+        "[ROLLING_TP_SL_STATE] winners=20 losers=20 pending_rolling=0 closed_trades=40\n"
+        "[FROZEN_TP_SL] "
+        f"entry_date={signal_date} bucket=fish_tail_production "
+        f"strategy_id=fish_tail_blow_off_top symbol={symbol} "
+        "dollar_volume_rank=0 tp_pct=0.050000 sl_pct=0.030000 "
+        "rolling_mp=0.040000 slope_60=0.1000 near_delta=0.2000 "
+        "min_hold_tp=1 disable_sl_trigger=True max_hold=7 "
+        f"wr_degrading={wr_degrading}\n",
+        encoding="utf-8",
+    )
+    return config_path, log_directory
+
+
+def _patch_phantom_paths(monkeypatch, repository_root: Path) -> Path:
+    """Point the module-level phantom constants at the temp tree and
+    return the daily data directory."""
+    live_state_directory = repository_root / "live_state"
+    live_state_directory.mkdir(parents=True, exist_ok=True)
+    data_directory = repository_root / "stock_data"
+    data_directory.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(
+        dashboard,
+        "PHANTOM_POSITIONS_PATH",
+        live_state_directory / "phantom_positions.json",
+    )
+    monkeypatch.setattr(
+        dashboard, "PRODUCTION_DATA_DIRECTORY", data_directory
+    )
+    return data_directory
+
+
+def test_preview_marks_gated_entry_phantom_when_rs_active(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """wr_degrading + risk_score >= activation -> phantom: zero qty, slot
+    held, phantom_record carried for execute persistence."""
+    config_path, log_directory = _write_phantom_fixture(
+        tmp_path, signal_date="2026-05-15", risk_score=30, wr_degrading=True
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    _patch_phantom_paths(monkeypatch, tmp_path)
+
+    preview = dashboard.api_preview_orders()
+
+    assert preview["risk_score_gate"]["status"] == "open"
+    order = preview["orders"][0]
+    assert order["symbol"] == "PHX"
+    assert order["status"] == "wr_gate_phantom"
+    assert order["qty"] == 0
+    assert order["phantom_record"] == {
+        "symbol": "PHX",
+        "signal_date": "2026-05-15",
+        "bucket": "fish_tail_production",
+        "tp_pct": 0.05,
+        "min_hold_tp": 1,
+        "max_hold": 7,
+    }
+
+
+def test_preview_no_phantom_when_rs_below_activation(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Below the activation threshold the gate is OFF; a degrading entry
+    funds normally."""
+    config_path, log_directory = _write_phantom_fixture(
+        tmp_path, signal_date="2026-05-15", risk_score=20, wr_degrading=True
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    _patch_phantom_paths(monkeypatch, tmp_path)
+
+    order = dashboard.api_preview_orders()["orders"][0]
+    assert order["symbol"] == "PHX"
+    assert order["qty"] > 0
+    assert order.get("status") != "wr_gate_phantom"
+
+
+def test_preview_no_phantom_when_not_degrading(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Active month but a non-degrading entry funds normally."""
+    config_path, log_directory = _write_phantom_fixture(
+        tmp_path, signal_date="2026-05-15", risk_score=30, wr_degrading=False
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    _patch_phantom_paths(monkeypatch, tmp_path)
+
+    order = dashboard.api_preview_orders()["orders"][0]
+    assert order["qty"] > 0
+    assert order.get("status") != "wr_gate_phantom"
+
+
+def test_phantom_still_open_detects_tp_close_and_open_hold(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """_phantom_still_open: a TP hit frees the slot; an unexited position
+    within its holding window keeps it."""
+    data_directory = _patch_phantom_paths(monkeypatch, tmp_path)
+    base = {
+        "symbol": "PHX",
+        "signal_date": "2026-05-15",
+        "fill_date": "2026-05-18",
+        "entry_price": 10.0,
+        "tp_pct": 0.05,
+        "min_hold_tp": 1,
+        "max_hold": 7,
+    }
+    # TP hit at the first post-entry bar (high 11.0 -> +10% >= 5%).
+    _write_phantom_csv(
+        data_directory,
+        "PHX",
+        [
+            ("2026-05-18", 10.0, 10.1, 9.9),
+            ("2026-05-19", 10.1, 11.0, 10.0),
+        ],
+    )
+    assert dashboard._phantom_still_open(dict(base), "2026-05-20") is False
+
+    # No TP, max_hold not reached -> still open.
+    _write_phantom_csv(
+        data_directory,
+        "PHX",
+        [
+            ("2026-05-18", 10.0, 10.1, 9.9),
+            ("2026-05-19", 10.1, 10.2, 10.0),
+        ],
+    )
+    assert dashboard._phantom_still_open(dict(base), "2026-05-20") is True
+
+
+def test_open_phantom_consumes_a_slot(tmp_path: Path, monkeypatch) -> None:
+    """A still-open phantom occupies a slot, so a fresh candidate is
+    slot_full when the real+phantom book is at capacity."""
+    config_path, log_directory = _write_phantom_fixture(
+        tmp_path,
+        signal_date="2026-05-15",
+        risk_score=20,  # gate OFF so AAA candidate is a normal BUY...
+        wr_degrading=False,
+        symbol="AAA",
+        max_position_count=1,
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    data_directory = _patch_phantom_paths(monkeypatch, tmp_path)
+    # An already-open phantom holds the single slot.
+    _write_phantom_csv(
+        data_directory,
+        "OLDPH",
+        [
+            ("2026-05-11", 10.0, 10.1, 9.9),
+            ("2026-05-12", 10.1, 10.2, 10.0),
+        ],
+    )
+    dashboard._save_phantom_positions([
+        {
+            "symbol": "OLDPH",
+            "signal_date": "2026-05-08",
+            "fill_date": "2026-05-11",
+            "entry_price": 10.0,
+            "bucket": "fish_tail_production",
+            "tp_pct": 0.05,
+            "min_hold_tp": 1,
+            "max_hold": 7,
+        }
+    ])
+
+    order = dashboard.api_preview_orders()["orders"][0]
+    assert order["symbol"] == "AAA"
+    assert order["status"] == "slot_full"
+
+
+def test_execute_records_phantom_and_places_no_order(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Executing a phantom order persists it to the phantom list and never
+    calls Futu place_order (status is in PREVIEW_SKIP_STATUSES)."""
+    repository_root = tmp_path
+    log_directory = tmp_path / "logs"
+    log_directory.mkdir(exist_ok=True)
+    (log_directory / "2026-05-15.log").write_text(
+        "max_position_count=6 held_before_today=0 same_day_closes=0\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "multi_bucket_production.json"
+    config_path.write_text(json.dumps({"max_position_count": 6}), encoding="utf-8")
+
+    placed: list[Any] = []
+
+    class _ExecCtx(FakeTradeContext):
+        def place_order(self, *args: Any, **kwargs: Any):
+            placed.append((args, kwargs))
+            return 0, pandas.DataFrame([{"order_id": "X1"}])
+
+        def order_list_query(self, trd_env: Any = None):
+            return 0, pandas.DataFrame([], columns=["code", "trd_side", "order_status", "order_id"])
+
+    futu_module = types.SimpleNamespace(
+        TrdEnv=types.SimpleNamespace(REAL="REAL"),
+        TrdSide=types.SimpleNamespace(BUY="BUY", SELL="SELL"),
+        OrderType=types.SimpleNamespace(MARKET="MARKET"),
+        ModifyOrderOp=types.SimpleNamespace(CANCEL="CANCEL"),
+    )
+    monkeypatch.setitem(sys.modules, "futu", futu_module)
+    monkeypatch.setattr(dashboard, "PRODUCTION_CONFIG_PATH", config_path)
+    monkeypatch.setattr(dashboard, "REPOSITORY_ROOT", repository_root)
+    monkeypatch.setattr(dashboard, "DATA_DIRECTORY", repository_root)
+    monkeypatch.setattr(dashboard, "LOGS_DIRECTORY", log_directory)
+    monkeypatch.setattr(dashboard, "_get_futu_trd_ctx", lambda: _ExecCtx())
+    monkeypatch.setattr(dashboard, "_get_trd_env", lambda: object())
+    data_directory = _patch_phantom_paths(monkeypatch, repository_root)
+    monkeypatch.setattr(dashboard, "_load_risk_score_gate_state", lambda d: {"status": "open"})
+
+    request = dashboard.ExecuteRequest(
+        orders=[
+            {
+                "side": "BUY",
+                "symbol": "PHX",
+                "qty": 0,
+                "status": "wr_gate_phantom",
+                "skip_reason": "WR-gate phantom",
+                "phantom_record": {
+                    "symbol": "PHX",
+                    "signal_date": "2026-05-15",
+                    "bucket": "fish_tail_production",
+                    "tp_pct": 0.05,
+                    "min_hold_tp": 1,
+                    "max_hold": 7,
+                },
+            }
+        ]
+    )
+    response = dashboard.api_execute_orders(request)
+
+    assert placed == []  # no real order placed for a phantom
+    assert response["results"][0]["status"] == "skipped"
+    stored = dashboard._load_phantom_positions()
+    assert [p["symbol"] for p in stored] == ["PHX"]
+    # Re-executing the same phantom must not double-book the slot.
+    dashboard.api_execute_orders(request)
+    assert len(dashboard._load_phantom_positions()) == 1
