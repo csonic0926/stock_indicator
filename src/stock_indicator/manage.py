@@ -4456,6 +4456,165 @@ class StockShell(cmd.Cmd):
             "month.\n"
         )
 
+    def do_merge_wr_gate_bootstrap(self, argument_line: str) -> None:  # noqa: D401
+        """merge_wr_gate_bootstrap EXPORT_PATH [--state STATE_PATH]
+
+        Cold-start install helper for the WR-gate. Non-destructively merges
+        ONLY ``wr_gate_sensor`` + ``wr_gate_pending_ft`` from a simulator
+        ``--export-state-on-date`` file into the live adaptive_state.json,
+        preserving the existing rolling pool, closed_trades, accepted_entries
+        and every other key untouched. Idempotent: re-running re-installs the
+        same two keys. STATE_PATH defaults to data/live_state/adaptive_state.json.
+        """
+        tokens = shlex.split(argument_line)
+        if not tokens:
+            self.stdout.write(
+                "usage: merge_wr_gate_bootstrap EXPORT_PATH [--state STATE_PATH]\n"
+            )
+            return
+        export_path = Path(tokens[0]).expanduser()
+        state_path = LIVE_STATE_DIRECTORY / "adaptive_state.json"
+        sensor_bucket = "fish_tail_production"
+        min_hold_tp = 1
+        token_index = 1
+        while token_index < len(tokens):
+            current_token = tokens[token_index]
+            if current_token == "--state" and token_index + 1 < len(tokens):
+                state_path = Path(tokens[token_index + 1]).expanduser()
+                token_index += 2
+            elif current_token == "--sensor-bucket" and token_index + 1 < len(tokens):
+                sensor_bucket = tokens[token_index + 1]
+                token_index += 2
+            elif current_token == "--min-hold-tp" and token_index + 1 < len(tokens):
+                min_hold_tp = int(tokens[token_index + 1])
+                token_index += 2
+            else:
+                token_index += 1
+
+        if not export_path.exists():
+            self.stdout.write(f"export file not found: {export_path}\n")
+            return
+        try:
+            with export_path.open("r", encoding="utf-8") as export_file:
+                export_document = json.load(export_file)
+        except (OSError, json.JSONDecodeError) as read_error:
+            self.stdout.write(f"failed to read export: {read_error}\n")
+            return
+
+        bootstrap_keys = ("wr_gate_sensor", "wr_gate_pending_ft")
+        if "wr_gate_sensor" not in export_document:
+            self.stdout.write(
+                "export has no wr_gate_sensor — run --export-state-on-date on a "
+                "config WITH ft_family_wr_gate. Aborting (no change).\n"
+            )
+            return
+
+        # Load the LIVE state via raw json (NOT load_state, which would
+        # cold-start on any schema hiccup) so the merge is provably
+        # non-destructive — every existing key is carried through verbatim.
+        if not state_path.exists():
+            self.stdout.write(
+                f"live state not found: {state_path}. The WR-gate bootstrap "
+                "merges into an existing adaptive_state.json — run the cron at "
+                "least once first. Aborting.\n"
+            )
+            return
+        try:
+            with state_path.open("r", encoding="utf-8") as state_file:
+                state_document = json.load(state_file)
+        except (OSError, json.JSONDecodeError) as read_error:
+            self.stdout.write(f"failed to read live state: {read_error}\n")
+            return
+        if not isinstance(state_document, dict):
+            self.stdout.write("live state is not a JSON object. Aborting.\n")
+            return
+
+        def _preserved_fingerprint(document: Dict[str, Any]) -> Dict[str, Any]:
+            """Snapshot every key EXCEPT the two bootstrap keys, for a
+            before/after non-destructiveness proof."""
+            return {
+                key: value
+                for key, value in document.items()
+                if key not in bootstrap_keys
+            }
+
+        before_fingerprint = _preserved_fingerprint(state_document)
+        before_keys = sorted(state_document.keys())
+
+        # Sensor is UNIVERSAL (deterministic from the sim) — copy verbatim.
+        state_document["wr_gate_sensor"] = export_document["wr_gate_sensor"]
+
+        # Pending is PER-MACHINE: the export's pending reflects the sim's
+        # open positions on the sim dataset, which do NOT match this
+        # machine's live open positions. Derive it from THIS state's own
+        # accepted_entries so the cron feeds the sensor when the real
+        # currently-open sensor-bucket positions close. Entries pre-dating
+        # the gate were never register_wr_gate_pending_entry'd, so this
+        # bootstrap is the one place they get picked up.
+        derived_pending: List[Dict[str, Any]] = []
+        for entry in state_document.get("accepted_entries", []):
+            if entry.get("bucket") != sensor_bucket:
+                continue
+            derived_pending.append({
+                "symbol": entry.get("symbol"),
+                "signal_date": entry.get("entry_date"),
+                "tp_pct": entry.get("tp_pct"),
+                "min_hold_tp": min_hold_tp,
+                "max_hold": entry.get("max_hold"),
+            })
+        state_document["wr_gate_pending_ft"] = derived_pending
+
+        after_fingerprint = _preserved_fingerprint(state_document)
+        if after_fingerprint != before_fingerprint:
+            self.stdout.write(
+                "ABORT: merge would alter a preserved key (non-destructive "
+                "guarantee violated). No file written.\n"
+            )
+            return
+
+        multi_bucket_today.save_state_atomically(state_path, state_document)
+
+        # Verify summary.
+        sensor = state_document.get("wr_gate_sensor", {})
+        cross_window = sensor.get("cross_window", [])
+        pending = state_document.get("wr_gate_pending_ft", [])
+        pending_symbols = [position.get("symbol") for position in pending]
+        captured_at = export_document.get("captured_at_date", "?")
+        self.stdout.write(
+            "WR-gate bootstrap merged (non-destructive).\n"
+            f"  state file:    {state_path}\n"
+            f"  export from:   {export_path} (captured_at={captured_at})\n"
+            f"  preserved keys ({len(before_keys)}): {before_keys}\n"
+            f"    winners={len(state_document.get('winners', []))} "
+            f"losers={len(state_document.get('losers', []))} "
+            f"closed_trades={len(state_document.get('closed_trades', []))} "
+            f"accepted_entries={len(state_document.get('accepted_entries', []))}\n"
+            f"  installed wr_gate_sensor: cross_ema={sensor.get('cross_ema')} "
+            f"cross_window={len(cross_window)} "
+            f"winner_pcts={len(sensor.get('winner_pcts', []))} "
+            f"loser_pcts={len(sensor.get('loser_pcts', []))}\n"
+            f"  derived wr_gate_pending_ft from accepted_entries "
+            f"(bucket={sensor_bucket}): {len(pending)} open {pending_symbols}\n"
+        )
+
+    def help_merge_wr_gate_bootstrap(self) -> None:
+        """Display help for merge_wr_gate_bootstrap."""
+        self.stdout.write(
+            "merge_wr_gate_bootstrap EXPORT_PATH [--state STATE_PATH]\n"
+            "Non-destructively install the WR-gate cold-start sensor.\n"
+            "Step 1: produce the export with a warm sensor:\n"
+            "  multi_bucket_simulation CONFIG_WITH_ft_family_wr_gate \\\n"
+            "    --export-state-on-date YYYY-MM-DD --export-state-out PATH\n"
+            "Step 2: merge it into the live state (this command). The\n"
+            "sensor is copied verbatim (universal/deterministic); pending is\n"
+            "DERIVED from this machine's accepted_entries (per-machine open\n"
+            "positions), since the sim's pending won't match live holdings.\n"
+            "The rolling pool, closed_trades, and accepted_entries are\n"
+            "preserved verbatim (aborts if any preserved key would change).\n"
+            "Idempotent. --sensor-bucket / --min-hold-tp override defaults\n"
+            "(fish_tail_production / 1).\n"
+        )
+
     def do_compute_adaptive_tp_sl(self, argument_line: str) -> None:  # noqa: D401
         """compute_adaptive_tp_sl
         System A: compute adaptive TP/SL from rolling raw trade stats.
