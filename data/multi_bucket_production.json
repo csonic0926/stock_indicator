@@ -11,6 +11,16 @@
     "csv_path": "data/historical_risk_scores.csv",
     "stop_threshold": 75
   },
+  "ft_family_wr_gate": {
+    "sensor_bucket": "fish_tail_production",
+    "gated_buckets": [
+      "fish_tail_production",
+      "fish_tail_squeeze"
+    ],
+    "window": 12,
+    "curve": "wr_cross",
+    "risk_score_activation_threshold": 25
+  },
   "adaptive_tp_sl": {
     "window": 20,
     "sigma": 0.5,
