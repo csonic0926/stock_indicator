@@ -3,6 +3,7 @@
 import pandas as pd
 import pytest
 
+from stock_indicator import strategy
 from stock_indicator.strategy import (
     WRGateConfig,
     compute_wr_gate_score,
@@ -229,9 +230,78 @@ def test_compute_adaptive_ft_close_matches_simulator() -> None:
         )
         if result is None:
             continue
-        win, pct, reason = result
+        win, pct, reason, adaptive_date = result
         checked += 1
         assert reason == row.exit_reason, (row.symbol, row.entry_date)
         assert pct == pytest.approx(row.percentage_change, abs=1e-4)
         assert win == (row.percentage_change > 0)
     assert checked >= 50
+
+
+def test_daily_flow_sensor_matches_direct_feed() -> None:
+    """The daily-flow sensor maintenance (register + advance over business
+    days) must reproduce a direct sensor-bucket adaptive-close feed —
+    validating the pending-list bookkeeping, same-date ordering, signal vs
+    TP/max_hold classification, and no-lookahead timing end-to-end. The
+    direct feed (sensor bucket, exit-then-entry order) is itself the order
+    that matches the simulator's exported sensor byte-for-byte."""
+    import glob
+    import pathlib
+    from stock_indicator import multi_bucket_today as mbt
+    csvs = glob.glob("logs/multi_bucket_simulation_result/*rs25_2010*.csv")
+    if not csvs:
+        pytest.skip("no rs25 2010 trade-detail CSV available")
+    df = pd.read_csv(csvs[0], parse_dates=["entry_date", "exit_date"])
+    data_dir = pathlib.Path("data/stock_data_2010_yf_clean")
+    cfg = strategy.WRGateConfig(window=12, curve="wr_cross")
+    sb = "fish_tail_production"
+    start, cut = pd.Timestamp("2010-01-01"), pd.Timestamp("2013-01-01")
+    bucket_df = df[df.bucket == sb].copy()
+    bucket_df["win"] = bucket_df.result == "win"
+
+    # Reference: direct feed, exit<cut, (exit_date, entry_date) order.
+    reference = {"cross_ema": None, "cross_window": [], "winner_pcts": [], "loser_pcts": []}
+    for row in bucket_df[bucket_df.exit_date < cut].sort_values(
+        ["exit_date", "entry_date"]
+    ).itertuples():
+        strategy.update_wr_gate_sensor_state(
+            reference, bool(row.win), float(row.percentage_change), 12
+        )
+
+    # Daily flow.
+    state = {
+        "wr_gate_sensor": {"cross_ema": None, "cross_window": [], "winner_pcts": [], "loser_pcts": []},
+        "wr_gate_pending_ft": [],
+        "closed_trades": [],
+    }
+    by_signal: dict = {}
+    sig_closes: dict = {}
+    for row in bucket_df.itertuples():
+        signal = (row.entry_date - pd.offsets.BDay(1)).normalize()
+        by_signal.setdefault(signal, []).append(row)
+        if row.exit_reason == "signal":
+            sig_closes.setdefault(row.exit_date.normalize(), []).append(
+                (row.symbol, str(signal.date()), str(row.exit_date.date()),
+                 float(row.percentage_change))
+            )
+    for day in pd.bdate_range(start, cut):
+        for symbol, sig_d, exit_d, raw_pct in sig_closes.get(day.normalize(), []):
+            state["closed_trades"].append({
+                "symbol": symbol, "bucket": sb, "entry_date": sig_d,
+                "exit_date": exit_d, "raw_pct": raw_pct,
+            })
+        for row in by_signal.get(day.normalize(), []):
+            mbt.register_wr_gate_pending_entry(
+                state, cfg, row.bucket, row.symbol,
+                str((row.entry_date - pd.offsets.BDay(1)).date()),
+                float(row.adaptive_tp_pct), 1, 7,
+            )
+        mbt.advance_wr_gate_sensor(state, cfg, str(day.date()), data_dir)
+
+    sensor = state["wr_gate_sensor"]
+    assert sensor["cross_ema"] == pytest.approx(reference["cross_ema"], abs=1e-9)
+    assert sensor["cross_window"] == reference["cross_window"]
+    # winner/loser magnitudes within CSV rounding (6 dp).
+    assert len(sensor["winner_pcts"]) == len(reference["winner_pcts"])
+    for produced, expected in zip(sensor["winner_pcts"], reference["winner_pcts"]):
+        assert produced == pytest.approx(expected, abs=5e-6)

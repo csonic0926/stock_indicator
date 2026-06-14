@@ -838,7 +838,7 @@ def compute_adaptive_ft_close(
     *,
     min_hold_tp: int,
     max_hold: int | None,
-) -> tuple[bool, float, str] | None:
+) -> tuple[bool, float, str, pandas.Timestamp] | None:
     """Compute a closed ft trade's ADAPTIVE (TP/SL) exit for the WR-gate
     sensor, by reconstructing the entry-relative bar path from the daily
     price cache and replaying it through the simulator's own
@@ -848,7 +848,8 @@ def compute_adaptive_ft_close(
     the signal exit (horizon). Bars start strictly AFTER the entry bar
     (validated byte-for-byte against the simulator: 734/734 ft TP/max_hold
     trades match on exit date, reason and pct). Returns
-    ``(win, pct, exit_reason)`` or None when price history is missing.
+    ``(win, pct, exit_reason, adaptive_exit_date)`` or None when price
+    history is missing.
     """
 
     price_path = data_directory / f"{symbol}.csv"
@@ -869,9 +870,12 @@ def compute_adaptive_ft_close(
     bar_excursions: list[tuple[pandas.Timestamp, float, float, float]] = []
     for row_position in range(entry_position + 1, len(frame.index)):
         bar_date = frame.index[row_position]
-        # Walk one bar past the horizon so max_hold's next-bar-open exit
-        # is reachable; the replay stops at TP/max_hold/signal anyway.
-        if bar_date > horizon_timestamp + pandas.offsets.BDay(2):
+        # Excursions end at the horizon (the signal-exit bar), exactly
+        # like the simulator's bar_excursions. A TP/max_hold beyond the
+        # horizon must NOT fire — that is the signal exit's territory.
+        # max_hold's next-bar-open exit only fires when that next bar is
+        # within the horizon (mirrors the sim's next_idx < len check).
+        if bar_date > horizon_timestamp:
             break
         bar = frame.iloc[row_position]
         bar_excursions.append((
@@ -903,7 +907,167 @@ def compute_adaptive_ft_close(
     adaptive_pct = (
         (adaptive_trade.exit_price - entry_price) / entry_price
     )
-    return adaptive_pct > 0, adaptive_pct, adaptive_trade.exit_reason
+    return (
+        adaptive_pct > 0,
+        adaptive_pct,
+        adaptive_trade.exit_reason,
+        adaptive_trade.exit_date,
+    )
+
+
+def advance_wr_gate_sensor(
+    state: Dict[str, Any],
+    gate_config: "strategy.WRGateConfig | None",
+    eval_date_string: str,
+    data_directory: Path,
+) -> List[str]:
+    """Feed ft adaptive closes to the WR-gate sensor for any close that
+    completed STRICTLY before eval_date, in adaptive-exit-date order, and
+    maintain ``wr_gate_pending_ft`` in place.
+
+    Mirrors the simulator: the sensor is fed each ft trade's adaptive
+    (TP/max_hold/signal) outcome at its adaptive exit date — NOT at the
+    signal-exit date the virtual ledger discovers it. So each daily run
+    replays open ft positions to detect TP/max_hold closes, and resolves
+    signal closes via the recorded exit date as the replay horizon. The
+    strictly-before-eval-date rule preserves no-lookahead (a close on day
+    D never feeds D's own entries). No-op without a bootstrapped sensor
+    (gate stays off — the safe default until --export-state-on-date seeds
+    ``wr_gate_sensor``).
+    """
+
+    log_messages: List[str] = []
+    if gate_config is None:
+        return log_messages
+    sensor = state.get("wr_gate_sensor")
+    if sensor is None:
+        return log_messages
+    pending: List[Dict[str, Any]] = state.setdefault("wr_gate_pending_ft", [])
+    eval_timestamp = pandas.Timestamp(eval_date_string)
+    signal_exit_by_key: Dict[tuple, str] = {}
+    for closed_trade in state.get("closed_trades", []):
+        if (
+            closed_trade.get("bucket") == gate_config.sensor_bucket
+            and closed_trade.get("exit_date")
+        ):
+            signal_exit_by_key[
+                (closed_trade.get("symbol"), closed_trade.get("entry_date"))
+            ] = (
+                closed_trade.get("exit_date"),
+                closed_trade.get("raw_pct"),
+            )
+
+    feeds: List[tuple] = []
+    still_pending: List[Dict[str, Any]] = []
+    for position in pending:
+        signal_date_string = position["signal_date"]
+        # Lazy fill resolution: entry fills at signal+1 open.
+        fill_date_string = position.get("fill_date") or _execution_date_string(
+            signal_date_string
+        )
+        entry_price = position.get("entry_price")
+        if entry_price is None:
+            resolved = _read_open_price(
+                data_directory, position["symbol"], fill_date_string
+            )
+            if resolved is not None:
+                position["fill_date"] = fill_date_string
+                position["entry_price"] = round(float(resolved), 4)
+                entry_price = position["entry_price"]
+        if entry_price is None:
+            still_pending.append(position)
+            continue
+        signal_close = signal_exit_by_key.get(
+            (position["symbol"], signal_date_string)
+        )
+        signal_exit_string = signal_close[0] if signal_close else None
+        # Replay only detects TP / max_hold (which fire before any signal
+        # exit). Horizon = the signal exit when known, else today.
+        horizon_string = signal_exit_string or eval_date_string
+        adaptive = compute_adaptive_ft_close(
+            data_directory,
+            position["symbol"],
+            fill_date_string,
+            float(entry_price),
+            horizon_string,
+            float(position["tp_pct"]),
+            min_hold_tp=int(position["min_hold_tp"]),
+            max_hold=position.get("max_hold"),
+        )
+        if adaptive is None:
+            still_pending.append(position)
+            continue
+        win, pct, reason, adaptive_exit_timestamp = adaptive
+        if reason in ("adaptive_take_profit", "max_hold"):
+            # TP / max_hold is the true adaptive exit.
+            if adaptive_exit_timestamp < eval_timestamp:
+                feeds.append((
+                    adaptive_exit_timestamp, fill_date_string,
+                    position["symbol"], win, pct, reason,
+                ))
+            else:
+                still_pending.append(position)
+        elif signal_close is not None:
+            # No TP/max_hold before the signal exit -> the signal exit IS
+            # the adaptive exit; use the recorded raw_pct (the replay's
+            # fall-through price is not a real exit).
+            signal_raw_pct = signal_close[1]
+            signal_exit_timestamp = pandas.Timestamp(signal_exit_string)
+            if signal_raw_pct is None:
+                still_pending.append(position)
+            elif signal_exit_timestamp < eval_timestamp:
+                feeds.append((
+                    signal_exit_timestamp, fill_date_string,
+                    position["symbol"], float(signal_raw_pct) > 0,
+                    float(signal_raw_pct), "signal",
+                ))
+            else:
+                still_pending.append(position)
+        else:
+            # Still open: no TP/max_hold and not signal-closed yet.
+            still_pending.append(position)
+
+    # Feed in adaptive-exit-date order; tie-break by (fill_date, symbol)
+    # to approximate the simulator's insertion (entry) order for closes
+    # that land on the same date, keeping the EMA path deterministic.
+    feeds.sort(key=lambda feed: (feed[0], feed[1]))
+    for adaptive_date, _fill, symbol, win, pct, reason in feeds:
+        strategy.update_wr_gate_sensor_state(
+            sensor, win, pct, gate_config.window
+        )
+        log_messages.append(
+            f"  WR-gate sensor fed {symbol} "
+            f"({reason} {adaptive_date.date()}): {pct:+.2%}"
+        )
+    state["wr_gate_pending_ft"] = still_pending
+    return log_messages
+
+
+def register_wr_gate_pending_entry(
+    state: Dict[str, Any],
+    gate_config: "strategy.WRGateConfig | None",
+    bucket_label: str,
+    symbol: str,
+    signal_date_string: str,
+    tp_pct: float,
+    min_hold_tp: int,
+    max_hold: int | None,
+) -> None:
+    """Track a newly accepted gated-bucket entry as awaiting its adaptive
+    close, so advance_wr_gate_sensor will feed the sensor when it closes.
+    Fill price is resolved lazily on a later run."""
+
+    # Only the sensor bucket feeds the WR cross stream (gated_buckets are
+    # phantom-gated by it, but the sensor reads sensor_bucket alone).
+    if gate_config is None or bucket_label != gate_config.sensor_bucket:
+        return
+    state.setdefault("wr_gate_pending_ft", []).append({
+        "symbol": symbol,
+        "signal_date": signal_date_string,
+        "tp_pct": float(tp_pct),
+        "min_hold_tp": int(min_hold_tp),
+        "max_hold": max_hold,
+    })
 
 
 def compute_fuel_drawdown_for_today(

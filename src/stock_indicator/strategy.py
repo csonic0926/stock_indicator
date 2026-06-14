@@ -1597,6 +1597,65 @@ def _build_wr_gate_sensor_export(
     }
 
 
+def _build_wr_gate_pending_export(
+    export_date: pandas.Timestamp,
+    wr_gate: "WRGateConfig",
+    accepted_trades_by_set: dict[str, list["Trade"]],
+    adaptive_original_trade: dict[int, "Trade"],
+    adaptive_tp_sl_applied: dict[int, tuple[float, float]],
+    artifacts_by_set: dict,
+    set_definitions: dict,
+    adaptive_tp_sl: "AdaptiveTPSLConfig",
+) -> list[dict[str, Any]]:
+    """Capture the gated-bucket positions still OPEN at the export date so
+    the live path can keep feeding the sensor when they adaptively close.
+
+    A position is open when ``entry_date <= export_date < adaptive_exit``.
+    Each record carries everything the live adaptive replay needs: the
+    fill date/price, the frozen TP pct that was applied, the effective TP
+    min-hold, and the bucket's max_hold. Without this the sensor would
+    silently miss every trade that was open at bootstrap.
+    """
+
+    pending: list[dict[str, Any]] = []
+    # Only the sensor bucket feeds the WR cross stream.
+    for label in (wr_gate.sensor_bucket,):
+        trades_for_label = accepted_trades_by_set.get(label)
+        if not trades_for_label:
+            continue
+        bucket_def = set_definitions[label]
+        override_tp = (
+            bucket_def.override_min_hold_tp_only
+            if bucket_def.override_min_hold_tp_only is not None
+            else adaptive_tp_sl.override_min_hold_tp_only
+        )
+        min_hold_tp_value = (
+            bucket_def.min_hold_tp
+            if bucket_def.min_hold_tp is not None
+            else adaptive_tp_sl.min_hold_tp
+        )
+        effective_min_hold_tp = int(min_hold_tp_value) if override_tp else 0
+        symbol_lookup = artifacts_by_set[label].trade_symbol_lookup
+        for trade in trades_for_label:
+            if not (trade.entry_date <= export_date < trade.exit_date):
+                continue
+            original_trade = adaptive_original_trade.get(id(trade), trade)
+            symbol = symbol_lookup.get(original_trade, "")
+            applied_tp_pct = adaptive_tp_sl_applied.get(id(trade), (0.0, 0.0))[0]
+            pending.append({
+                "symbol": symbol,
+                "fill_date": trade.entry_date.strftime("%Y-%m-%d"),
+                "signal_date": (
+                    trade.entry_date - pandas.offsets.BDay(1)
+                ).strftime("%Y-%m-%d"),
+                "entry_price": float(trade.entry_price),
+                "tp_pct": float(applied_tp_pct),
+                "min_hold_tp": effective_min_hold_tp,
+                "max_hold": bucket_def.max_hold,
+            })
+    return pending
+
+
 def update_wr_gate_sensor_state(
     sensor_state: dict[str, Any],
     win: bool,
@@ -2347,6 +2406,18 @@ def run_complex_simulation(
                                 wr_gate_loser_pcts,
                             )
                         )
+                        exported_state["wr_gate_pending_ft"] = (
+                            _build_wr_gate_pending_export(
+                                export_state_at_date,
+                                wr_gate,
+                                accepted_trades_by_set,
+                                adaptive_original_trade,
+                                adaptive_tp_sl_applied,
+                                artifacts_by_set,
+                                set_definitions,
+                                adaptive_tp_sl,
+                            )
+                        )
                     exported_state["_captured"] = True
 
             process_close = False
@@ -3065,6 +3136,18 @@ def run_complex_simulation(
                         wr_gate_cross_window,
                         wr_gate_winner_pcts,
                         wr_gate_loser_pcts,
+                    )
+                )
+                exported_state["wr_gate_pending_ft"] = (
+                    _build_wr_gate_pending_export(
+                        export_state_at_date,
+                        wr_gate,
+                        accepted_trades_by_set,
+                        adaptive_original_trade,
+                        adaptive_tp_sl_applied,
+                        artifacts_by_set,
+                        set_definitions,
+                        adaptive_tp_sl,
                     )
                 )
             exported_state["_captured"] = True
