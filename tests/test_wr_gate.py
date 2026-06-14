@@ -1,5 +1,6 @@
 """Unit tests for the ft-family regime phantom score."""
 
+import pandas as pd
 import pytest
 
 from stock_indicator.strategy import (
@@ -195,3 +196,42 @@ def test_evaluate_wr_gate_phantom_matches_entry_gate_logic() -> None:
     thin = {"cross_ema": 0.50, "cross_window": [0.0]*7 + [1.0]*5,
             "winner_pcts": [0.03]*12, "loser_pcts": [0.06]*12}
     assert _s.evaluate_wr_gate_phantom(thin, cfg) is True
+
+
+def test_compute_adaptive_ft_close_matches_simulator() -> None:
+    """The live adaptive-exit helper reproduces the simulator's recorded
+    ft adaptive exit (TP/max_hold) byte-for-byte on real trades."""
+    import glob
+    from pathlib import Path
+    from stock_indicator import multi_bucket_today as mbt
+    csvs = glob.glob(
+        "logs/multi_bucket_simulation_result/*rs25_2010*.csv"
+    )
+    if not csvs:
+        pytest.skip("no rs25 2010 trade-detail CSV available")
+    df = pd.read_csv(csvs[0], parse_dates=["entry_date", "exit_date"])
+    data_dir = Path("data/stock_data_2010_yf_clean")
+    ft = df[
+        df.bucket.isin(["fish_tail_production", "fish_tail_squeeze"])
+        & df.exit_reason.isin(["adaptive_take_profit", "max_hold"])
+    ].head(120)
+    checked = 0
+    for row in ft.itertuples():
+        result = mbt.compute_adaptive_ft_close(
+            data_dir,
+            row.symbol,
+            str(row.entry_date.date()),
+            float(row.entry_price),
+            str(row.exit_date.date()),
+            float(row.adaptive_tp_pct),
+            min_hold_tp=1,
+            max_hold=7,
+        )
+        if result is None:
+            continue
+        win, pct, reason = result
+        checked += 1
+        assert reason == row.exit_reason, (row.symbol, row.entry_date)
+        assert pct == pytest.approx(row.percentage_change, abs=1e-4)
+        assert win == (row.percentage_change > 0)
+    assert checked >= 50

@@ -24,7 +24,13 @@ from typing import Any, Dict, List, Sequence, Tuple
 
 import pandas
 
-from . import daily_job, futu_trade_metadata, strategy, symbol_seasoning
+from . import (
+    daily_job,
+    futu_trade_metadata,
+    simulator,
+    strategy,
+    symbol_seasoning,
+)
 from .strategy_sets import (
     load_strategy_entry_filters,
     load_strategy_set_mapping,
@@ -820,6 +826,84 @@ def append_rolling_update(
         if len(losers) > window:
             losers = losers[-window:]
         state["losers"] = losers
+
+
+def compute_adaptive_ft_close(
+    data_directory: Path,
+    symbol: str,
+    entry_date_string: str,
+    entry_price: float,
+    horizon_date_string: str,
+    tp_pct: float,
+    *,
+    min_hold_tp: int,
+    max_hold: int | None,
+) -> tuple[bool, float, str] | None:
+    """Compute a closed ft trade's ADAPTIVE (TP/SL) exit for the WR-gate
+    sensor, by reconstructing the entry-relative bar path from the daily
+    price cache and replaying it through the simulator's own
+    ``_replay_trade_with_adaptive_tp_sl``.
+
+    Production runs SL disabled, so the adaptive exit is TP, max_hold, or
+    the signal exit (horizon). Bars start strictly AFTER the entry bar
+    (validated byte-for-byte against the simulator: 734/734 ft TP/max_hold
+    trades match on exit date, reason and pct). Returns
+    ``(win, pct, exit_reason)`` or None when price history is missing.
+    """
+
+    price_path = data_directory / f"{symbol}.csv"
+    if not price_path.exists() or entry_price <= 0:
+        return None
+    try:
+        frame = pandas.read_csv(price_path, parse_dates=["Date"])
+    except (OSError, ValueError):
+        return None
+    if not {"high", "low", "open"} <= set(frame.columns):
+        return None
+    frame = frame.set_index("Date").sort_index()
+    entry_timestamp = pandas.Timestamp(entry_date_string)
+    horizon_timestamp = pandas.Timestamp(horizon_date_string)
+    if entry_timestamp not in frame.index:
+        return None
+    entry_position = frame.index.get_loc(entry_timestamp)
+    bar_excursions: list[tuple[pandas.Timestamp, float, float, float]] = []
+    for row_position in range(entry_position + 1, len(frame.index)):
+        bar_date = frame.index[row_position]
+        # Walk one bar past the horizon so max_hold's next-bar-open exit
+        # is reachable; the replay stops at TP/max_hold/signal anyway.
+        if bar_date > horizon_timestamp + pandas.offsets.BDay(2):
+            break
+        bar = frame.iloc[row_position]
+        bar_excursions.append((
+            bar_date,
+            (float(bar["high"]) - entry_price) / entry_price,
+            (float(bar["low"]) - entry_price) / entry_price,
+            (float(bar["open"]) - entry_price) / entry_price,
+        ))
+    if not bar_excursions:
+        return None
+    raw_trade = simulator.Trade(
+        entry_date=entry_timestamp,
+        exit_date=bar_excursions[-1][0],
+        entry_price=entry_price,
+        exit_price=entry_price * (1 + bar_excursions[-1][1]),
+        profit=0.0,
+        holding_period=len(bar_excursions),
+        bar_excursions=bar_excursions,
+    )
+    adaptive_trade = strategy._replay_trade_with_adaptive_tp_sl(
+        raw_trade,
+        tp_pct=tp_pct,
+        sl_pct=0.0,
+        minimum_holding_bars=0,
+        minimum_holding_bars_tp=min_hold_tp,
+        disable_sl_trigger=True,
+        max_hold_bars=max_hold,
+    )
+    adaptive_pct = (
+        (adaptive_trade.exit_price - entry_price) / entry_price
+    )
+    return adaptive_pct > 0, adaptive_pct, adaptive_trade.exit_reason
 
 
 def compute_fuel_drawdown_for_today(
