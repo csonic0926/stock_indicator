@@ -69,6 +69,11 @@ class MultiBucketRunConfig:
     max_same_symbol: int
     raw_document: Dict[str, Any]
     symbol_seasoning: symbol_seasoning.SymbolSeasoningConfig | None = None
+    # WR-gate (phantom) sensor config. The cron only maintains the sensor
+    # and emits the per-entry degrading flag; the RS-combine + phantom
+    # execution (slot occupancy, exit) live entirely in the order layer
+    # (dashboard). None means the gate is unconfigured (cron stays inert).
+    wr_gate: "strategy.WRGateConfig | None" = None
 
 
 def _parse_volume_filter_text(text: str) -> Tuple[float | None, float | None, int | None, int]:
@@ -669,6 +674,39 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
         document.get("symbol_seasoning")
     )
 
+    # WR-gate sensor config. The cron consumes only the sensor-facing
+    # fields (sensor_bucket / gated_buckets / window / curve) to maintain
+    # the win-rate cross and stamp the per-entry degrading flag. The
+    # risk_score_activation_threshold is intentionally NOT applied here —
+    # the RS combine belongs to the dashboard's order layer. Mirrors the
+    # simulator parse in manage.py so both read the same JSON key.
+    wr_gate_config: strategy.WRGateConfig | None = None
+    raw_wr_gate = document.get("ft_family_wr_gate")
+    if raw_wr_gate is not None:
+        wr_gate_config = strategy.WRGateConfig(
+            sensor_bucket=str(
+                raw_wr_gate.get("sensor_bucket", "fish_tail_production")
+            ),
+            gated_buckets=tuple(
+                raw_wr_gate.get(
+                    "gated_buckets",
+                    ["fish_tail_production", "fish_tail_squeeze"],
+                )
+            ),
+            window=int(raw_wr_gate.get("window", 12)),
+            score_threshold=float(raw_wr_gate.get("score_threshold", 0.5)),
+            weight_wr=float(raw_wr_gate.get("weight_wr", 0.5)),
+            weight_no_tp=float(raw_wr_gate.get("weight_no_tp", 0.5)),
+            weight_max_hold=float(raw_wr_gate.get("weight_max_hold", 0.0)),
+            curve=str(raw_wr_gate.get("curve", "score")),
+            risk_score_activation_threshold=(
+                int(raw_wr_gate["risk_score_activation_threshold"])
+                if raw_wr_gate.get("risk_score_activation_threshold")
+                is not None
+                else None
+            ),
+        )
+
     return MultiBucketRunConfig(
         bucket_definitions=bucket_definitions,
         adaptive_tp_sl=adaptive_tp_sl_config,
@@ -693,6 +731,7 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
         max_same_symbol=int(document.get("max_same_symbol", 1)),
         raw_document=document,
         symbol_seasoning=seasoning_config,
+        wr_gate=wr_gate_config,
     )
 
 
@@ -1382,6 +1421,20 @@ def compute_today_signals(
     log_lines.extend(fill_messages)
 
     # ------------------------------------------------------------------
+    # Step A2. WR-gate sensor maintenance. Feed any sensor-bucket adaptive
+    # close that completed STRICTLY before today into the win-rate cross,
+    # so the degrading flag stamped on today's entries reflects the same
+    # sensor state the simulator's entry gate reads (no-lookahead). No-op
+    # until the gate is configured AND the sensor has been bootstrapped via
+    # --export-state-on-date. Runs after Step A so signal closes carry
+    # their filled raw_pct.
+    # ------------------------------------------------------------------
+    sensor_messages = advance_wr_gate_sensor(
+        state, config.wr_gate, eval_date_string, data_directory
+    )
+    log_lines.extend(sensor_messages)
+
+    # ------------------------------------------------------------------
     # Step B. Per-bucket signal generation via compute_signals_for_date.
     # ------------------------------------------------------------------
     per_bucket_signals: Dict[str, Dict[str, Any]] = {}
@@ -1715,6 +1768,21 @@ def compute_today_signals(
         held_symbol_counts_after[symbol_name] = (
             held_symbol_counts_after.get(symbol_name, 0) + 1
         )
+        # Track sensor-bucket entries so the WR-gate sensor is fed when
+        # they adaptively close on a future run. Self-filters to
+        # sensor_bucket; no-op when the gate is unconfigured. entry_date
+        # is the signal date here (the cron evaluates on the signal day;
+        # the fill lands T+1), which is exactly what the sensor expects.
+        register_wr_gate_pending_entry(
+            state,
+            config.wr_gate,
+            bucket_label,
+            symbol_name,
+            candidate_record.entry_date,
+            candidate_record.tp_pct,
+            adaptive.min_hold_tp,
+            candidate_record.max_hold,
+        )
 
     # ------------------------------------------------------------------
     # Step G. Build new signal_trades dict (retained held + new accepted).
@@ -1818,12 +1886,30 @@ def compute_today_signals(
             f"reset_hold_on_reentry_signal={bucket_def.reset_hold_on_reentry_signal}"
         )
 
+    # WR-gate degrading flag. The sensor is identical for every entry on
+    # this run (it advanced once, before any entry decision), so evaluate
+    # it once. The flag is the cron's endogenous half of the phantom
+    # decision; the dashboard ANDs it with the month's risk score and owns
+    # the phantom execution (slot occupancy + exit). Stamped only on gated
+    # buckets — non-gated entries always read wr_degrading=False.
+    wr_gate_degrading = False
+    if config.wr_gate is not None:
+        sensor_state = state.get("wr_gate_sensor")
+        if sensor_state is not None:
+            wr_gate_degrading = strategy.evaluate_wr_gate_phantom(
+                sensor_state, config.wr_gate
+            )
     for record in accepted_records:
         slope_text = (
             f"{record.slope_60:.4f}" if record.slope_60 is not None else "None"
         )
         near_delta_text = (
             f"{record.near_delta:.4f}" if record.near_delta is not None else "None"
+        )
+        record_degrading = (
+            wr_gate_degrading
+            and config.wr_gate is not None
+            and record.bucket_label in config.wr_gate.gated_buckets
         )
         log_lines.append(
             f"[FROZEN_TP_SL] entry_date={record.entry_date} "
@@ -1836,6 +1922,7 @@ def compute_today_signals(
             f"min_hold_tp={adaptive.min_hold_tp} "
             f"disable_sl_trigger={adaptive.disable_sl_trigger} "
             f"max_hold={record.max_hold} "
+            f"wr_degrading={record_degrading} "
             f"reset_hold_on_reentry_signal={record.reset_hold_on_reentry_signal}"
         )
 

@@ -363,6 +363,117 @@ def test_compute_today_signals_emits_all_dashboard_exit_signals(
     ] == [True, True]
 
 
+def test_compute_today_signals_stamps_wr_degrading_on_gated_buckets_only(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """When the gate is configured and the bootstrapped sensor is
+    degrading, the cron stamps wr_degrading=True on FROZEN_TP_SL lines of
+    GATED buckets only (non-gated buckets always read False), and the
+    accepted sensor-bucket entry is registered as a pending position for
+    future sensor feeding. This is the cron's endogenous half of the
+    phantom decision; the RS combine + execution belong to the dashboard."""
+
+    signal_results_by_strategy: dict[str, dict[str, Any]] = {
+        "fish_head_production_buy": {
+            "filtered_symbols": [("VST", 1)],
+            "entry_signals": ["VST"],
+            "exit_signals": [],
+        },
+        "fish_tail_explore_buy": {
+            "filtered_symbols": [("AMZN", 1)],
+            "entry_signals": ["AMZN"],
+            "exit_signals": [],
+        },
+    }
+
+    monkeypatch.setattr(
+        strategy,
+        "compute_signals_for_date",
+        lambda *, buy_strategy_name, **_: signal_results_by_strategy[
+            buy_strategy_name
+        ],
+    )
+    monkeypatch.setattr(
+        multi_bucket_today.daily_job,
+        "filter_debug_values",
+        lambda *a, **k: {"slope_60": 0.1, "near_delta": 0.2},
+    )
+    monkeypatch.setattr(
+        multi_bucket_today,
+        "passes_per_bucket_entry_filters",
+        lambda *a, **k: True,
+    )
+    monkeypatch.setattr(
+        strategy,
+        "compute_frozen_tp_sl_for_bucket",
+        lambda *a, **k: (0.05, 0.03, 0.04, -0.02),
+    )
+
+    config = _build_test_config()
+    # Gate fish_tail_explore (also the sensor bucket); leave
+    # fish_head_production ungated. curve='wr_cross', window=3.
+    config.wr_gate = strategy.WRGateConfig(
+        sensor_bucket="fish_tail_explore",
+        gated_buckets=("fish_tail_explore",),
+        window=3,
+        curve="wr_cross",
+    )
+
+    # Bootstrapped sensor in a clearly DEGRADING state: cross_window full
+    # (len==window) with EMA below SMA -> evaluate_wr_gate_phantom True.
+    state: dict[str, Any] = {
+        "schema_version": multi_bucket_today.SCHEMA_VERSION,
+        "winners": [0.04],
+        "losers": [-0.02],
+        "pending_rolling": [],
+        "closed_trades": [],
+        "accepted_entries": [],
+        "wr_gate_sensor": {
+            "cross_ema": 0.5,
+            "cross_window": [1.0, 1.0, 0.0],
+            "winner_pcts": [0.1],
+            "loser_pcts": [0.05],
+        },
+        "wr_gate_pending_ft": [],
+    }
+    assert strategy.evaluate_wr_gate_phantom(
+        state["wr_gate_sensor"], config.wr_gate
+    ) is True
+
+    result = multi_bucket_today.compute_today_signals(
+        config=config,
+        eval_date=pandas.Timestamp("2026-05-14"),
+        held_positions={},
+        state=state,
+        data_directory=tmp_path,
+        allowed_symbols=None,
+    )
+
+    frozen_by_symbol = {
+        token["symbol"]: token
+        for token in (
+            {
+                key: value
+                for key, _, value in (
+                    part.partition("=")
+                    for part in line[len("[FROZEN_TP_SL]"):].split()
+                )
+            }
+            for line in result.log_lines
+            if line.startswith("[FROZEN_TP_SL]")
+        )
+    }
+    # Gated bucket entry carries the degrading flag; ungated does not.
+    assert frozen_by_symbol["AMZN"]["wr_degrading"] == "True"
+    assert frozen_by_symbol["VST"]["wr_degrading"] == "False"
+    # The sensor-bucket entry is now awaiting its adaptive close.
+    pending_symbols = {
+        position["symbol"] for position in state["wr_gate_pending_ft"]
+    }
+    assert pending_symbols == {"AMZN"}
+
+
 def test_held_exit_debug_uses_bucket_exit_alpha_factor(
     tmp_path: Path,
     monkeypatch,
