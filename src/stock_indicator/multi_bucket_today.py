@@ -1082,6 +1082,52 @@ def advance_wr_gate_sensor(
     return log_messages
 
 
+def build_wr_gate_sensor_summary(
+    state: Dict[str, Any],
+    gate_config: "strategy.WRGateConfig | None",
+    fed_this_run: int,
+) -> str | None:
+    """Return a one-line heartbeat of the WR-gate sensor's current reading,
+    or None when the gate is unconfigured or not yet bootstrapped. Printed
+    every run so a quiet day (no entries, no closes) still shows the sensor
+    is alive and what it reads — distinguishing 'normally silent' from
+    'silently broken'. degrading mirrors the flag stamped on entries."""
+    from collections import deque
+
+    if gate_config is None:
+        return None
+    sensor = state.get("wr_gate_sensor")
+    if sensor is None:
+        return "[WR_GATE_SENSOR] status=not_bootstrapped (gate inert until --export-state-on-date)"
+    cross_window = sensor.get("cross_window", [])
+    window_full = len(cross_window) >= gate_config.window
+    ema_value = sensor.get("cross_ema")
+    sma_value = (
+        sum(cross_window) / len(cross_window) if cross_window else None
+    )
+    breakeven_value = strategy.compute_dynamic_breakeven_win_rate(
+        deque(sensor.get("winner_pcts", [])),
+        deque(sensor.get("loser_pcts", [])),
+        gate_config.window,
+    )
+    degrading = False
+    if window_full and gate_config.curve == "wr_cross":
+        degrading = strategy.evaluate_wr_gate_phantom(sensor, gate_config)
+    ema_text = f"{ema_value:.4f}" if ema_value is not None else "None"
+    sma_text = f"{sma_value:.4f}" if sma_value is not None else "None"
+    breakeven_text = (
+        f"{breakeven_value:.4f}" if breakeven_value is not None else "None"
+    )
+    return (
+        f"[WR_GATE_SENSOR] ema={ema_text} sma={sma_text} "
+        f"breakeven={breakeven_text} degrading={degrading} "
+        f"window={len(cross_window)}/{gate_config.window} "
+        f"window_full={window_full} "
+        f"open_pending={len(state.get('wr_gate_pending_ft', []))} "
+        f"fed_this_run={fed_this_run}"
+    )
+
+
 def register_wr_gate_pending_entry(
     state: Dict[str, Any],
     gate_config: "strategy.WRGateConfig | None",
@@ -1433,6 +1479,12 @@ def compute_today_signals(
         state, config.wr_gate, eval_date_string, data_directory
     )
     log_lines.extend(sensor_messages)
+    fed_this_run = sum(1 for message in sensor_messages if "fed" in message)
+    sensor_summary = build_wr_gate_sensor_summary(
+        state, config.wr_gate, fed_this_run
+    )
+    if sensor_summary is not None:
+        log_lines.append(sensor_summary)
 
     # ------------------------------------------------------------------
     # Step B. Per-bucket signal generation via compute_signals_for_date.

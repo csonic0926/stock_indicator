@@ -59,12 +59,22 @@ def _parse_log_key_value_tokens(line_body: str) -> dict[str, Any]:
                 "losers",
                 "pending_rolling",
                 "closed_trades",
+                "open_pending",
+                "fed_this_run",
             }:
                 fields[key_text] = int(raw_value_text)
+            elif key_text in {
+                "ema",
+                "sma",
+                "breakeven",
+            }:
+                fields[key_text] = float(raw_value_text)
             elif key_text in {
                 "disable_sl_trigger",
                 "reset_hold_on_reentry_signal",
                 "wr_degrading",
+                "degrading",
+                "window_full",
             }:
                 fields[key_text] = raw_value_text.lower() == "true"
             else:
@@ -126,6 +136,19 @@ def _parse_log(log_path: Path) -> dict[str, Any]:
             _parse_log_key_value_tokens(line[len("[BUCKET_TP_SL]"):])
         )
     result["bucket_tp_sl"] = bucket_tp_sl_records
+
+    # WR-gate sensor heartbeat (single source of truth for the cross
+    # reading; emitted every cron run). Last line wins.
+    wr_gate_sensor_records: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        if not line.startswith("[WR_GATE_SENSOR]"):
+            continue
+        wr_gate_sensor_records.append(
+            _parse_log_key_value_tokens(line[len("[WR_GATE_SENSOR]"):])
+        )
+    result["wr_gate_sensor"] = (
+        wr_gate_sensor_records[-1] if wr_gate_sensor_records else {}
+    )
 
     rolling_state_records: list[dict[str, Any]] = []
     for line in text.splitlines():
@@ -1309,11 +1332,14 @@ def api_preview_orders():
         and isinstance(risk_score_value, int)
         and risk_score_value >= wr_activation_threshold
     )
-    open_phantom_symbols = {
-        phantom["symbol"]
+    open_phantom_positions = [
+        phantom
         for phantom in _load_phantom_positions()
         if phantom.get("symbol")
         and _phantom_still_open(phantom, eval_date_string)
+    ]
+    open_phantom_symbols = {
+        phantom["symbol"] for phantom in open_phantom_positions
     }
 
     # Slot cap based on REAL Futu portfolio PLUS phantom-held slots (this
@@ -1536,9 +1562,33 @@ def api_preview_orders():
         "margin": MARGIN_MULTIPLIER,
         "max_positions": max_positions,
         "held_count": len(held_symbols),
+        "phantom_count": len(open_phantom_symbols),
         "trading_env": TRADING_ENV,
         "signal_date": log.get("date"),
         "risk_score_gate": risk_gate_state,
+        "wr_gate": {
+            "configured": wr_activation_threshold is not None,
+            "active": wr_gate_active,
+            "risk_score": risk_score_value,
+            "activation_threshold": wr_activation_threshold,
+            # The cron's per-run sensor heartbeat (ema/sma/breakeven/
+            # degrading/window_full) — single source of truth for the
+            # cross reading, even on a day with no gated entries.
+            "sensor": log.get("wr_gate_sensor", {}),
+            "open_phantoms": [
+                {
+                    "symbol": phantom.get("symbol"),
+                    "signal_date": phantom.get("signal_date"),
+                    "bucket": phantom.get("bucket"),
+                }
+                for phantom in open_phantom_positions
+            ],
+            "phantomed_today": [
+                order["symbol"]
+                for order in orders
+                if order.get("status") == "wr_gate_phantom"
+            ],
+        },
     }
 
 
@@ -2222,11 +2272,15 @@ async function previewOrders() {
       return;
     }
 
-    const slotsFree = Math.max(0, (data.max_positions||0) - (data.held_count||0));
+    const phantomCount = data.phantom_count || 0;
+    const slotsFree = Math.max(0, (data.max_positions||0) - (data.held_count||0) - phantomCount);
     let html = '<div style="font-size:0.8em; color:var(--text2); margin-bottom:8px">';
     html += 'Assets: HK$' + (data.total_assets_hkd||0).toLocaleString(undefined,{minimumFractionDigits:0});
     html += ' | Margin: ' + data.margin + 'x';
     html += ' | Futu held: ' + data.held_count + '/' + data.max_positions;
+    if (phantomCount > 0) {
+      html += ' | <span title="WR-gate phantom slots (held, zero capital)">👻 phantom: ' + phantomCount + '</span>';
+    }
     html += ' | Slots free: <strong' + (slotsFree===0 ? ' style="color:var(--red)"' : '') + '>' + slotsFree + '</strong>';
     html += ' | Signal: ' + (data.signal_date||'—');
     const gate = data.risk_score_gate || {};
@@ -2234,6 +2288,37 @@ async function previewOrders() {
       html += ' | <strong style="color:var(--red)">Risk gate STOP: ' + gate.year_month + ' score=' + gate.risk_score + '</strong>';
     }
     html += '</div>';
+
+    // WR-gate (phantom) status panel — visible whenever the gate is
+    // configured, so a quiet day still shows the sensor is alive.
+    const wr = data.wr_gate || {};
+    if (wr.configured) {
+      const s = wr.sensor || {};
+      const sensorKnown = s.degrading != null;
+      const degrading = sensorKnown ? s.degrading : null;
+      const activeColor = wr.active ? 'var(--red)' : 'var(--text2)';
+      let wrHtml = '<div style="font-size:0.78em; margin-bottom:8px; padding:6px 8px; border-left:3px solid ' + activeColor + '; background:rgba(127,127,127,0.06)">';
+      wrHtml += '<strong>WR-gate</strong> ';
+      wrHtml += '<span style="color:' + activeColor + '">' + (wr.active ? 'ACTIVE' : 'inactive') + '</span>';
+      wrHtml += ' (risk_score=' + (wr.risk_score != null ? wr.risk_score : '—') + ' vs activation≥' + (wr.activation_threshold != null ? wr.activation_threshold : '—') + ')';
+      if (sensorKnown) {
+        wrHtml += ' | sensor: ' + (degrading ? '<strong style="color:var(--red)">degrading</strong>' : 'healthy');
+        wrHtml += ' (ema=' + (s.ema != null ? s.ema.toFixed(3) : '—') + ' sma=' + (s.sma != null ? s.sma.toFixed(3) : '—') + ' be=' + (s.breakeven != null ? s.breakeven.toFixed(3) : '—');
+        wrHtml += ' win=' + (s.window || '—') + (s.window_full ? '' : ' warming') + ' open_pending=' + (s.open_pending != null ? s.open_pending : '—') + ')';
+      } else {
+        wrHtml += ' | <span style="color:var(--text2)">sensor: not bootstrapped</span>';
+      }
+      const pt = wr.phantomed_today || [];
+      if (pt.length > 0) {
+        wrHtml += ' | <strong>phantomed today:</strong> ' + pt.join(', ');
+      }
+      const op = wr.open_phantoms || [];
+      if (op.length > 0) {
+        wrHtml += ' | holding: ' + op.map(p => p.symbol).join(', ');
+      }
+      wrHtml += '</div>';
+      html += wrHtml;
+    }
     html += '<div style="font-size:0.78em; color:var(--text2); margin-bottom:8px">';
     html += 'This table is dashboard-sendable orders. It starts from cron accepted buys, then removes or marks items blocked by live Futu holdings, account slots, or risk gate.';
     html += '</div>';
@@ -2249,10 +2334,12 @@ async function previewOrders() {
       const rankDisplay = o.exit_reason === 'max_hold'
         ? `max ${o.bars_held}/${o.max_hold}`
         : (o.dollar_volume_rank != null) ? '#' + o.dollar_volume_rank : '—';
-      const skipped = o.status === 'slot_full' || o.status === 'risk_score_stop' || o.status === 'min_hold_block';
+      const isPhantom = o.status === 'wr_gate_phantom';
+      const skipped = o.status === 'slot_full' || o.status === 'risk_score_stop' || o.status === 'min_hold_block' || isPhantom;
       const rowStyle = skipped ? ' style="opacity:0.45"' : '';
       const statusDetail = o.status === 'min_hold_block' && o.bars_held != null && o.min_hold != null
         ? `min_hold_block ${o.bars_held}/${o.min_hold}`
+        : isPhantom ? '👻 phantom: slot held, no capital'
         : o.status;
       const sideLabel = skipped
         ? `${o.side} <span style="font-size:0.75em; opacity:0.8">(${statusDetail})</span>`

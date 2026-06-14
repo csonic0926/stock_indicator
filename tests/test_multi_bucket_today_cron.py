@@ -473,6 +473,52 @@ def test_compute_today_signals_stamps_wr_degrading_on_gated_buckets_only(
     }
     assert pending_symbols == {"AMZN"}
 
+    # A sensor heartbeat is emitted every run so a quiet day still shows
+    # the cross reading and degrading verdict.
+    heartbeat_lines = [
+        line for line in result.log_lines
+        if line.startswith("[WR_GATE_SENSOR]")
+    ]
+    assert len(heartbeat_lines) == 1
+    assert "degrading=True" in heartbeat_lines[0]
+    assert "window_full=True" in heartbeat_lines[0]
+
+
+def test_compute_today_signals_emits_no_heartbeat_without_gate(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """With no ft_family_wr_gate configured the cron stays fully inert —
+    no WR_GATE_SENSOR line at all."""
+    monkeypatch.setattr(
+        strategy,
+        "compute_signals_for_date",
+        lambda *, buy_strategy_name, **_: {
+            "filtered_symbols": [],
+            "entry_signals": [],
+            "exit_signals": [],
+        },
+    )
+    state: dict[str, Any] = {
+        "schema_version": multi_bucket_today.SCHEMA_VERSION,
+        "winners": [],
+        "losers": [],
+        "pending_rolling": [],
+        "closed_trades": [],
+        "accepted_entries": [],
+    }
+    result = multi_bucket_today.compute_today_signals(
+        config=_build_test_config(),
+        eval_date=pandas.Timestamp("2026-05-14"),
+        held_positions={},
+        state=state,
+        data_directory=tmp_path,
+        allowed_symbols=None,
+    )
+    assert not any(
+        line.startswith("[WR_GATE_SENSOR]") for line in result.log_lines
+    )
+
 
 def test_held_exit_debug_uses_bucket_exit_alpha_factor(
     tmp_path: Path,

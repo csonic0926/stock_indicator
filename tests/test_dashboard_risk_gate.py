@@ -970,6 +970,9 @@ def _write_phantom_fixture(
         "rejected: []\n"
         "max_position_count=6 held_before_today=0 same_day_closes=0\n"
         "[ROLLING_TP_SL_STATE] winners=20 losers=20 pending_rolling=0 closed_trades=40\n"
+        "[WR_GATE_SENSOR] ema=0.4800 sma=0.6000 breakeven=0.4500 "
+        f"degrading={wr_degrading} window=12/12 window_full=True "
+        "open_pending=1 fed_this_run=0\n"
         "[FROZEN_TP_SL] "
         f"entry_date={signal_date} bucket=fish_tail_production "
         f"strategy_id=fish_tail_blow_off_top symbol={symbol} "
@@ -1031,6 +1034,34 @@ def test_preview_marks_gated_entry_phantom_when_rs_active(
         "min_hold_tp": 1,
         "max_hold": 7,
     }
+
+    # Observability: the wr_gate summary surfaces gate state + the cron's
+    # sensor heartbeat + today's phantom decision.
+    wr_gate = preview["wr_gate"]
+    assert wr_gate["configured"] is True
+    assert wr_gate["active"] is True
+    assert wr_gate["risk_score"] == 30
+    assert wr_gate["activation_threshold"] == 25
+    assert wr_gate["sensor"]["degrading"] is True
+    assert wr_gate["sensor"]["ema"] == 0.48
+    assert wr_gate["phantomed_today"] == ["PHX"]
+
+
+def test_parse_log_extracts_wr_gate_sensor_heartbeat(tmp_path: Path) -> None:
+    """_parse_log surfaces the last WR_GATE_SENSOR line with typed fields."""
+    log_path = tmp_path / "2026-05-15.log"
+    log_path.write_text(
+        "[WR_GATE_SENSOR] ema=0.4800 sma=0.6000 breakeven=0.4500 "
+        "degrading=True window=12/12 window_full=True open_pending=2 "
+        "fed_this_run=1\n",
+        encoding="utf-8",
+    )
+    sensor = dashboard._parse_log(log_path)["wr_gate_sensor"]
+    assert sensor["ema"] == 0.48
+    assert sensor["degrading"] is True
+    assert sensor["window_full"] is True
+    assert sensor["open_pending"] == 2
+    assert sensor["window"] == "12/12"
 
 
 def test_preview_no_phantom_when_rs_below_activation(
