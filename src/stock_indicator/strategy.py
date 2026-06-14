@@ -1573,6 +1573,103 @@ def compute_wr_gate_score(
     )
 
 
+def _build_wr_gate_sensor_export(
+    cross_ema: float | None,
+    cross_window: "deque[float]",
+    winner_pcts: "deque[float]",
+    loser_pcts: "deque[float]",
+) -> dict[str, Any]:
+    """Serialize the WR-gate sensor state for cold-start export.
+
+    Captures exactly what the live path needs to continue the sensor
+    incrementally: the running EMA, the trailing win/loss indicator
+    window (for SMA), and the sensor-local win/loss magnitude windows
+    (for the dynamic breakeven floor). All adaptive-exit derived, so a
+    live path seeded with this and fed adaptive ft closes reproduces the
+    simulator's sensor exactly.
+    """
+
+    return {
+        "cross_ema": cross_ema,
+        "cross_window": [float(value) for value in cross_window],
+        "winner_pcts": [float(value) for value in winner_pcts],
+        "loser_pcts": [float(value) for value in loser_pcts],
+    }
+
+
+def update_wr_gate_sensor_state(
+    sensor_state: dict[str, Any],
+    win: bool,
+    pct: float,
+    window: int,
+) -> None:
+    """Advance the WR-gate sensor by one adaptive ft close, in place.
+
+    Mirrors the simulator's close-handler sensor update so the live
+    path and the simulator stay byte-for-byte consistent: EMA with
+    alpha=2/(window+1) and adjust=False seeding, an N-capped win/loss
+    indicator window for the SMA, and N-capped sensor-local win/loss
+    magnitude windows for the dynamic breakeven. `sensor_state` matches
+    the dict shape produced by _build_wr_gate_sensor_export.
+    """
+
+    win_value = 1.0 if win else 0.0
+    alpha = 2.0 / (window + 1.0)
+    prior_ema = sensor_state.get("cross_ema")
+    sensor_state["cross_ema"] = (
+        win_value
+        if prior_ema is None
+        else alpha * win_value + (1.0 - alpha) * float(prior_ema)
+    )
+    cross_window = sensor_state.setdefault("cross_window", [])
+    cross_window.append(win_value)
+    del cross_window[:-window]
+    if pct > 0:
+        winner_pcts = sensor_state.setdefault("winner_pcts", [])
+        winner_pcts.append(float(pct))
+        del winner_pcts[:-window]
+    elif pct < 0:
+        loser_pcts = sensor_state.setdefault("loser_pcts", [])
+        loser_pcts.append(abs(float(pct)))
+        del loser_pcts[:-window]
+
+
+def evaluate_wr_gate_phantom(
+    sensor_state: dict[str, Any],
+    gate_config: WRGateConfig,
+) -> bool:
+    """Return whether a new gated entry should be phantom right now.
+
+    Reads the current sensor_state (as maintained by
+    update_wr_gate_sensor_state) and applies the same wr_cross logic as
+    the simulator entry gate: EMA_N < SMA_N (degrading) OR SMA_N below
+    the dynamic greedy breakeven floor. Returns False until the SMA
+    window is full (warm-up). Does NOT apply the risk-score activation —
+    that exogenous AND is layered by the caller.
+    """
+
+    if gate_config.curve != "wr_cross":
+        raise ValueError(
+            "evaluate_wr_gate_phantom only supports curve='wr_cross', "
+            f"got {gate_config.curve!r}"
+        )
+    cross_window = sensor_state.get("cross_window", [])
+    if len(cross_window) < gate_config.window:
+        return False
+    ema_value = sensor_state.get("cross_ema")
+    if ema_value is None:
+        return False
+    sma_value = sum(cross_window) / len(cross_window)
+    if ema_value < sma_value:
+        return True
+    breakeven_value = compute_dynamic_breakeven_win_rate(
+        deque(sensor_state.get("winner_pcts", [])),
+        deque(sensor_state.get("loser_pcts", [])),
+        gate_config.window,
+    )
+    return breakeven_value is not None and sma_value < breakeven_value
+
+
 def compute_dynamic_breakeven_win_rate(
     winner_pcts: "deque[float]",
     loser_pcts: "deque[float]",
@@ -2241,6 +2338,15 @@ def run_complex_simulation(
                         }
                         for closed_date, closed_pct in pending_rolling_updates
                     ]
+                    if wr_gate is not None:
+                        exported_state["wr_gate_sensor"] = (
+                            _build_wr_gate_sensor_export(
+                                wr_gate_cross_ema,
+                                wr_gate_cross_window,
+                                wr_gate_winner_pcts,
+                                wr_gate_loser_pcts,
+                            )
+                        )
                     exported_state["_captured"] = True
 
             process_close = False
@@ -2952,6 +3058,15 @@ def run_complex_simulation(
                 }
                 for closed_date, closed_pct in pending_rolling_updates
             ]
+            if wr_gate is not None:
+                exported_state["wr_gate_sensor"] = (
+                    _build_wr_gate_sensor_export(
+                        wr_gate_cross_ema,
+                        wr_gate_cross_window,
+                        wr_gate_winner_pcts,
+                        wr_gate_loser_pcts,
+                    )
+                )
             exported_state["_captured"] = True
     else:
         # Original non-adaptive event processing.

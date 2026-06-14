@@ -141,3 +141,57 @@ def test_risk_score_activation_threshold_field() -> None:
     assert WRGateConfig(
         risk_score_activation_threshold=50
     ).risk_score_activation_threshold == 50
+
+
+def test_live_sensor_functions_match_simulator_close_handler() -> None:
+    """update_wr_gate_sensor_state must reproduce the simulator's in-loop
+    EMA/SMA/magnitude update byte-for-byte, so a live-path sensor seeded
+    from the export and fed adaptive ft closes equals the simulator."""
+    from collections import deque as _deque
+    from stock_indicator import strategy as _s
+    window = 12
+    # Replicate the simulator's in-loop variables.
+    sim_ema = None
+    sim_win = _deque(maxlen=window)
+    sim_winp = _deque(maxlen=window)
+    sim_losp = _deque(maxlen=window)
+    # Live sensor state dict.
+    live = {"cross_ema": None, "cross_window": [], "winner_pcts": [], "loser_pcts": []}
+    import random as _r
+    _r.seed(7)
+    closes = [(_r.random() > 0.42, _r.uniform(-0.08, 0.10)) for _ in range(60)]
+    for win, pct in closes:
+        # simulator in-loop update (copied semantics)
+        wv = 1.0 if win else 0.0
+        a = 2.0 / (window + 1.0)
+        sim_ema = wv if sim_ema is None else a * wv + (1.0 - a) * sim_ema
+        sim_win.append(wv)
+        if pct > 0: sim_winp.append(pct)
+        elif pct < 0: sim_losp.append(abs(pct))
+        # live update
+        _s.update_wr_gate_sensor_state(live, win, pct, window)
+        # must match
+        assert live["cross_ema"] == pytest.approx(sim_ema)
+        assert live["cross_window"] == list(sim_win)
+        assert live["winner_pcts"] == list(sim_winp)
+        assert live["loser_pcts"] == list(sim_losp)
+
+
+def test_evaluate_wr_gate_phantom_matches_entry_gate_logic() -> None:
+    from stock_indicator import strategy as _s
+    cfg = _s.WRGateConfig(window=12, curve="wr_cross")
+    # Warm-up: short window -> no phantom.
+    short = {"cross_ema": 0.3, "cross_window": [1.0]*5, "winner_pcts": [], "loser_pcts": []}
+    assert _s.evaluate_wr_gate_phantom(short, cfg) is False
+    # EMA below SMA (degrading) -> phantom.
+    deg = {"cross_ema": 0.30, "cross_window": [0.0]*4 + [1.0]*8,
+           "winner_pcts": [0.05]*12, "loser_pcts": [0.04]*12}
+    assert _s.evaluate_wr_gate_phantom(deg, cfg) is True
+    # EMA above SMA (improving), SMA 0.50 above breakeven 0.444 -> no phantom.
+    healthy = {"cross_ema": 0.70, "cross_window": [0.0]*6 + [1.0]*6,
+               "winner_pcts": [0.05]*12, "loser_pcts": [0.04]*12}
+    assert _s.evaluate_wr_gate_phantom(healthy, cfg) is False
+    # EMA above SMA but SMA below dynamic breakeven (thin payoff) -> phantom.
+    thin = {"cross_ema": 0.50, "cross_window": [0.0]*7 + [1.0]*5,
+            "winner_pcts": [0.03]*12, "loser_pcts": [0.06]*12}
+    assert _s.evaluate_wr_gate_phantom(thin, cfg) is True
