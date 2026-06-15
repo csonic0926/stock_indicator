@@ -412,28 +412,41 @@ def api_trades():
 def api_futu_positions():
     """Live positions from Futu OpenD (if connected)."""
     try:
-        from futu import (
-            OpenSecTradeContext,
-            SecurityFirm,
-            TrdEnv,
-            TrdMarket,
-        )
-
-        trd_ctx = OpenSecTradeContext(
-            host="127.0.0.1",
-            port=11111,
-            filter_trdmarket=TrdMarket.US,
-            security_firm=SecurityFirm.FUTUSECURITIES,
-        )
-        ret_pos, pos_data = trd_ctx.position_list_query(trd_env=TrdEnv.REAL)
-        ret_acc, acc_data = trd_ctx.accinfo_query(trd_env=TrdEnv.REAL)
-        trd_ctx.close()
+        trade_context = _get_futu_trd_ctx()
+        try:
+            trading_environment = _get_trd_env()
+            position_return_code, position_data = (
+                trade_context.position_list_query(trd_env=trading_environment)
+            )
+            account_return_code, account_data = trade_context.accinfo_query(
+                trd_env=trading_environment
+            )
+            position_entries_by_symbol: dict[str, dict[str, Any]] = {}
+            if position_return_code == 0 and len(position_data) > 0:
+                try:
+                    position_entries_by_symbol = _load_futu_open_trade_entries(
+                        trade_context,
+                        trading_environment,
+                        signal_date_text=date.today().isoformat(),
+                    )
+                except Exception as position_entry_error:  # noqa: BLE001
+                    LOGGER.warning(
+                        "Failed to load Futu position bucket metadata: %s",
+                        position_entry_error,
+                    )
+        finally:
+            trade_context.close()
 
         positions = []
-        if ret_pos == 0 and len(pos_data) > 0:
-            for _, row in pos_data.iterrows():
+        if position_return_code == 0 and len(position_data) > 0:
+            for _, row in position_data.iterrows():
+                symbol = str(row.get("code", "")).replace("US.", "")
+                entry_metadata = position_entries_by_symbol.get(symbol, {})
                 positions.append({
-                    "symbol": str(row.get("code", "")).replace("US.", ""),
+                    "symbol": symbol,
+                    "bucket": entry_metadata.get("bucket"),
+                    "strategy_id": entry_metadata.get("strategy_id"),
+                    "entry_date": entry_metadata.get("entry_date"),
                     "qty": float(row.get("qty", 0)),
                     "cost_price": float(row.get("cost_price", 0)),
                     "market_price": float(row.get("nominal_price", 0)),
@@ -443,8 +456,8 @@ def api_futu_positions():
                 })
 
         account = {}
-        if ret_acc == 0 and len(acc_data) > 0:
-            row = acc_data.iloc[0]
+        if account_return_code == 0 and len(account_data) > 0:
+            row = account_data.iloc[0]
             account = {
                 "total_assets": float(row.get("total_assets", 0)),
                 "cash": float(row.get("cash", 0)),
@@ -2170,16 +2183,16 @@ function render(state, futu) {
   // Positions
   html = '';
   if (futu.connected && futu.positions.length > 0) {
-    html += '<table><tr><th>Symbol</th><th>Qty</th><th>Cost</th><th>Price</th><th>P/L</th><th>P/L %</th></tr>';
-    for (const p of futu.positions) {
-      const plPct = p.pl_ratio * 100;
+    html += '<table><tr><th>Symbol</th><th>Bucket</th><th>Qty</th><th>Cost</th><th>Price</th><th>P/L</th></tr>';
+    for (const position of futu.positions) {
+      const bucketShort = shortBucket(position.bucket) || '—';
       html += `<tr>
-        <td><strong>${p.symbol}</strong></td>
-        <td>${p.qty}</td>
-        <td>$${p.cost_price.toFixed(2)}</td>
-        <td>$${p.market_price.toFixed(2)}</td>
-        <td class="${plClass(p.unrealized_pl)}">${p.unrealized_pl >= 0 ? '+' : ''}$${p.unrealized_pl.toFixed(2)}</td>
-        <td class="${plClass(plPct)}">${plPct >= 0 ? '+' : ''}${plPct.toFixed(2)}%</td>
+        <td><strong>${position.symbol}</strong></td>
+        <td style="color:var(--text2)">${bucketShort}</td>
+        <td>${position.qty}</td>
+        <td>$${position.cost_price.toFixed(2)}</td>
+        <td>$${position.market_price.toFixed(2)}</td>
+        <td class="${plClass(position.unrealized_pl)}">${position.unrealized_pl >= 0 ? '+' : ''}$${position.unrealized_pl.toFixed(2)}</td>
       </tr>`;
     }
     html += '</table>';

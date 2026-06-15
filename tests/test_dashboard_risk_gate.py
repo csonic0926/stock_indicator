@@ -44,7 +44,18 @@ class FakeTradeContext:
     def position_list_query(self, trd_env: Any = None) -> tuple[int, pandas.DataFrame]:
         """Return deterministic current positions."""
         self._raise_if_closed()
-        return 0, pandas.DataFrame(self.positions, columns=["code", "qty"])
+        return 0, pandas.DataFrame(
+            self.positions,
+            columns=[
+                "code",
+                "qty",
+                "cost_price",
+                "nominal_price",
+                "market_val",
+                "unrealized_pl",
+                "pl_ratio",
+            ],
+        )
 
     def history_deal_list_query(
         self,
@@ -295,6 +306,59 @@ def test_preview_orders_allows_buy_orders_when_risk_score_is_below_stop(
     assert order["symbol"] == "AAA"
     assert order["qty"] == 250
     assert "status" not in order
+
+
+def test_futu_positions_include_bucket_metadata(monkeypatch) -> None:
+    """Live positions should expose bucket metadata resolved from Futu history."""
+    fake_trade_context = FakeTradeContext(
+        positions=[
+            {
+                "code": "US.AAA",
+                "qty": 12,
+                "cost_price": 10.0,
+                "nominal_price": 11.0,
+                "market_val": 132.0,
+                "unrealized_pl": 12.0,
+                "pl_ratio": 0.10,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: fake_trade_context,
+    )
+    monkeypatch.setattr(dashboard, "_get_trd_env", lambda: object())
+    monkeypatch.setattr(
+        dashboard,
+        "_load_futu_open_trade_entries",
+        lambda trade_context, trading_environment, *, signal_date_text: {
+            "AAA": {
+                "bucket": "fish_tail_squeeze",
+                "strategy_id": "fish_tail_blow_off_top",
+                "entry_date": "2026-06-01",
+            }
+        },
+    )
+
+    response = dashboard.api_futu_positions()
+
+    assert fake_trade_context.is_closed is True
+    assert response["connected"] is True
+    assert response["positions"] == [
+        {
+            "symbol": "AAA",
+            "bucket": "fish_tail_squeeze",
+            "strategy_id": "fish_tail_blow_off_top",
+            "entry_date": "2026-06-01",
+            "qty": 12.0,
+            "cost_price": 10.0,
+            "market_price": 11.0,
+            "market_val": 132.0,
+            "unrealized_pl": 12.0,
+            "pl_ratio": 0.10,
+        }
+    ]
 
 
 def test_preview_orders_cold_start_keeps_old_positions_and_sizes_new_buy_by_seven(
