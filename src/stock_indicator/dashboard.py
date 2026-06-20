@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from stock_indicator import daily_job
 from stock_indicator.futu_trade_metadata import (
     format_futu_order_remark,
     parse_futu_order_remark,
@@ -24,6 +25,7 @@ from stock_indicator.futu_trade_metadata import (
 LOGGER = logging.getLogger(__name__)
 
 DATA_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "data"
+STOCK_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
 LIVE_STATE_DIRECTORY = DATA_DIRECTORY / "live_state"
 LOGS_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "logs"
 
@@ -86,8 +88,10 @@ def _parse_log_key_value_tokens(line_body: str) -> dict[str, Any]:
 
 def _parse_log(log_path: Path) -> dict[str, Any]:
     """Parse a daily multi-bucket log into structured data."""
-    text = log_path.read_text(encoding="utf-8")
-    result: dict[str, Any] = {"raw": text, "date": log_path.stem}
+    raw_text = log_path.read_text(encoding="utf-8")
+    latest_run_start = raw_text.rfind("[multi_bucket_daily_signal mode=")
+    text = raw_text[latest_run_start:] if latest_run_start >= 0 else raw_text
+    result: dict[str, Any] = {"raw": raw_text, "date": log_path.stem}
 
     # TODO: review
     # Raw strategy entry signals are emitted before dashboard/order-layer
@@ -128,14 +132,26 @@ def _parse_log(log_path: Path) -> dict[str, Any]:
     result["buy_actions"] = todays_buy_symbols
     result["accepted_buy_actions"] = todays_buy_symbols
 
-    bucket_tp_sl_records: list[dict[str, Any]] = []
+    bucket_tp_sl_records_by_key: dict[str, dict[str, Any]] = {}
+    bucket_tp_sl_key_order: list[str] = []
     for line in text.splitlines():
         if not line.startswith("[BUCKET_TP_SL]"):
             continue
-        bucket_tp_sl_records.append(
-            _parse_log_key_value_tokens(line[len("[BUCKET_TP_SL]"):])
+        bucket_tp_sl_record = _parse_log_key_value_tokens(
+            line[len("[BUCKET_TP_SL]"):]
         )
-    result["bucket_tp_sl"] = bucket_tp_sl_records
+        bucket_tp_sl_key = str(
+            bucket_tp_sl_record.get("bucket")
+            or bucket_tp_sl_record.get("strategy_id")
+            or len(bucket_tp_sl_key_order)
+        )
+        if bucket_tp_sl_key not in bucket_tp_sl_records_by_key:
+            bucket_tp_sl_key_order.append(bucket_tp_sl_key)
+        bucket_tp_sl_records_by_key[bucket_tp_sl_key] = bucket_tp_sl_record
+    result["bucket_tp_sl"] = [
+        bucket_tp_sl_records_by_key[bucket_tp_sl_key]
+        for bucket_tp_sl_key in bucket_tp_sl_key_order
+    ]
 
     # WR-gate sensor heartbeat (single source of truth for the cross
     # reading; emitted every cron run). Last line wins.
@@ -161,25 +177,29 @@ def _parse_log(log_path: Path) -> dict[str, Any]:
         rolling_state_records[-1] if rolling_state_records else {}
     )
 
-    accepted_match = re.search(r"^accepted:\s*(.+)$", text, re.MULTILINE)
-    rejected_match = re.search(r"^rejected:\s*(.+)$", text, re.MULTILINE)
+    accepted_matches = re.findall(r"^accepted:\s*(.+)$", text, re.MULTILINE)
+    rejected_matches = re.findall(r"^rejected:\s*(.+)$", text, re.MULTILINE)
     result["slot_allocation"] = {
-        "accepted": _parse_slot_allocation_pairs(accepted_match.group(1))
-        if accepted_match else [],
-        "rejected": _parse_slot_allocation_pairs(rejected_match.group(1))
-        if rejected_match else [],
+        "accepted": _parse_slot_allocation_pairs(accepted_matches[-1])
+        if accepted_matches else [],
+        "rejected": _parse_slot_allocation_pairs(rejected_matches[-1])
+        if rejected_matches else [],
     }
-    allocation_summary_match = re.search(
+    allocation_summary_matches = re.findall(
         r"max_position_count=(\d+)\s+"
         r"held_before_today=(\d+)\s+"
         r"same_day_closes=(\d+)",
         text,
+        re.MULTILINE,
     )
-    if allocation_summary_match:
+    if allocation_summary_matches:
+        max_position_count, held_before_today, same_day_closes = (
+            allocation_summary_matches[-1]
+        )
         result["slot_allocation"].update({
-            "max_position_count": int(allocation_summary_match.group(1)),
-            "held_before_today": int(allocation_summary_match.group(2)),
-            "same_day_closes": int(allocation_summary_match.group(3)),
+            "max_position_count": int(max_position_count),
+            "held_before_today": int(held_before_today),
+            "same_day_closes": int(same_day_closes),
         })
 
     # Exit signals (machine-readable per-symbol lines).
@@ -223,10 +243,13 @@ def _parse_log(log_path: Path) -> dict[str, Any]:
     pos_m = re.search(r"Concurrent positions after entry \((\d+) total\)", text)
     if pos_m:
         result["position_count"] = int(pos_m.group(1))
-    elif allocation_summary_match:
+    elif allocation_summary_matches:
+        _, position_count_held_before_today, position_count_same_day_closes = (
+            allocation_summary_matches[-1]
+        )
         result["position_count"] = (
-            int(allocation_summary_match.group(2))
-            - int(allocation_summary_match.group(3))
+            int(position_count_held_before_today)
+            - int(position_count_same_day_closes)
             + len(result["slot_allocation"]["accepted"])
         )
     else:
@@ -359,15 +382,35 @@ def _build_cron_dashboard_contract() -> dict[str, Any]:
     }
 
 
+def _load_latest_cached_market_log_date() -> date | None:
+    """Return the latest cached market date used to filter dashboard logs."""
+
+    market_cache_path = STOCK_DATA_DIRECTORY / f"{daily_job.SP500_SYMBOL}.csv"
+    if not market_cache_path.exists():
+        return None
+    try:
+        return daily_job.determine_latest_cached_market_date(STOCK_DATA_DIRECTORY)
+    except Exception as market_date_error:  # noqa: BLE001
+        LOGGER.warning(
+            "Could not determine latest cached market date from %s: %s",
+            market_cache_path,
+            market_date_error,
+        )
+        return None
+
+
 def _get_log_dates() -> list[str]:
     """Return sorted list of available log dates (newest first)."""
+    latest_market_log_date = _load_latest_cached_market_log_date()
     dates = []
-    for f in LOGS_DIRECTORY.glob("*.log"):
+    for log_file_path in LOGS_DIRECTORY.glob("*.log"):
         try:
-            date.fromisoformat(f.stem)
-            dates.append(f.stem)
+            log_date = date.fromisoformat(log_file_path.stem)
         except ValueError:
             continue
+        if latest_market_log_date is not None and log_date > latest_market_log_date:
+            continue
+        dates.append(log_file_path.stem)
     return sorted(dates, reverse=True)
 
 

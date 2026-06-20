@@ -196,6 +196,78 @@ def test_parse_log_separates_raw_entries_from_accepted_buys(
     assert parsed_log["position_count"] == 3
 
 
+def test_parse_log_uses_last_cron_run_when_log_was_appended(
+    tmp_path: Path,
+) -> None:
+    """Dashboard should not duplicate TP/SL rows after a manual cron rerun."""
+
+    log_path = tmp_path / "2026-06-19.log"
+    log_path.write_text(
+        "[multi_bucket_daily_signal mode=live state=adaptive_state.json]\n"
+        "[multi_bucket_daily_signal] eval_date=2026-06-19\n"
+        "accepted: [('OLD', 'fish_head_production')]\n"
+        "max_position_count=7 held_before_today=1 same_day_closes=0\n"
+        "[BUCKET_TP_SL] date=2026-06-19 bucket=fish_head_production "
+        "strategy_id=fish_head_vacuum_turn tp_pct=0.010000 sl_pct=0.020000 "
+        "rolling_mp=0.010000 rolling_ml=-0.020000 min_hold_tp=1 "
+        "min_hold_sl=1 disable_sl_trigger=True max_hold=None "
+        "reset_hold_on_reentry_signal=False\n"
+        "[multi_bucket_daily_signal mode=live state=adaptive_state.json]\n"
+        "[multi_bucket_daily_signal] eval_date=2026-06-19\n"
+        "accepted: []\n"
+        "max_position_count=7 held_before_today=8 same_day_closes=0\n"
+        "[BUCKET_TP_SL] date=2026-06-19 bucket=fish_head_production "
+        "strategy_id=fish_head_vacuum_turn tp_pct=0.060502 sl_pct=0.037015 "
+        "rolling_mp=0.034519 rolling_ml=0.037015 min_hold_tp=1 "
+        "min_hold_sl=1 disable_sl_trigger=True max_hold=None "
+        "reset_hold_on_reentry_signal=False\n",
+        encoding="utf-8",
+    )
+
+    parsed_log = dashboard._parse_log(log_path)
+
+    assert parsed_log["slot_allocation"]["accepted"] == []
+    assert parsed_log["position_count"] == 8
+    assert parsed_log["bucket_tp_sl"] == [
+        {
+            "date": "2026-06-19",
+            "bucket": "fish_head_production",
+            "strategy_id": "fish_head_vacuum_turn",
+            "tp_pct": 0.060502,
+            "sl_pct": 0.037015,
+            "rolling_mp": 0.034519,
+            "rolling_ml": 0.037015,
+            "min_hold_tp": 1,
+            "min_hold_sl": 1,
+            "disable_sl_trigger": True,
+            "max_hold": None,
+            "reset_hold_on_reentry_signal": False,
+        }
+    ]
+
+
+def test_get_log_dates_skips_logs_after_latest_sp500_cache_date(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Dashboard latest log should follow the latest real market session."""
+
+    log_directory = tmp_path / "logs"
+    stock_data_directory = tmp_path / "stock_data"
+    log_directory.mkdir()
+    stock_data_directory.mkdir()
+    (log_directory / "2026-06-18.log").write_text("", encoding="utf-8")
+    (log_directory / "2026-06-19.log").write_text("", encoding="utf-8")
+    (stock_data_directory / f"{dashboard.daily_job.SP500_SYMBOL}.csv").write_text(
+        "Date,close\n2026-06-17,1\n2026-06-18,1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dashboard, "LOGS_DIRECTORY", log_directory)
+    monkeypatch.setattr(dashboard, "STOCK_DATA_DIRECTORY", stock_data_directory)
+
+    assert dashboard._get_log_dates() == ["2026-06-18"]
+
+
 def _patch_dashboard_paths(
     monkeypatch,
     *,

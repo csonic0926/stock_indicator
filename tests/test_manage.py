@@ -252,6 +252,7 @@ def test_update_all_data_from_yf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
         start: str,
         end: str,
         cache_path: Path | None = None,
+        refresh_lookback_days: int | None = None,
     ) -> pandas.DataFrame:
         download_calls.append(symbol_name)
         recorded_end_dates.append(end)

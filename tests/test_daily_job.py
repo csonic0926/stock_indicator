@@ -2,6 +2,7 @@
 
 # TODO: review
 
+import datetime
 from pathlib import Path
 import os
 import sys
@@ -14,6 +15,27 @@ import yfinance.exceptions as yfinance_exceptions
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from stock_indicator import daily_job
+
+
+def test_determine_latest_cached_market_date_uses_sp500_anchor(
+    tmp_path: Path,
+) -> None:
+    """Holiday signal dates should follow the broad-market cache."""
+
+    sp500_cache_path = tmp_path / f"{daily_job.SP500_SYMBOL}.csv"
+    sp500_cache_path.write_text(
+        "Date,close\n2026-06-17,1\n2026-06-18,1\n",
+        encoding="utf-8",
+    )
+    holiday_symbol_cache_path = tmp_path / "RVPH.csv"
+    holiday_symbol_cache_path.write_text(
+        "Date,close\n2026-06-17,1\n2026-06-18,1\n2026-06-19,1\n",
+        encoding="utf-8",
+    )
+
+    result = daily_job.determine_latest_cached_market_date(tmp_path)
+
+    assert result == datetime.date(2026, 6, 18)
 
 
 def test_update_all_data_from_yf_deduplicates_history(
@@ -29,7 +51,11 @@ def test_update_all_data_from_yf_deduplicates_history(
     )
 
     def fake_download_history(
-        symbol_name: str, start: str, end: str, cache_path: Path | None = None
+        symbol_name: str,
+        start: str,
+        end: str,
+        cache_path: Path | None = None,
+        refresh_lookback_days: int | None = None,
     ) -> pandas.DataFrame:
         existing_frame = pandas.read_csv(cache_path, index_col=0, parse_dates=True)
         new_frame = pandas.DataFrame(
@@ -73,11 +99,17 @@ def test_update_all_data_from_yf_treats_end_as_inclusive(
     """``update_all_data_from_yf`` should treat the ``end_date`` as inclusive."""
 
     recorded_end_dates: list[str] = []
+    recorded_refresh_lookback_days: list[int | None] = []
 
     def fake_download_history(
-        symbol_name: str, start: str, end: str, cache_path: Path | None = None
+        symbol_name: str,
+        start: str,
+        end: str,
+        cache_path: Path | None = None,
+        refresh_lookback_days: int | None = None,
     ) -> pandas.DataFrame:
         recorded_end_dates.append(end)
+        recorded_refresh_lookback_days.append(refresh_lookback_days)
         data_frame = pandas.DataFrame(
             {"close": [1.0]}, index=pandas.to_datetime([start])
         )
@@ -104,6 +136,10 @@ def test_update_all_data_from_yf_treats_end_as_inclusive(
     daily_job.update_all_data_from_yf("2024-01-01", "2024-01-01", tmp_path)
 
     assert recorded_end_dates == ["2024-01-02", "2024-01-02"]
+    assert recorded_refresh_lookback_days == [
+        daily_job.YAHOO_CACHE_REFRESH_LOOKBACK_DAYS,
+        daily_job.YAHOO_CACHE_REFRESH_LOOKBACK_DAYS,
+    ]
 
 
 def test_update_all_data_from_yf_preserves_existing_rows(
@@ -124,7 +160,11 @@ def test_update_all_data_from_yf_preserves_existing_rows(
     )
 
     def fake_download_history(
-        symbol_name: str, start: str, end: str, cache_path: Path | None = None
+        symbol_name: str,
+        start: str,
+        end: str,
+        cache_path: Path | None = None,
+        refresh_lookback_days: int | None = None,
     ) -> pandas.DataFrame:
         existing_frame = pandas.read_csv(cache_path, index_col=0, parse_dates=True)
         new_frame = pandas.DataFrame(
@@ -170,7 +210,11 @@ def test_update_all_data_from_yf_logs_warning_on_error(
     """Errors during download should be logged and not raised."""
 
     def fake_download_history(
-        symbol_name: str, start: str, end: str, cache_path: Path | None = None
+        symbol_name: str,
+        start: str,
+        end: str,
+        cache_path: Path | None = None,
+        refresh_lookback_days: int | None = None,
     ) -> pandas.DataFrame:
         if symbol_name == "BBB":
             raise yfinance_exceptions.YFException("bad symbol")

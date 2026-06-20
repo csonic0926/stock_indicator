@@ -15,6 +15,9 @@ def test_run_daily_job_uses_production_universe_without_refresh() -> None:
     daily_signal_position = script_text.index("multi_bucket_daily_signal")
     assert "update_universe_pipeline" not in script_text
     assert yahoo_update_position < daily_signal_position
+    assert "YAHOO_CACHE_REFRESH_LOOKBACK_DAYS" in script_text
+    assert "determine_latest_cached_market_date" in script_text
+    assert "timedelta(days=183)" not in script_text
 
 
 def test_run_daily_tasks_detects_signals(tmp_path, monkeypatch):

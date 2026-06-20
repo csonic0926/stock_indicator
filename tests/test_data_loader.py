@@ -303,3 +303,51 @@ def test_download_history_extends_cache_backwards_and_forwards(
     )
     saved_frame = pandas.read_csv(cache_file_path, index_col=0, parse_dates=True)
     pandas.testing.assert_frame_equal(combined_frame, saved_frame)
+
+
+def test_download_history_refreshes_recent_cached_rows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Refresh overlap should replace mutable Yahoo rows in the cache."""
+    symbol_name = "TEST"
+    cache_file_path = tmp_path / "TEST.csv"
+    cached_frame = pandas.DataFrame(
+        {"close": [1.0, 2.0, 3.0]},
+        index=pandas.to_datetime(["2023-01-01", "2023-01-02", "2023-01-03"]),
+    )
+    cached_frame.to_csv(cache_file_path)
+
+    captured_arguments: dict[str, str] = {}
+    refreshed_raw_frame = pandas.DataFrame(
+        {"Close": [30.0, 40.0]},
+        index=pandas.to_datetime(["2023-01-03", "2023-01-04"]),
+    )
+
+    def stubbed_download(
+        symbol: str,
+        start: str,
+        end: str,
+        progress: bool = False,
+        auto_adjust: bool = True,
+    ) -> pandas.DataFrame:
+        captured_arguments["start"] = start
+        captured_arguments["end"] = end
+        return refreshed_raw_frame
+
+    monkeypatch.setattr(
+        "stock_indicator.data_loader.yfinance.download", stubbed_download
+    )
+    monkeypatch.setattr("stock_indicator.symbols.load_symbols", lambda: [symbol_name])
+
+    combined_frame = download_history(
+        symbol_name,
+        "2023-01-01",
+        "2023-01-05",
+        cache_path=cache_file_path,
+        refresh_lookback_days=2,
+    )
+
+    assert captured_arguments == {"start": "2023-01-03", "end": "2023-01-05"}
+    assert list(combined_frame["close"]) == [1.0, 2.0, 30.0, 40.0]
+    saved_frame = pandas.read_csv(cache_file_path, index_col=0, parse_dates=True)
+    pandas.testing.assert_frame_equal(combined_frame, saved_frame)

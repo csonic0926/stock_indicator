@@ -59,6 +59,7 @@ def test_manager_cli_generates_logs_and_signals(
         start: str,
         end: str,
         cache_path: Path | None = None,
+        refresh_lookback_days: int | None = None,
     ) -> pandas.DataFrame:
         recorded_end_dates.append(end)
         data_frame = pandas.DataFrame(
@@ -107,4 +108,3 @@ def test_manager_cli_generates_logs_and_signals(
     assert date_marker_path.exists()
     assert recorded_arguments["end"] == "2024-01-10"
     assert set(recorded_end_dates) == {"2024-01-11"}
-

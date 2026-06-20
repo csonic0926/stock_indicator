@@ -29,6 +29,7 @@ MINIMUM_HISTORY_DATE = "2014-01-01"
 # Maximum trailing window (in calendar days) of history needed to evaluate
 # indicator windows safely when recomputing signals for a single date.
 SIGNAL_HISTORY_LOOKBACK_DAYS = 756
+YAHOO_CACHE_REFRESH_LOOKBACK_DAYS = 365
 DATA_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "data"
 STOCK_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
 BACKTEST_UNIVERSE_DIRECTORY = DATA_DIRECTORY / "backtest_universe_alpha_vantage"
@@ -144,6 +145,39 @@ def determine_last_cached_date(data_directory: Path) -> datetime.date:
     if latest_date is None:
         return datetime.date.fromisoformat(DEFAULT_START_DATE)
     return latest_date
+
+
+def determine_latest_cached_market_date(data_directory: Path) -> datetime.date:
+    """Return the latest cached broad-market trading date.
+
+    The cron wrapper may run on exchange holidays that are still ordinary
+    business days. In that case, a few individual Yahoo symbols can contain a
+    row for the holiday while the broad market did not trade. The S&P 500 cache
+    is used as the market-date anchor so daily signal generation evaluates the
+    last real market session.
+    """
+
+    market_cache_path = data_directory / f"{SP500_SYMBOL}.csv"
+    if market_cache_path.exists():
+        try:
+            market_date_frame = pandas.read_csv(
+                market_cache_path,
+                usecols=[0],
+                parse_dates=[0],
+            )
+        except Exception as read_error:  # noqa: BLE001
+            LOGGER.warning("Could not read %s: %s", market_cache_path, read_error)
+        else:
+            if not market_date_frame.empty:
+                latest_market_timestamp = market_date_frame.iloc[:, 0].max()
+                if hasattr(latest_market_timestamp, "date"):
+                    return latest_market_timestamp.date()
+
+    LOGGER.warning(
+        "Market cache %s is unavailable; falling back to latest cached symbol date",
+        market_cache_path,
+    )
+    return determine_last_cached_date(data_directory)
 
 
 def _symbol_separator_aliases(symbol_name: str) -> set[str]:
@@ -293,6 +327,7 @@ def update_all_data_from_yf(
                 start=start_date,
                 end=exclusive_end_date,
                 cache_path=csv_path,
+                refresh_lookback_days=YAHOO_CACHE_REFRESH_LOOKBACK_DAYS,
             )
             try:
                 cached_frame = pandas.read_csv(

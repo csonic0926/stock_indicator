@@ -38,6 +38,7 @@ def download_history(
     start: str,
     end: str,
     cache_path: Path | None = None,
+    refresh_lookback_days: int | None = None,
     **download_options: Any,
 ) -> pandas.DataFrame:
     """Download historical price data for a stock symbol.
@@ -54,6 +55,10 @@ def download_history(
         Optional path to a CSV file used as a local cache. When the file exists,
         only missing rows are requested from the remote source and the merged
         result is written back to this file.
+    refresh_lookback_days: int | None, optional
+        When a cache exists, force a re-download from ``end`` minus this many
+        calendar days. Cached rows before that refresh window are preserved,
+        while overlapping recent rows are replaced by Yahoo Finance data.
     **download_options
         Additional keyword arguments forwarded to :func:`yfinance.download`, such
         as ``actions`` or ``interval``. By default, ``auto_adjust`` is set to
@@ -83,13 +88,17 @@ def download_history(
     cached_frame = pandas.DataFrame()
     if cache_path is not None and cache_path.exists():
         cached_frame = pandas.read_csv(cache_path, index_col=0, parse_dates=True)
+    cached_frame_before_refresh: pandas.DataFrame | None = None
 
     if "auto_adjust" not in download_options:
         download_options["auto_adjust"] = True
+    if refresh_lookback_days is not None and refresh_lookback_days < 0:
+        raise ValueError("refresh_lookback_days must be >= 0")
 
     if not cached_frame.empty:
         earliest_cached_date = cached_frame.index.min()
         requested_start_timestamp = pandas.Timestamp(start)
+        requested_end_timestamp = pandas.Timestamp(end)
         # TODO: review
         if requested_start_timestamp < earliest_cached_date:
             try:
@@ -108,16 +117,29 @@ def download_history(
                     symbol,
                     download_error,
                 )
-        next_download_date = cached_frame.index.max() + pandas.Timedelta(days=1)
-        # Yahoo Finance treats the end date as exclusive.  When the next
-        # missing date is exactly equal to the requested end date, the cache is
-        # already complete for the requested half-open date range.
-        if next_download_date >= pandas.Timestamp(end):
-            if cache_path is not None:
-                cache_path.parent.mkdir(parents=True, exist_ok=True)
-                cached_frame.to_csv(cache_path)
-            return cached_frame
-        start = next_download_date.strftime("%Y-%m-%d")
+        if refresh_lookback_days is not None:
+            refresh_start_timestamp = max(
+                requested_start_timestamp,
+                requested_end_timestamp - pandas.Timedelta(
+                    days=refresh_lookback_days
+                ),
+            )
+            cached_frame_before_refresh = cached_frame.copy()
+            cached_frame = cached_frame.loc[
+                cached_frame.index < refresh_start_timestamp
+            ]
+            start = refresh_start_timestamp.strftime("%Y-%m-%d")
+        else:
+            next_download_date = cached_frame.index.max() + pandas.Timedelta(days=1)
+            # Yahoo Finance treats the end date as exclusive.  When the next
+            # missing date is exactly equal to the requested end date, the cache is
+            # already complete for the requested half-open date range.
+            if next_download_date >= requested_end_timestamp:
+                if cache_path is not None:
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    cached_frame.to_csv(cache_path)
+                return cached_frame
+            start = next_download_date.strftime("%Y-%m-%d")
 
     maximum_attempts = 3
     for attempt_number in range(1, maximum_attempts + 1):
@@ -130,10 +152,27 @@ def download_history(
                 **download_options,
             )
             downloaded_frame = _normalize_columns(downloaded_frame)
+            if (
+                downloaded_frame.empty
+                and refresh_lookback_days is not None
+                and cached_frame_before_refresh is not None
+                and not cached_frame_before_refresh.empty
+            ):
+                LOGGER.warning(
+                    "Yahoo returned no refreshed data for %s; preserving existing cache",
+                    symbol,
+                )
+                if cache_path is not None:
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    cached_frame_before_refresh.to_csv(cache_path)
+                return cached_frame_before_refresh
             if not cached_frame.empty:
                 downloaded_frame = (
                     pandas.concat([cached_frame, downloaded_frame]).sort_index()
                 )
+            downloaded_frame = downloaded_frame.loc[
+                ~downloaded_frame.index.duplicated(keep="last")
+            ]
             if cache_path is not None:
                 cache_path.parent.mkdir(parents=True, exist_ok=True)
                 downloaded_frame.to_csv(cache_path)
