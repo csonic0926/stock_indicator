@@ -58,7 +58,8 @@
       "tp_regime_adjust": false,
       "tp_slope_amplify": false,
       "pre_cross_signal_lookback": true,
-      "reset_hold_on_reentry_signal": false
+      "reset_hold_on_reentry_signal": false,
+      "max_hold": 14
     },
     {
       "label": "fish_tail_squeeze",
