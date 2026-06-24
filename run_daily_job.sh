@@ -30,7 +30,9 @@ REFRESH_END_DATE="$("$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -c 'from stock_i
 START_DATE="$("$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -c 'from datetime import datetime, timedelta; import sys; from stock_indicator.daily_job import YAHOO_CACHE_REFRESH_LOOKBACK_DAYS; print((datetime.fromisoformat(sys.argv[1]) - timedelta(days=YAHOO_CACHE_REFRESH_LOOKBACK_DAYS)).date().isoformat())' "$REFRESH_END_DATE")"
 
 # Update the production daily price cache, then record live signals.
+CRON_START_EPOCH=$(date +%s)
 "$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage update_all_data_from_yf "$START_DATE" "$REFRESH_END_DATE" >> "$LOG_DIRECTORY/cron_stdout.log" 2>&1
+UPDATE_END_EPOCH=$(date +%s)
 LATEST_DATE="$("$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -c 'from stock_indicator.daily_job import determine_latest_cached_market_date, STOCK_DATA_DIRECTORY;print(determine_latest_cached_market_date(STOCK_DATA_DIRECTORY))')"
 
 # Multi-bucket signal generation. compute_today_signals emits one
@@ -47,4 +49,28 @@ set +e
     >> "$DATE_LOG_DIRECTORY/$LATEST_DATE.log"
 SIGNAL_EXIT_CODE=$?
 set -e
+CRON_END_EPOCH=$(date +%s)
+TOTAL_SECONDS=$((CRON_END_EPOCH - CRON_START_EPOCH))
+UPDATE_SECONDS=$((UPDATE_END_EPOCH - CRON_START_EPOCH))
+SIGNAL_SECONDS=$((CRON_END_EPOCH - UPDATE_END_EPOCH))
+"$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" - \
+    "$LOG_DIRECTORY/cron_runtime.csv" \
+    "$LATEST_DATE" \
+    "$CRON_START_EPOCH" \
+    "$UPDATE_END_EPOCH" \
+    "$CRON_END_EPOCH" <<'PY' || true
+from pathlib import Path
+import sys
+
+from stock_indicator.daily_job import record_cron_runtime
+
+record_cron_runtime(
+    Path(sys.argv[1]),
+    signal_date=sys.argv[2],
+    start_epoch=float(sys.argv[3]),
+    update_end_epoch=float(sys.argv[4]),
+    end_epoch=float(sys.argv[5]),
+)
+PY
+echo "[CRON_TIMING] date=$LATEST_DATE total=${TOTAL_SECONDS}s update=${UPDATE_SECONDS}s signal=${SIGNAL_SECONDS}s" >> "$LOG_DIRECTORY/cron_stdout.log" || true
 exit "$SIGNAL_EXIT_CODE"

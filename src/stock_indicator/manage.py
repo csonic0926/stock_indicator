@@ -14,6 +14,7 @@ import re
 import shlex
 import sys  # TODO: review
 import time  # TODO: review
+from dataclasses import dataclass
 from pathlib import Path
 from statistics import mean, stdev
 from typing import Any, Dict, List
@@ -23,6 +24,7 @@ import yfinance  # TODO: review
 from pandas import DataFrame
 
 from . import data_loader, symbols, strategy, daily_job, multi_bucket_today
+from . import data_revision_audit
 from . import production_ff12_promotion
 from . import symbol_seasoning
 from . import universe_pipeline
@@ -45,6 +47,7 @@ LIVE_STATE_DIRECTORY = DATA_DIRECTORY / "live_state"
 # Store downloaded per-symbol CSVs under a dedicated subfolder to avoid mixing
 # with other project CSVs (e.g., sector exports).
 STOCK_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
+CRON_LOG_DIRECTORY = DATA_DIRECTORY.parent / "cron_logs"
 
 # Named data sources for backtesting.  The cron job always uses "stock_data"
 # (daily 6-month cache).  Exploratory and full backtests select a source via
@@ -164,6 +167,80 @@ def load_symbol_seasoning_dates_for_config(
         )
     )
     return eligibility_path, symbol_first_eligible_trade_dates
+
+
+@dataclass
+class MultiBucketDailyContext:
+    """Resolved config, paths, and state shared by daily live commands."""
+
+    config: multi_bucket_today.MultiBucketRunConfig
+    data_directory: Path
+    allowed_symbols: set[str] | None
+    ff12_data_path: Path | None
+    state_path: Path
+    state: Dict[str, Any]
+    symbol_first_eligible_trade_dates: Dict[str, datetime.date] | None
+    setup_messages: List[str]
+
+
+def load_multi_bucket_daily_context(
+    config_path: Path,
+    *,
+    shadow_mode: bool = False,
+    ensure_state_directory: bool = True,
+) -> MultiBucketDailyContext:
+    """Resolve the production daily-signal context for shell commands."""
+
+    config = multi_bucket_today.load_multi_bucket_config(config_path)
+    if config.adaptive_tp_sl is None:
+        raise ValueError("config must define adaptive_tp_sl")
+
+    data_directory = resolve_data_source(config.data_source_name)
+    if not data_directory.exists():
+        raise ValueError(f"data source directory not found: {data_directory}")
+    allowed_symbols = load_symbol_list(config.symbol_list_name)
+    ff12_data_path = resolve_ff12_data_path(config.ff12_data_path_text)
+
+    setup_messages: List[str] = []
+    if ff12_data_path is not None:
+        setup_messages.append(f"FF12 data: {ff12_data_path}")
+
+    seasoning_dates_result = load_symbol_seasoning_dates_for_config(
+        config.symbol_seasoning or symbol_seasoning.SymbolSeasoningConfig(),
+        data_directory=data_directory,
+        allowed_symbols=allowed_symbols,
+    )
+    symbol_first_eligible_trade_dates = None
+    if seasoning_dates_result is not None:
+        seasoning_source_path, symbol_first_eligible_trade_dates = (
+            seasoning_dates_result
+        )
+        seasoning_config = (
+            config.symbol_seasoning or symbol_seasoning.SymbolSeasoningConfig()
+        )
+        setup_messages.append(
+            "Symbol seasoning: enabled "
+            f"records={len(symbol_first_eligible_trade_dates)} "
+            f"source={seasoning_config.eligibility_source} "
+            f"path={seasoning_source_path}"
+        )
+
+    suffix = "_shadow" if shadow_mode else ""
+    state_path = LIVE_STATE_DIRECTORY / f"adaptive_state{suffix}.json"
+    if ensure_state_directory:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+    state = multi_bucket_today.load_state(state_path)
+
+    return MultiBucketDailyContext(
+        config=config,
+        data_directory=data_directory,
+        allowed_symbols=allowed_symbols,
+        ff12_data_path=ff12_data_path,
+        state_path=state_path,
+        state=state,
+        symbol_first_eligible_trade_dates=symbol_first_eligible_trade_dates,
+        setup_messages=setup_messages,
+    )
 
 
 def load_risk_score_priority_overrides(
@@ -4272,61 +4349,25 @@ class StockShell(cmd.Cmd):
 
         config_path = Path(config_path_text).expanduser()
         try:
-            config = multi_bucket_today.load_multi_bucket_config(config_path)
-        except (FileNotFoundError, ValueError, json.JSONDecodeError) as parse_error:
-            self.stdout.write(f"{parse_error}\n")
+            runtime_context = load_multi_bucket_daily_context(
+                config_path,
+                shadow_mode=shadow_mode,
+            )
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as load_error:
+            self.stdout.write(f"{load_error}\n")
             return
+        for setup_message in runtime_context.setup_messages:
+            self.stdout.write(f"{setup_message}\n")
 
-        if config.adaptive_tp_sl is None:
-            self.stdout.write("config must define adaptive_tp_sl\n")
-            return
-
-        try:
-            data_directory = resolve_data_source(config.data_source_name)
-        except ValueError as source_error:
-            self.stdout.write(f"{source_error}\n")
-            return
-        if not data_directory.exists():
-            self.stdout.write(
-                f"data source directory not found: {data_directory}\n"
-            )
-            return
-        try:
-            allowed_symbols = load_symbol_list(config.symbol_list_name)
-        except ValueError as symbol_list_error:
-            self.stdout.write(f"{symbol_list_error}\n")
-            return
-        try:
-            ff12_data_path = resolve_ff12_data_path(config.ff12_data_path_text)
-        except ValueError as ff12_path_error:
-            self.stdout.write(f"{ff12_path_error}\n")
-            return
-        if ff12_data_path is not None:
-            self.stdout.write(f"FF12 data: {ff12_data_path}\n")
-
-        try:
-            seasoning_dates_result = load_symbol_seasoning_dates_for_config(
-                config.symbol_seasoning or symbol_seasoning.SymbolSeasoningConfig(),
-                data_directory=data_directory,
-                allowed_symbols=allowed_symbols,
-            )
-        except (FileNotFoundError, ValueError) as seasoning_error:
-            self.stdout.write(f"{seasoning_error}\n")
-            return
-        symbol_first_eligible_trade_dates = None
-        if seasoning_dates_result is not None:
-            seasoning_source_path, symbol_first_eligible_trade_dates = (
-                seasoning_dates_result
-            )
-            seasoning_config = (
-                config.symbol_seasoning or symbol_seasoning.SymbolSeasoningConfig()
-            )
-            self.stdout.write(
-                "Symbol seasoning: enabled "
-                f"records={len(symbol_first_eligible_trade_dates)} "
-                f"source={seasoning_config.eligibility_source} "
-                f"path={seasoning_source_path}\n"
-            )
+        config = runtime_context.config
+        data_directory = runtime_context.data_directory
+        allowed_symbols = runtime_context.allowed_symbols
+        ff12_data_path = runtime_context.ff12_data_path
+        state_path = runtime_context.state_path
+        state = runtime_context.state
+        symbol_first_eligible_trade_dates = (
+            runtime_context.symbol_first_eligible_trade_dates
+        )
 
         if date_string is None:
             eval_date_string = daily_job.determine_latest_trading_date().isoformat()
@@ -4372,12 +4413,6 @@ class StockShell(cmd.Cmd):
                     f"month={evaluation_month} scores=[{score_text}], "
                     f"{priority_text}\n"
                 )
-
-        suffix = "_shadow" if shadow_mode else ""
-        state_path = LIVE_STATE_DIRECTORY / f"adaptive_state{suffix}.json"
-        state_path.parent.mkdir(parents=True, exist_ok=True)
-
-        state = multi_bucket_today.load_state(state_path)
 
         # Held positions come from cron's own virtual ledger
         # (state.accepted_entries), NOT from signal_trades.json.
@@ -4454,6 +4489,374 @@ class StockShell(cmd.Cmd):
             "selection uses the same sector map as the matching simulation.\n"
             "Honors optional risk_score_priority_overrides for the evaluated "
             "month.\n"
+        )
+
+    def do_data_revision_audit(self, argument_line: str) -> None:  # noqa: D401
+        """data_revision_audit CONFIG_PATH
+        Re-evaluate accepted live entries against the refreshed data cache."""
+
+        try:
+            tokens = shlex.split(argument_line.strip())
+        except ValueError as parse_error:
+            self.stdout.write(f"failed to parse arguments: {parse_error}\n")
+            return
+        if len(tokens) != 1:
+            self.stdout.write("usage: data_revision_audit CONFIG_PATH\n")
+            return
+
+        config_path = Path(tokens[0]).expanduser()
+        try:
+            runtime_context = load_multi_bucket_daily_context(
+                config_path,
+                ensure_state_directory=False,
+            )
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as load_error:
+            self.stdout.write(f"{load_error}\n")
+            return
+
+        accepted_entries = runtime_context.state.get("accepted_entries", [])
+        if not isinstance(accepted_entries, list):
+            self.stdout.write("accepted_entries must be a list\n")
+            return
+        self.stdout.write(
+            "symbol | bucket | entry_date | "
+            "orig_rank(accepted_entries.dollar_volume_rank) | "
+            "new_rank | reason | verdict\n"
+        )
+        if not accepted_entries:
+            return
+
+        for accepted_entry in accepted_entries:
+            if not isinstance(accepted_entry, dict):
+                continue
+            symbol_name = str(accepted_entry.get("symbol", "")).upper()
+            bucket_label = str(accepted_entry.get("bucket", ""))
+            entry_date = str(accepted_entry.get("entry_date", ""))
+            original_rank = accepted_entry.get("dollar_volume_rank", "")
+            if not symbol_name or not bucket_label or not entry_date:
+                self.stdout.write(
+                    f"{symbol_name} | {bucket_label} | {entry_date} | "
+                    f"{original_rank} |  | invalid_entry_record | "
+                    "[DATA_REVISION_CANDIDATE]\n"
+                )
+                continue
+            try:
+                reevaluation_result = (
+                    data_revision_audit.reevaluate_entry_signal(
+                        runtime_context.config,
+                        symbol_name,
+                        bucket_label,
+                        entry_date,
+                        runtime_context.data_directory,
+                        runtime_context.allowed_symbols,
+                        runtime_context.ff12_data_path,
+                    )
+                )
+            except ValueError as reevaluation_error:
+                self.stdout.write(
+                    f"{symbol_name} | {bucket_label} | {entry_date} | "
+                    f"{original_rank} |  | {reevaluation_error} | "
+                    "[DATA_REVISION_CANDIDATE]\n"
+                )
+                continue
+            new_rank_text = (
+                ""
+                if reevaluation_result.new_rank is None
+                else str(reevaluation_result.new_rank)
+            )
+            verdict = (
+                "still_valid"
+                if reevaluation_result.reason
+                == data_revision_audit.REASON_STILL_VALID
+                else "[DATA_REVISION_CANDIDATE]"
+            )
+            self.stdout.write(
+                f"{symbol_name} | {bucket_label} | {entry_date} | "
+                f"{original_rank} | {new_rank_text} | "
+                f"{reevaluation_result.reason} | {verdict}\n"
+            )
+
+    def help_data_revision_audit(self) -> None:
+        """Display help for the data_revision_audit command."""
+
+        self.stdout.write(
+            "data_revision_audit CONFIG_PATH\n"
+            "Recompute each accepted live entry against the current data cache.\n"
+            "Detection only: prints candidates and does not write files.\n"
+        )
+
+    def do_data_revision_cancel(self, argument_line: str) -> None:  # noqa: D401
+        """data_revision_cancel CONFIG_PATH SYMBOL --close-price X
+        Record a manually closed data-revision cancellation in the ledger."""
+
+        try:
+            tokens = shlex.split(argument_line.strip())
+        except ValueError as parse_error:
+            self.stdout.write(f"failed to parse arguments: {parse_error}\n")
+            return
+        parsed_arguments = self._parse_data_revision_cancel_arguments(tokens)
+        if parsed_arguments is None:
+            return
+
+        config_path = Path(parsed_arguments["config_path"]).expanduser()
+        symbol_name = str(parsed_arguments["symbol"])
+        try:
+            runtime_context = load_multi_bucket_daily_context(
+                config_path,
+                ensure_state_directory=False,
+            )
+        except (FileNotFoundError, ValueError, json.JSONDecodeError) as load_error:
+            self.stdout.write(f"{load_error}\n")
+            return
+
+        accepted_entry = self._find_accepted_entry_for_symbol(
+            runtime_context.state,
+            symbol_name,
+        )
+        if accepted_entry is None:
+            self.stdout.write(f"accepted entry not found for {symbol_name}\n")
+            return
+
+        bucket_label = str(accepted_entry.get("bucket", ""))
+        entry_date = str(accepted_entry.get("entry_date", ""))
+        strategy_identifier = str(accepted_entry.get("strategy_id", ""))
+        original_rank = accepted_entry.get("dollar_volume_rank", "")
+        if not bucket_label or not entry_date or not strategy_identifier:
+            self.stdout.write(
+                "accepted entry is missing bucket, entry_date, or strategy_id\n"
+            )
+            return
+
+        try:
+            reevaluation_result = data_revision_audit.reevaluate_entry_signal(
+                runtime_context.config,
+                symbol_name,
+                bucket_label,
+                entry_date,
+                runtime_context.data_directory,
+                runtime_context.allowed_symbols,
+                runtime_context.ff12_data_path,
+            )
+        except ValueError as reevaluation_error:
+            self.stdout.write(f"{reevaluation_error}\n")
+            return
+
+        force_enabled = bool(parsed_arguments["force"])
+        if (
+            reevaluation_result.reason == data_revision_audit.REASON_STILL_VALID
+            and not force_enabled
+        ):
+            self.stdout.write(
+                "refusing to ledger data-revision cancellation: "
+                f"{symbol_name} is still_valid; use --force to override\n"
+            )
+            return
+
+        ledger_path = CRON_LOG_DIRECTORY / "data_revision_cancellations.csv"
+        if (
+            data_revision_audit.ledger_contains_symbol_entry(
+                ledger_path,
+                symbol=symbol_name,
+                entry_date=entry_date,
+            )
+            and not force_enabled
+        ):
+            self.stdout.write(
+                "refusing duplicate data-revision ledger row: "
+                f"{symbol_name} entry_date={entry_date}; "
+                "use --force to override\n"
+            )
+            return
+
+        entry_price = parsed_arguments["entry_price"]
+        futu_position: data_revision_audit.FutuPosition | None = None
+        try:
+            futu_position = data_revision_audit.load_futu_position_for_symbol(
+                symbol_name
+            )
+        except (ImportError, RuntimeError, OSError) as position_error:
+            if entry_price is None:
+                self.stdout.write(
+                    "could not query Futu cost_price; provide --entry-price: "
+                    f"{position_error}\n"
+                )
+                return
+            self.stdout.write(
+                "warning: could not query Futu position; qty left blank: "
+                f"{position_error}\n"
+            )
+
+        if entry_price is None:
+            if futu_position is None or futu_position.cost_price is None:
+                self.stdout.write(
+                    "Futu position not found; provide --entry-price\n"
+                )
+                return
+            entry_price = futu_position.cost_price
+        if entry_price <= 0:
+            self.stdout.write("entry price must be positive\n")
+            return
+
+        close_price = float(parsed_arguments["close_price"])
+        close_date = str(parsed_arguments["close_date"])
+        realized_pct = (close_price - entry_price) / entry_price
+        quantity_text = ""
+        if futu_position is not None and futu_position.quantity is not None:
+            quantity_text = str(futu_position.quantity)
+
+        cache_latest_date = daily_job.determine_latest_cached_market_date(
+            STOCK_DATA_DIRECTORY
+        )
+        new_rank_text = (
+            ""
+            if reevaluation_result.new_rank is None
+            else str(reevaluation_result.new_rank)
+        )
+        ledger_row = {
+            "detect_date": datetime.date.today().isoformat(),
+            "symbol": data_revision_audit.normalize_symbol_for_state(
+                symbol_name
+            ),
+            "bucket": bucket_label,
+            "strategy_id": strategy_identifier,
+            "entry_date": entry_date,
+            "entry_price": str(float(entry_price)),
+            "close_date": close_date,
+            "close_price": str(close_price),
+            "qty": quantity_text,
+            "realized_pct": f"{realized_pct:.10f}",
+            "orig_rank": str(original_rank),
+            "new_rank": new_rank_text,
+            "reason": reevaluation_result.reason,
+            "cache_latest_date": cache_latest_date.isoformat(),
+        }
+        data_revision_audit.append_cancellation_ledger_row(
+            ledger_path,
+            ledger_row,
+        )
+        self.stdout.write(
+            "[DATA_REVISION_CANCEL_LEDGERED] "
+            f"symbol={ledger_row['symbol']} entry_date={entry_date} "
+            f"reason={reevaluation_result.reason} ledger={ledger_path}\n"
+        )
+
+    def _parse_data_revision_cancel_arguments(
+        self,
+        tokens: List[str],
+    ) -> Dict[str, Any] | None:
+        """Parse the data_revision_cancel shell command arguments."""
+
+        usage_text = (
+            "usage: data_revision_cancel CONFIG_PATH SYMBOL --close-price X "
+            "[--close-date D] [--entry-price X] [--force]\n"
+        )
+        if len(tokens) < 2:
+            self.stdout.write(usage_text)
+            return None
+
+        parsed_arguments: Dict[str, Any] = {
+            "config_path": tokens[0],
+            "symbol": data_revision_audit.normalize_symbol_for_state(tokens[1]),
+            "close_price": None,
+            "close_date": datetime.date.today().isoformat(),
+            "entry_price": None,
+            "force": False,
+        }
+
+        argument_index = 2
+        while argument_index < len(tokens):
+            argument_text = tokens[argument_index]
+            if argument_text == "--force":
+                parsed_arguments["force"] = True
+                argument_index += 1
+                continue
+
+            option_name = argument_text
+            option_value: str | None = None
+            if "=" in argument_text:
+                option_name, option_value = argument_text.split("=", maxsplit=1)
+            elif argument_text in {
+                "--close-price",
+                "--close-date",
+                "--entry-price",
+            }:
+                next_argument_index = argument_index + 1
+                if next_argument_index >= len(tokens):
+                    self.stdout.write(usage_text)
+                    return None
+                option_value = tokens[next_argument_index]
+                argument_index += 1
+
+            if option_name == "--close-price" and option_value is not None:
+                try:
+                    close_price = float(option_value)
+                except ValueError:
+                    self.stdout.write("close price must be numeric\n")
+                    return None
+                if close_price <= 0:
+                    self.stdout.write("close price must be positive\n")
+                    return None
+                parsed_arguments["close_price"] = close_price
+            elif option_name == "--close-date" and option_value is not None:
+                try:
+                    datetime.date.fromisoformat(option_value)
+                except ValueError:
+                    self.stdout.write(
+                        f"invalid close date: {option_value} "
+                        "(expected YYYY-MM-DD)\n"
+                    )
+                    return None
+                parsed_arguments["close_date"] = option_value
+            elif option_name == "--entry-price" and option_value is not None:
+                try:
+                    entry_price = float(option_value)
+                except ValueError:
+                    self.stdout.write("entry price must be numeric\n")
+                    return None
+                if entry_price <= 0:
+                    self.stdout.write("entry price must be positive\n")
+                    return None
+                parsed_arguments["entry_price"] = entry_price
+            else:
+                self.stdout.write(f"unexpected argument: {argument_text}\n")
+                self.stdout.write(usage_text)
+                return None
+            argument_index += 1
+
+        if parsed_arguments["close_price"] is None:
+            self.stdout.write(usage_text)
+            return None
+        return parsed_arguments
+
+    def _find_accepted_entry_for_symbol(
+        self,
+        state: Dict[str, Any],
+        symbol: str,
+    ) -> Dict[str, Any] | None:
+        """Return the first accepted entry matching ``symbol``."""
+
+        normalized_symbol = data_revision_audit.normalize_symbol_for_state(symbol)
+        accepted_entries = state.get("accepted_entries", [])
+        if not isinstance(accepted_entries, list):
+            return None
+        for accepted_entry in accepted_entries:
+            if not isinstance(accepted_entry, dict):
+                continue
+            accepted_symbol = data_revision_audit.normalize_symbol_for_state(
+                str(accepted_entry.get("symbol", ""))
+            )
+            if accepted_symbol == normalized_symbol:
+                return accepted_entry
+        return None
+
+    def help_data_revision_cancel(self) -> None:
+        """Display help for the data_revision_cancel command."""
+
+        self.stdout.write(
+            "data_revision_cancel CONFIG_PATH SYMBOL --close-price X "
+            "[--close-date D] [--entry-price X] [--force]\n"
+            "Append a read-only cancellation ledger row after a manual close.\n"
+            "The command does not place Futu orders or mutate accepted_entries.\n"
         )
 
     def do_merge_wr_gate_bootstrap(self, argument_line: str) -> None:  # noqa: D401

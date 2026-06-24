@@ -3,8 +3,10 @@
 
 from __future__ import annotations
 
+import csv
 import datetime
 import logging
+import math
 import re
 from pathlib import Path
 from typing import Any, Dict, List
@@ -47,6 +49,61 @@ NON_COMMON_STOCK_SYMBOL_PATTERN = re.compile(
     r"(?:[.-](?:WT|WS|W|U|R)|(?:WS|WT))$",
     flags=re.IGNORECASE,
 )
+
+CRON_RUNTIME_FIELD_NAMES = [
+    "signal_date",
+    "start_iso",
+    "end_iso",
+    "total_seconds",
+    "update_seconds",
+    "signal_seconds",
+]
+
+
+def record_cron_runtime(
+    csv_path: Path,
+    *,
+    signal_date: str,
+    start_epoch: float,
+    update_end_epoch: float,
+    end_epoch: float,
+) -> None:
+    """Append one wall-clock runtime record for the daily cron wrapper.
+
+    The helper intentionally uses append mode and only writes the header when
+    the target CSV does not exist. This keeps the cron integration simple and
+    avoids rewriting the timing ledger during a production run.
+    """
+
+    def _round_duration_seconds(duration_seconds: float) -> int:
+        """Round a non-negative duration to the nearest whole second."""
+
+        return int(math.floor(duration_seconds + 0.5))
+
+    csv_exists = csv_path.exists()
+    start_datetime = datetime.datetime.fromtimestamp(start_epoch).astimezone()
+    end_datetime = datetime.datetime.fromtimestamp(end_epoch).astimezone()
+    update_seconds = _round_duration_seconds(update_end_epoch - start_epoch)
+    signal_seconds = _round_duration_seconds(end_epoch - update_end_epoch)
+    total_seconds = _round_duration_seconds(end_epoch - start_epoch)
+
+    with csv_path.open("a", newline="", encoding="utf-8") as cron_runtime_file:
+        writer = csv.DictWriter(
+            cron_runtime_file,
+            fieldnames=CRON_RUNTIME_FIELD_NAMES,
+        )
+        if not csv_exists:
+            writer.writeheader()
+        writer.writerow(
+            {
+                "signal_date": signal_date,
+                "start_iso": start_datetime.isoformat(),
+                "end_iso": end_datetime.isoformat(),
+                "total_seconds": total_seconds,
+                "update_seconds": update_seconds,
+                "signal_seconds": signal_seconds,
+            }
+        )
 
 
 def determine_latest_trading_date(

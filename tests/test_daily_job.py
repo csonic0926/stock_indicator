@@ -2,6 +2,7 @@
 
 # TODO: review
 
+import csv
 import datetime
 from pathlib import Path
 import os
@@ -15,6 +16,45 @@ import yfinance.exceptions as yfinance_exceptions
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
 from stock_indicator import daily_job
+
+
+def test_record_cron_runtime_appends_row(tmp_path: Path) -> None:
+    """Cron runtime CSV should get one header and append data rows."""
+
+    cron_runtime_path = tmp_path / "cron_runtime.csv"
+
+    daily_job.record_cron_runtime(
+        cron_runtime_path,
+        signal_date="2026-06-22",
+        start_epoch=100.0,
+        update_end_epoch=130.0,
+        end_epoch=145.0,
+    )
+    daily_job.record_cron_runtime(
+        cron_runtime_path,
+        signal_date="2026-06-23",
+        start_epoch=200.0,
+        update_end_epoch=245.0,
+        end_epoch=260.0,
+    )
+
+    csv_lines = cron_runtime_path.read_text(encoding="utf-8").splitlines()
+    assert csv_lines[0] == ",".join(daily_job.CRON_RUNTIME_FIELD_NAMES)
+    assert sum(
+        1
+        for line_text in csv_lines
+        if line_text.startswith("signal_date,start_iso,end_iso,")
+    ) == 1
+
+    with cron_runtime_path.open("r", newline="", encoding="utf-8") as csv_file:
+        runtime_rows = list(csv.DictReader(csv_file))
+
+    assert len(runtime_rows) == 2
+    for runtime_row in runtime_rows:
+        total_seconds = int(runtime_row["total_seconds"])
+        update_seconds = int(runtime_row["update_seconds"])
+        signal_seconds = int(runtime_row["signal_seconds"])
+        assert total_seconds == update_seconds + signal_seconds
 
 
 def test_determine_latest_cached_market_date_uses_sp500_anchor(
