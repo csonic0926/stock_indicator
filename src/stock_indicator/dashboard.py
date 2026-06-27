@@ -530,6 +530,7 @@ PRODUCTION_CONFIG_PATH = (
 )
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent.parent
 PREVIEW_SKIP_STATUSES = {
+    "bucket_cap",
     "slot_full",
     "risk_score_stop",
     "min_hold_block",
@@ -668,6 +669,101 @@ def _load_max_positions() -> int:
         return int(_load_production_config().get("max_position_count", 6))
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         return 6
+
+
+# TODO: review
+def _load_current_bucket_entry_limits() -> dict[str, dict[str, Any]]:
+    """Load live per-bucket entry caps keyed by bucket label and strategy id."""
+    try:
+        from stock_indicator import multi_bucket_today
+
+        config = multi_bucket_today.load_multi_bucket_config(
+            PRODUCTION_CONFIG_PATH
+        )
+    except (OSError, json.JSONDecodeError, ValueError) as config_error:
+        LOGGER.warning(
+            "Failed to load current bucket entry limits: %s", config_error
+        )
+        return {}
+
+    limits_by_key: dict[str, dict[str, Any]] = {}
+    for bucket_label, bucket_definition in config.bucket_definitions.items():
+        maximum_positions = (
+            bucket_definition.maximum_positions
+            if bucket_definition.maximum_positions is not None
+            else config.maximum_position_count
+        )
+        limit = {
+            "bucket": bucket_label,
+            "strategy_id": bucket_definition.strategy_identifier,
+            "maximum_positions": maximum_positions,
+            "fill_remaining": bucket_definition.fill_remaining,
+        }
+        limits_by_key[bucket_label] = limit
+        if bucket_definition.strategy_identifier:
+            limits_by_key.setdefault(
+                bucket_definition.strategy_identifier, limit
+            )
+    return limits_by_key
+
+
+def _count_live_positions_by_bucket(
+    *,
+    held_symbols: set[str],
+    futu_open_entries: dict[str, dict[str, Any]],
+    open_phantom_positions: list[dict[str, Any]],
+) -> dict[str, int]:
+    """Count current broker and phantom positions by bucket label."""
+    bucket_counts: dict[str, int] = {}
+    for symbol in held_symbols:
+        bucket_label = futu_open_entries.get(symbol, {}).get("bucket")
+        if not bucket_label:
+            continue
+        bucket_key = str(bucket_label)
+        bucket_counts[bucket_key] = bucket_counts.get(bucket_key, 0) + 1
+
+    for phantom_position in open_phantom_positions:
+        bucket_label = phantom_position.get("bucket")
+        if not bucket_label:
+            continue
+        bucket_key = str(bucket_label)
+        bucket_counts[bucket_key] = bucket_counts.get(bucket_key, 0) + 1
+    return bucket_counts
+
+
+def _entry_limit_skip_reason(
+    *,
+    entry_limit: dict[str, Any] | None,
+    bucket_position_counts: dict[str, int],
+    occupied_position_count: int,
+) -> str | None:
+    """Return a skip reason when a BUY would violate its bucket cap."""
+    if not entry_limit:
+        return None
+    bucket_label = str(entry_limit.get("bucket") or "")
+    if not bucket_label:
+        return None
+    try:
+        maximum_positions = int(entry_limit.get("maximum_positions"))
+    except (TypeError, ValueError):
+        return None
+
+    if bool(entry_limit.get("fill_remaining")):
+        if occupied_position_count >= maximum_positions:
+            return (
+                f"fill_remaining bucket {bucket_label} requires total "
+                f"positions < {maximum_positions} "
+                f"(current: {occupied_position_count})"
+            )
+        return None
+
+    current_bucket_positions = bucket_position_counts.get(bucket_label, 0)
+    if current_bucket_positions >= maximum_positions:
+        return (
+            f"bucket {bucket_label} max_positions={maximum_positions} "
+            f"already filled (current: {current_bucket_positions})"
+        )
+    return None
 
 
 def _load_production_min_hold() -> int:
@@ -1373,6 +1469,7 @@ def api_preview_orders():
     }
 
     current_bucket_exit_rules = _load_current_bucket_exit_rules()
+    current_bucket_entry_limits = _load_current_bucket_entry_limits()
     orders = []
 
     # WR-gate phantom accounting (read-only here; persistence happens at
@@ -1397,6 +1494,25 @@ def api_preview_orders():
     open_phantom_symbols = {
         phantom["symbol"] for phantom in open_phantom_positions
     }
+    signal_date_text = str(log.get("date") or "")
+    futu_open_entries: dict[str, dict[str, Any]] = {}
+    if signal_date_text:
+        try:
+            futu_open_entries = _load_futu_open_trade_entries(
+                trd_ctx,
+                trd_env,
+                signal_date_text=signal_date_text,
+            )
+        except Exception as load_error:
+            LOGGER.warning(
+                "Failed to load Futu open entries for bucket gates: %s",
+                load_error,
+            )
+    bucket_position_counts = _count_live_positions_by_bucket(
+        held_symbols=held_symbols,
+        futu_open_entries=futu_open_entries,
+        open_phantom_positions=open_phantom_positions,
+    )
 
     # Slot cap based on REAL Futu portfolio PLUS phantom-held slots (this
     # is the order layer's job — cron's signal layer emits Top N
@@ -1407,6 +1523,7 @@ def api_preview_orders():
     slots_remaining = max(
         0, max_positions - len(held_symbols) - len(open_phantom_symbols)
     )
+    occupied_position_count = len(held_symbols) + len(open_phantom_symbols)
 
     # BUY orders (today's accepted entries from [FROZEN_TP_SL] lines).
     # Iteration order follows log emission, which mirrors cron's
@@ -1485,6 +1602,16 @@ def api_preview_orders():
                 f"(Futu held: {len(held_symbols)}, "
                 f"phantom: {len(open_phantom_symbols)})"
             )
+        elif (
+            bucket_skip_reason := _entry_limit_skip_reason(
+                entry_limit=current_bucket_entry_limits.get(bucket_key),
+                bucket_position_counts=bucket_position_counts,
+                occupied_position_count=occupied_position_count,
+            )
+        ):
+            order_dict["status"] = "bucket_cap"
+            order_dict["qty"] = 0
+            order_dict["skip_reason"] = bucket_skip_reason
         elif is_phantom:
             # Phantom: hold the slot, deploy zero capital, place no real
             # order. Carries phantom_record so execute can persist it to
@@ -1507,28 +1634,26 @@ def api_preview_orders():
                 "max_hold": meta.get("max_hold"),
             }
             slots_remaining -= 1
+            occupied_position_count += 1
+            bucket_label = str(order_dict.get("bucket") or "")
+            if bucket_label:
+                bucket_position_counts[bucket_label] = (
+                    bucket_position_counts.get(bucket_label, 0) + 1
+                )
         else:
             slots_remaining -= 1
+            occupied_position_count += 1
+            bucket_label = str(order_dict.get("bucket") or "")
+            if bucket_label:
+                bucket_position_counts[bucket_label] = (
+                    bucket_position_counts.get(bucket_label, 0) + 1
+                )
         orders.append(order_dict)
 
     # SELL orders (exit signals for held positions). The signal layer (cron)
     # treats its own sim portfolio as truth, so it can emit an exit signal for
     # a symbol that Futu only filled this signal day. The order layer must
     # re-check min_hold against the Futu entry_date before sending the SELL.
-    signal_date_text = str(log.get("date") or "")
-    futu_open_entries: dict[str, dict[str, Any]] = {}
-    if signal_date_text:
-        try:
-            futu_open_entries = _load_futu_open_trade_entries(
-                trd_ctx,
-                trd_env,
-                signal_date_text=signal_date_text,
-            )
-        except Exception as load_error:
-            LOGGER.warning(
-                "Failed to load Futu open entries for min_hold gate: %s",
-                load_error,
-            )
     production_min_hold = _load_production_min_hold()
 
     # Trading calendar covering every open-entry hold window so min_hold and
@@ -2391,7 +2516,7 @@ async function previewOrders() {
         ? `max ${o.bars_held}/${o.max_hold}`
         : (o.dollar_volume_rank != null) ? '#' + o.dollar_volume_rank : '—';
       const isPhantom = o.status === 'wr_gate_phantom';
-      const skipped = o.status === 'slot_full' || o.status === 'risk_score_stop' || o.status === 'min_hold_block' || isPhantom;
+      const skipped = o.status === 'bucket_cap' || o.status === 'slot_full' || o.status === 'risk_score_stop' || o.status === 'min_hold_block' || isPhantom;
       const rowStyle = skipped ? ' style="opacity:0.45"' : '';
       const statusDetail = o.status === 'min_hold_block' && o.bars_held != null && o.min_hold != null
         ? `min_hold_block ${o.bars_held}/${o.min_hold}`

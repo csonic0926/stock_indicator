@@ -535,6 +535,108 @@ def test_preview_orders_cold_start_keeps_old_positions_and_sizes_new_buy_by_seve
     ]
 
 
+def test_preview_orders_blocks_buy_when_live_bucket_is_at_cap(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Live Futu bucket metadata should enforce bucket max_positions."""
+    signal_date = "2026-06-26"
+    config_path = tmp_path / "multi_bucket_production.json"
+    log_directory = tmp_path / "logs"
+    log_directory.mkdir()
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 7,
+                "margin": 1.5,
+                "buckets": [
+                    {
+                        "label": "fish_head_production",
+                        "strategy_id": "fish_head_vacuum_turn",
+                        "dollar_volume_filter": (
+                            "dollar_volume>0.02%,Top500,Pick5"
+                        ),
+                        "max_positions": 6,
+                        "max_hold": 14,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (log_directory / f"{signal_date}.log").write_text(
+        "[FROZEN_TP_SL] entry_date=2026-06-26 "
+        "bucket=fish_head_production strategy_id=fish_head_vacuum_turn "
+        "symbol=GGG dollar_volume_rank=1 tp_pct=0.070000 sl_pct=0.025000 "
+        "min_hold_sl=1 disable_sl_trigger=True max_hold=14 "
+        "reset_hold_on_reentry_signal=False\n",
+        encoding="utf-8",
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    held_symbols = ["AAA", "BBB", "CCC", "DDD", "EEE", "FFF"]
+    fish_head_remark = "si2|s=h|tp=700|sl=300|ms=1|ds=1|mh=14|rr=0"
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: FakeTradeContext(
+            total_assets=54_600.0,
+            positions=[
+                {"code": f"US.{symbol}", "qty": 1}
+                for symbol in held_symbols
+            ],
+            deals=[
+                {
+                    "code": f"US.{symbol}",
+                    "trd_side": "BUY",
+                    "qty": 1,
+                    "create_time": "2026-06-25 09:30:00",
+                    "order_id": str(symbol_position),
+                }
+                for symbol_position, symbol in enumerate(held_symbols, start=1)
+            ],
+            orders=[
+                {"order_id": str(symbol_position), "remark": fish_head_remark}
+                for symbol_position, _symbol in enumerate(held_symbols, start=1)
+            ],
+        ),
+    )
+
+    preview = dashboard.api_preview_orders()
+
+    assert preview["held_count"] == 6
+    buy_orders = [
+        order for order in preview["orders"] if order["side"] == "BUY"
+    ]
+    assert buy_orders == [
+        {
+            "side": "BUY",
+            "symbol": "GGG",
+            "qty": 0,
+            "ref_price": 10.0,
+            "order_type": "MARKET",
+            "bucket": "fish_head_production",
+            "strategy_id": "fish_head_vacuum_turn",
+            "tp_pct": 0.07,
+            "sl_pct": 0.025,
+            "dollar_volume_rank": 1,
+            "min_hold_sl": 1,
+            "disable_sl_trigger": True,
+            "max_hold": 14,
+            "reset_hold_on_reentry_signal": False,
+            "status": "bucket_cap",
+            "skip_reason": (
+                "bucket fish_head_production max_positions=6 already filled "
+                "(current: 6)"
+            ),
+        }
+    ]
+
+
 def test_dashboard_buy_remark_uses_compact_v2_schema() -> None:
     """BUY remarks should fit Futu limits and round-trip live metadata."""
     order = {
