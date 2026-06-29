@@ -531,6 +531,10 @@ def _build_eligibility_mask(
 LONG_TERM_SMA_WINDOW: int = 150
 DOLLAR_VOLUME_SMA_WINDOW: int = 50
 MAXIMUM_REASONABLE_PRICE: float = 1_000_000.0
+BarExcursion = (
+    tuple[pandas.Timestamp, float, float]
+    | tuple[pandas.Timestamp, float, float, float]
+)
 
 
 @dataclass
@@ -933,6 +937,94 @@ class StrategyEvaluationArtifacts:
     entry_signal_by_symbol: Dict[str, pandas.Series] = field(default_factory=dict)
 
 
+def _calculate_bar_excursion_extremes(
+    bar_excursions: Iterable[BarExcursion],
+) -> tuple[
+    float | None,
+    float | None,
+    pandas.Timestamp | None,
+    pandas.Timestamp | None,
+]:
+    """Return MFE/MAE percentages and dates for an entry-basis bar path."""
+
+    favorable_percentage: float | None = None
+    adverse_percentage: float | None = None
+    favorable_date: pandas.Timestamp | None = None
+    adverse_date: pandas.Timestamp | None = None
+    for bar_excursion in bar_excursions:
+        bar_date = bar_excursion[0]
+        high_percentage = bar_excursion[1]
+        low_percentage = bar_excursion[2]
+        if favorable_percentage is None or high_percentage > favorable_percentage:
+            favorable_percentage = high_percentage
+            favorable_date = bar_date
+        if adverse_percentage is None or low_percentage < adverse_percentage:
+            adverse_percentage = low_percentage
+            adverse_date = bar_date
+    return (
+        favorable_percentage,
+        adverse_percentage,
+        favorable_date,
+        adverse_date,
+    )
+
+
+def _copy_bar_excursions_with_final_bar_open_only(
+    bar_excursions: list[BarExcursion],
+) -> list[BarExcursion]:
+    """Return a path whose final bar exposure stops at the opening fill."""
+
+    if not bar_excursions:
+        return []
+    adjusted_bar_excursions = list(bar_excursions)
+    final_bar_excursion = adjusted_bar_excursions[-1]
+    final_bar_date = final_bar_excursion[0]
+    if len(final_bar_excursion) == 4:
+        final_open_percentage = final_bar_excursion[3]
+        adjusted_bar_excursions[-1] = (
+            final_bar_date,
+            final_open_percentage,
+            final_open_percentage,
+            final_open_percentage,
+        )
+    else:
+        adjusted_bar_excursions[-1] = (final_bar_date, 0.0, 0.0)
+    return adjusted_bar_excursions
+
+
+def _replace_trade_exit_with_recomputed_excursions(
+    trade: Trade,
+    *,
+    exit_date: pandas.Timestamp,
+    exit_price: float,
+    profit: float,
+    holding_period: int,
+    exit_reason: str,
+    bar_excursions: list[BarExcursion] | None,
+) -> Trade:
+    """Replace exit fields and keep MFE/MAE aligned to the exposed path."""
+
+    (
+        favorable_percentage,
+        adverse_percentage,
+        favorable_date,
+        adverse_date,
+    ) = _calculate_bar_excursion_extremes(bar_excursions or [])
+    return replace(
+        trade,
+        exit_date=exit_date,
+        exit_price=exit_price,
+        profit=profit,
+        holding_period=holding_period,
+        exit_reason=exit_reason,
+        bar_excursions=bar_excursions,
+        max_favorable_excursion_pct=favorable_percentage,
+        max_adverse_excursion_pct=adverse_percentage,
+        max_favorable_excursion_date=favorable_date,
+        max_adverse_excursion_date=adverse_date,
+    )
+
+
 def _resolve_slot_release_date(
     trade: Trade,
     target_holding_bars: int,
@@ -1071,18 +1163,24 @@ def _replay_trade_with_adaptive_tp_sl(
             and bar_low_pct <= -active_sl_pct
         ):
             effective_sl_pct = active_sl_pct
+            bar_excursions_until_exit = list(trade.bar_excursions[: holding])
             if bar_open_pct <= -active_sl_pct:
                 effective_sl_pct = -bar_open_pct
+                bar_excursions_until_exit = (
+                    _copy_bar_excursions_with_final_bar_open_only(
+                        bar_excursions_until_exit
+                    )
+                )
             adjusted_exit_price = trade.entry_price * (1 - effective_sl_pct)
             adjusted_profit = adjusted_exit_price - trade.entry_price
-            return replace(
+            return _replace_trade_exit_with_recomputed_excursions(
                 trade,
                 exit_date=bar_date,
                 exit_price=adjusted_exit_price,
                 profit=adjusted_profit,
                 holding_period=holding,
                 exit_reason="adaptive_stop_loss",
-                bar_excursions=trade.bar_excursions[: holding],
+                bar_excursions=bar_excursions_until_exit,
             )
         # Check TP (may use different min_hold).
         # If open gaps above TP, limit order fills at open (price improvement).
@@ -1097,16 +1195,25 @@ def _replay_trade_with_adaptive_tp_sl(
                 and bar_high_pct >= active_tp_pct
             ):
                 effective_tp_pct = max(active_tp_pct, bar_open_pct)
+                bar_excursions_until_exit = list(
+                    trade.bar_excursions[: holding]
+                )
+                if bar_open_pct >= active_tp_pct:
+                    bar_excursions_until_exit = (
+                        _copy_bar_excursions_with_final_bar_open_only(
+                            bar_excursions_until_exit
+                        )
+                    )
                 adjusted_exit_price = trade.entry_price * (1 + effective_tp_pct)
                 adjusted_profit = adjusted_exit_price - trade.entry_price
-                return replace(
+                return _replace_trade_exit_with_recomputed_excursions(
                     trade,
                     exit_date=bar_date,
                     exit_price=adjusted_exit_price,
                     profit=adjusted_profit,
                     holding_period=holding,
                     exit_reason="adaptive_take_profit",
-                    bar_excursions=trade.bar_excursions[: holding],
+                    bar_excursions=bar_excursions_until_exit,
                 )
         # Max-hold force exit: when holding meets the per-bucket ceiling
         # without TP/SL firing, exit at the NEXT bar's open (similar to
@@ -1126,14 +1233,22 @@ def _replay_trade_with_adaptive_tp_sl(
                 next_date = next_excursion[0]
                 adjusted_exit_price = trade.entry_price * (1 + next_open_pct)
                 adjusted_profit = adjusted_exit_price - trade.entry_price
-                return replace(
+                bar_excursions_until_exit = list(
+                    trade.bar_excursions[: holding + 1]
+                )
+                bar_excursions_until_exit = (
+                    _copy_bar_excursions_with_final_bar_open_only(
+                        bar_excursions_until_exit
+                    )
+                )
+                return _replace_trade_exit_with_recomputed_excursions(
                     trade,
                     exit_date=next_date,
                     exit_price=adjusted_exit_price,
                     profit=adjusted_profit,
                     holding_period=holding,
                     exit_reason="max_hold",
-                    bar_excursions=trade.bar_excursions[: holding + 1],
+                    bar_excursions=bar_excursions_until_exit,
                 )
     if sl_only:
         # No SL triggered — hold indefinitely until evicted by a new signal.
@@ -1145,14 +1260,14 @@ def _replay_trade_with_adaptive_tp_sl(
         # eviction will replace this with the eviction-day open.
         adjusted_exit_price = trade.exit_price
         adjusted_profit = adjusted_exit_price - trade.entry_price
-        return replace(
+        return _replace_trade_exit_with_recomputed_excursions(
             trade,
             exit_date=far_future,
             exit_price=adjusted_exit_price,
             profit=adjusted_profit,
             holding_period=len(trade.bar_excursions),
             exit_reason="end_of_data",
-            bar_excursions=trade.bar_excursions,
+            bar_excursions=list(trade.bar_excursions),
         )
     # Neither triggered — use signal exit as-is.
     return trade
@@ -2799,17 +2914,27 @@ def run_complex_simulation(
                             evict_exit_price = evicted_original.exit_price
                             evict_holding = len(evicted_original.bar_excursions)
                     evict_profit = evict_exit_price - evicted_adjusted.entry_price
-                    evicted_new = replace(
+                    evicted_bar_excursions = (
+                        list(evicted_original.bar_excursions[:evict_holding])
+                        if evicted_original.bar_excursions
+                        else None
+                    )
+                    if evicted_bar_excursions:
+                        final_evicted_bar_date = evicted_bar_excursions[-1][0]
+                        if final_evicted_bar_date >= event_date:
+                            evicted_bar_excursions = (
+                                _copy_bar_excursions_with_final_bar_open_only(
+                                    evicted_bar_excursions
+                                )
+                            )
+                    evicted_new = _replace_trade_exit_with_recomputed_excursions(
                         evicted_adjusted,
                         exit_date=event_date,
                         exit_price=evict_exit_price,
                         profit=evict_profit,
                         holding_period=evict_holding,
                         exit_reason="evicted",
-                        bar_excursions=(
-                            evicted_original.bar_excursions[:evict_holding]
-                            if evicted_original.bar_excursions else None
-                        ),
+                        bar_excursions=evicted_bar_excursions,
                     )
                     # Replace in accepted trades list.
                     trades_list = accepted_trades_by_set[evict_label]

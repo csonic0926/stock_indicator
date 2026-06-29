@@ -1869,6 +1869,92 @@ def test_replay_refire_blocks_sl_during_new_min_hold_window() -> None:
     assert adjusted.exit_date == bars[7][0]
 
 
+def test_replay_take_profit_recomputes_excursions_from_adjusted_path() -> None:
+    """Adaptive TP must not keep MFE/MAE from the raw signal-exit path."""
+
+    first_bar_date = pandas.Timestamp("2024-02-02")
+    bar_excursions = [
+        (first_bar_date, 0.01, -0.02, 0.0),
+        (first_bar_date + pandas.Timedelta(days=1), 0.06, -0.03, 0.0),
+        (first_bar_date + pandas.Timedelta(days=2), 0.20, -0.01, 0.0),
+    ]
+    trade = strategy.Trade(
+        entry_date=pandas.Timestamp("2024-02-01"),
+        exit_date=bar_excursions[-1][0],
+        entry_price=100.0,
+        exit_price=120.0,
+        profit=20.0,
+        holding_period=len(bar_excursions),
+        exit_reason="signal",
+        max_favorable_excursion_pct=0.20,
+        max_adverse_excursion_pct=-0.03,
+        max_favorable_excursion_date=bar_excursions[-1][0],
+        max_adverse_excursion_date=bar_excursions[1][0],
+        bar_excursions=bar_excursions,
+    )
+
+    adjusted = strategy._replay_trade_with_adaptive_tp_sl(
+        trade,
+        tp_pct=0.05,
+        sl_pct=0.50,
+        disable_sl_trigger=True,
+    )
+
+    assert adjusted.exit_reason == "adaptive_take_profit"
+    assert adjusted.exit_date == bar_excursions[1][0]
+    assert adjusted.max_favorable_excursion_pct == pytest.approx(0.06)
+    assert adjusted.max_adverse_excursion_pct == pytest.approx(-0.03)
+    assert adjusted.max_favorable_excursion_date == bar_excursions[1][0]
+    assert adjusted.max_adverse_excursion_date == bar_excursions[1][0]
+    assert adjusted.max_favorable_excursion_date <= adjusted.exit_date
+    assert len(adjusted.bar_excursions or []) == 2
+
+
+def test_replay_max_hold_reports_exit_open_not_exit_day_extremes() -> None:
+    """Max-hold exits at next open, so same-day high/low are post-exit."""
+
+    first_bar_date = pandas.Timestamp("2024-03-02")
+    bar_excursions = [
+        (first_bar_date, 0.02, -0.01, 0.0),
+        (first_bar_date + pandas.Timedelta(days=1), 0.03, -0.02, 0.01),
+        (first_bar_date + pandas.Timedelta(days=2), 0.50, -0.50, -0.04),
+    ]
+    trade = strategy.Trade(
+        entry_date=pandas.Timestamp("2024-03-01"),
+        exit_date=bar_excursions[-1][0],
+        entry_price=100.0,
+        exit_price=90.0,
+        profit=-10.0,
+        holding_period=len(bar_excursions),
+        exit_reason="signal",
+        max_favorable_excursion_pct=0.50,
+        max_adverse_excursion_pct=-0.50,
+        max_favorable_excursion_date=bar_excursions[-1][0],
+        max_adverse_excursion_date=bar_excursions[-1][0],
+        bar_excursions=bar_excursions,
+    )
+
+    adjusted = strategy._replay_trade_with_adaptive_tp_sl(
+        trade,
+        tp_pct=0.50,
+        sl_pct=0.50,
+        disable_sl_trigger=True,
+        max_hold_bars=2,
+    )
+
+    assert adjusted.exit_reason == "max_hold"
+    assert adjusted.exit_date == bar_excursions[2][0]
+    assert adjusted.exit_price == pytest.approx(96.0)
+    assert adjusted.max_favorable_excursion_pct == pytest.approx(0.03)
+    assert adjusted.max_adverse_excursion_pct == pytest.approx(-0.04)
+    assert adjusted.max_favorable_excursion_date == bar_excursions[1][0]
+    assert adjusted.max_adverse_excursion_date == adjusted.exit_date
+    final_bar_excursion = (adjusted.bar_excursions or [])[-1]
+    assert final_bar_excursion[1] == pytest.approx(-0.04)
+    assert final_bar_excursion[2] == pytest.approx(-0.04)
+    assert final_bar_excursion[3] == pytest.approx(-0.04)
+
+
 def test_risk_score_stop_mask_zeroes_target_months() -> None:
     """Test the gate-mask logic in isolation — month-keyed mask must
     AND-zero entry signals for any bar in a stop month.
