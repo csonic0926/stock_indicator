@@ -48,7 +48,6 @@
       "tp_regime_adjust": false,
       "tp_slope_amplify": false,
       "pre_cross_signal_lookback": true,
-      "max_hold": 14,
       "reset_hold_on_reentry_signal": false
     },
     {

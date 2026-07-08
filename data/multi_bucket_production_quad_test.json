@@ -1,25 +1,15 @@
 {
   "max_position_count": 7,
   "starting_cash": 70000,
-  "margin": 1.5,
+  "margin": 1.7,
   "withdraw": 0,
   "start_date": "2010-01-01",
-  "data_source": "daily",
+  "data_source": "2010",
   "min_hold": 5,
   "show_trade_details": false,
   "risk_score_gate": {
     "csv_path": "data/historical_risk_scores.csv",
     "stop_threshold": 75
-  },
-  "ft_family_wr_gate": {
-    "sensor_bucket": "fish_tail_production",
-    "gated_buckets": [
-      "fish_tail_production",
-      "fish_tail_squeeze"
-    ],
-    "window": 12,
-    "curve": "wr_cross",
-    "risk_score_activation_threshold": 25
   },
   "adaptive_tp_sl": {
     "window": 20,
@@ -67,7 +57,7 @@
       "priority": 1,
       "max_positions": 2,
       "exit_alpha_factor": 3,
-      "sigma": 0.75,
+      "sigma": 0.0,
       "min_sl": 0.01,
       "fixed_sl": null,
       "fixed_tp": null,
@@ -127,6 +117,7 @@
     }
   ],
   "symbol_list": "production",
+  "symbol_exclude_list": "crypto_proxy_blocked",
   "ff12_data_path": "data/production_symbols_with_sector.parquet",
   "risk_score_priority_overrides": {
     "scores": [
