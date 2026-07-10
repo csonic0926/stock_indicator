@@ -67,6 +67,10 @@ SYMBOL_LIST_PATHS: dict[str, Path] = {
     "production_candidate": DATA_DIRECTORY / "production_candidate_symbols.txt",
 }
 
+SYMBOL_EXCLUDE_LIST_PATHS: dict[str, Path] = {
+    "crypto_proxy_blocked": DATA_DIRECTORY / "crypto_proxy_blocked_symbols.txt",
+}
+
 
 def resolve_data_source(source_name: str | None) -> Path:
     """Return the stock data directory for the given source name.
@@ -100,6 +104,58 @@ def load_symbol_list(symbol_list_name: str | None) -> set[str] | None:
         if symbol_name:
             symbols_to_keep.add(symbol_name)
     return symbols_to_keep
+
+
+def load_symbol_exclude_list(exclude_list_name: str | None) -> set[str] | None:
+    """Return the configured symbol denylist by name or file path.
+
+    Fail-closed: once a denylist is configured, a missing or empty file
+    raises instead of silently trading the full universe. Lines may carry
+    ``#`` comments.
+    """
+
+    if not exclude_list_name:
+        return None
+    exclude_list_path = SYMBOL_EXCLUDE_LIST_PATHS.get(exclude_list_name)
+    if exclude_list_path is None:
+        exclude_list_path = Path(exclude_list_name).expanduser()
+    if not exclude_list_path.exists():
+        raise ValueError(f"symbol exclude list not found: {exclude_list_path}")
+    symbols_to_exclude: set[str] = set()
+    for line_text in exclude_list_path.read_text(encoding="utf-8").splitlines():
+        symbol_name = line_text.split("#", 1)[0].strip().upper()
+        if symbol_name:
+            symbols_to_exclude.add(symbol_name)
+    if not symbols_to_exclude:
+        raise ValueError(f"symbol exclude list is empty: {exclude_list_path}")
+    return symbols_to_exclude
+
+
+def apply_symbol_exclude_list(
+    allowed_symbols: set[str] | None,
+    exclude_list_name: str | None,
+) -> tuple[set[str] | None, str | None]:
+    """Subtract the configured denylist from the symbol whitelist.
+
+    Returns the filtered whitelist and a setup message for QA output.
+    Requires a whitelist when a denylist is configured so the exclusion
+    always applies to a bounded universe.
+    """
+
+    symbols_to_exclude = load_symbol_exclude_list(exclude_list_name)
+    if symbols_to_exclude is None:
+        return allowed_symbols, None
+    if allowed_symbols is None:
+        raise ValueError(
+            "symbol_exclude_list requires symbol_list so the exclusion "
+            "applies to a bounded universe"
+        )
+    removed_symbols = allowed_symbols & symbols_to_exclude
+    setup_message = (
+        f"Symbol exclude list: {exclude_list_name} "
+        f"listed={len(symbols_to_exclude)} removed={len(removed_symbols)}"
+    )
+    return allowed_symbols - symbols_to_exclude, setup_message
 
 
 def resolve_ff12_data_path(ff12_data_path_text: object | None) -> Path | None:
@@ -199,9 +255,14 @@ def load_multi_bucket_daily_context(
     if not data_directory.exists():
         raise ValueError(f"data source directory not found: {data_directory}")
     allowed_symbols = load_symbol_list(config.symbol_list_name)
+    allowed_symbols, symbol_exclude_message = apply_symbol_exclude_list(
+        allowed_symbols, config.symbol_exclude_list_name
+    )
     ff12_data_path = resolve_ff12_data_path(config.ff12_data_path_text)
 
     setup_messages: List[str] = []
+    if symbol_exclude_message is not None:
+        setup_messages.append(symbol_exclude_message)
     if ff12_data_path is not None:
         setup_messages.append(f"FF12 data: {ff12_data_path}")
 
@@ -2107,11 +2168,16 @@ class StockShell(cmd.Cmd):
         self.stdout.write(f"Data source: {data_directory.name}\n")
         try:
             allowed_symbols = load_symbol_list(config_document.get("symbol_list"))
+            allowed_symbols, symbol_exclude_message = apply_symbol_exclude_list(
+                allowed_symbols, config_document.get("symbol_exclude_list")
+            )
         except ValueError as symbol_list_error:
             self.stdout.write(f"{symbol_list_error}\n")
             return
         if allowed_symbols is not None:
             self.stdout.write(f"Symbol list: {len(allowed_symbols)} symbols\n")
+        if symbol_exclude_message is not None:
+            self.stdout.write(f"{symbol_exclude_message}\n")
 
         ff12_data_path_text = (
             config_document.get("ff12_data_path")

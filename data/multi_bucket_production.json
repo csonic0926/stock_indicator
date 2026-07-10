@@ -127,6 +127,7 @@
     }
   ],
   "symbol_list": "production",
+  "symbol_exclude_list": "crypto_proxy_blocked",
   "ff12_data_path": "data/production_symbols_with_sector.parquet",
   "risk_score_priority_overrides": {
     "scores": [

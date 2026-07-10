@@ -68,6 +68,11 @@ class MultiBucketRunConfig:
     ff12_data_path_text: str | None
     max_same_symbol: int
     raw_document: Dict[str, Any]
+    # Universe denylist name/path (see manage.SYMBOL_EXCLUDE_LIST_PATHS).
+    # Root criterion: symbols with no operating enterprise behind the
+    # equity (pure-liquidity crypto proxies) violate the iceberg-position
+    # premise and stay excluded even when historically profitable.
+    symbol_exclude_list_name: str | None = None
     symbol_seasoning: symbol_seasoning.SymbolSeasoningConfig | None = None
     # WR-gate (phantom) sensor config. The cron only maintains the sensor
     # and emits the per-entry degrading flag; the RS-combine + phantom
@@ -723,6 +728,7 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
         confirmation_sma_angle_range=confirmation_sma_angle_range,
         data_source_name=document.get("data_source"),
         symbol_list_name=document.get("symbol_list"),
+        symbol_exclude_list_name=document.get("symbol_exclude_list"),
         ff12_data_path_text=(
             str(raw_ff12_data_path_text)
             if raw_ff12_data_path_text is not None

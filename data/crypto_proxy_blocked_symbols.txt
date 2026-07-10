@@ -1,0 +1,105 @@
+# crypto_proxy_blocked — universe denylist (fail-closed via symbol_exclude_list)
+# Root criterion (Cal, 2026-07-03; audited 2026-07-10): no operating enterprise
+# with enough independent earning power to anchor the equity. The dominant
+# value driver is token NAV, staking yield, or crypto-mining economics, so the
+# stock is priced primarily from crypto liquidity. Excluded even when a small
+# legacy business remains. COIN / HOOD / CRCL / GLXY stay tradable because
+# diversified customer-fee businesses, rather than token inventory, anchor
+# their enterprise value. Membership is a moving target; review quarterly and
+# retain a symbol until a completed exit from the crypto strategy is evidenced.
+#
+# Tier 1 — crypto treasury / token-NAV wrapper (no independent earnings anchor)
+MSTR   # Strategy (ex-MicroStrategy), BTC treasury; owns every catastrophic tail in cohort
+SBET   # SharpLink Gaming, ETH treasury
+DFDV   # DeFi Development, SOL treasury
+UPXI   # Upexi, SOL treasury
+BMNR   # BitMine Immersion, ETH treasury
+BTCS   # BTCS Inc, ETH treasury/staking
+SMLR   # Semler Scientific — medical devices exist but market value dominated by BTC treasury
+KULR   # KULR Technology, BTC treasury pivot
+NAKA   # Nakamoto Holdings, BTC treasury
+XXI    # Twenty One Capital, BTC treasury company
+ASST   # Strive, BTC treasury strategy dominates the asset-management business
+ZOOZ   # ZOOZ Strategy, BTC treasury reserve company
+EMPD   # Empery Digital, BTC treasury company
+FLD    # Fold, investment BTC treasury dominates the loss-making fee business
+DDC    # DDC Enterprise, BTC holdings dominate the small food operating business
+GDC    # GD Culture, 7,500 BTC and no current core-business revenue
+NXTT   # Next Technology Holding, BTC treasury concentration
+USBC   # USBC, substantially all treasury reserves invested in BTC
+AGPU   # Axe Compute, ATH-token strategic compute reserve
+AVX    # AVAX One, AVAX treasury plus crypto mining
+BNC    # CEA Industries, BNB treasury company
+BNBX   # BNB Plus, BNB is the primary reserve asset
+BNKK   # Bonk, public-market BONK proxy and BONK treasury
+CNTN   # Canton Strategic Holdings, Canton Coin treasury
+CYPH   # Cypherpunk Technologies, ZEC treasury
+ENLV   # Enlivex, RAIN-token treasury dominates its balance sheet
+FGNX   # FG Nexus, ETH treasury
+FWDI   # Forward Industries, SOL treasury
+GAME   # GameSquare, material ETH treasury dominates loss-making operations
+GNLN   # Greenlane, BERA treasury company
+HSDT   # Solana Company, SOL treasury is the principal strategy
+HYPD   # Hyperion DeFi, HYPE treasury reserve business model
+IPST   # IP Strategy, $IP-token treasury dominates results
+LITS   # Lite Strategy, LTC is the primary reserve asset
+ORBS   # Eightco, WLD/ETH treasury and investment-NAV vehicle
+SLMT   # Solmate Infrastructure (Brera), SOL treasury; legacy sports exit underway
+STKE   # SOL Strategies, SOL treasury/validator proxy
+SUIG   # Sui Group, SUI treasury company
+TAOX   # TAO Synergies, pure-play TAO treasury
+TONX   # TON Strategy, core business is management of TON holdings
+TRON   # Tron Inc, TRX treasury company
+TWAV   # TaoWeave, TAO-exclusive treasury company
+VIVO   # VivoPower current data symbol, XRP treasury pivot
+VVPR   # VivoPower broker/legacy alias retained for fail-safe exclusion
+ZNB    # Zeta Network, BTC-centric digital-asset treasury
+ZONE   # CleanCore, material DOGE remains while treasury wind-down is incomplete
+ZSTK   # ZeroStack, 0G-token decentralized-AI treasury
+STSS   # SkyAI legacy/data symbol, SOL treasury
+SKYA   # SkyAI current broker alias retained for fail-safe exclusion
+#
+# Tier 2 — miners (real operations, but product IS the pure-liquidity asset;
+# equity trades as leveraged BTC beta; Cal ruling 2026-07-03: exclude)
+MARA   # Marathon Digital
+RIOT   # Riot Platforms
+CLSK   # CleanSpark
+CORZ   # Core Scientific
+CIFR   # Cipher Mining
+WULF   # TeraWulf
+HUT    # Hut 8
+BITF   # Bitfarms
+HIVE   # HIVE Digital
+BTBT   # Bit Digital
+IREN   # IREN (ex-Iris Energy) — AI-datacenter pivot underway, review
+BTDR   # Bitdeer
+CAN    # Canaan (mining rigs)
+EBON   # Ebang (mining rigs)
+SOS    # SOS Limited
+GREE   # Greenidge
+SDIG   # Stronghold Digital
+ARBK   # Argo Blockchain
+DGHI   # Digihost
+APLD   # Applied Digital — mining-hosting origin, AI/HPC pivot underway, review
+ABTC   # American Bitcoin, BTC miner and treasury accumulator
+ABTS   # Abits Group, BTC mining and colocation
+AGMH   # AGM Group, crypto-mining machines and compute equipment
+ANY    # Sphere 3D, BTC miner
+BGDE   # Mawson/legacy mining business current candidate symbol
+BTCT   # BTC Digital, BTC/ETH mining
+BTOG   # Bit Origin, crypto mining
+CANG   # Cango, operating business pivoted to BTC mining
+DGXX   # Digihost current symbol; DGHI retained as legacy alias
+FUFU   # BitFuFu, cloud mining and self-mining
+GPUS   # Hyperscale Data, BTC mining/hosting with AI pivot under review
+GREEL  # Greenidge listed companion security; block alongside GREE
+ICG    # Intchains, altcoin-mining ASIC designer
+KEEL   # Bitfarms successor/candidate symbol; BITF retained as legacy alias
+LMFA   # LM Funding, BTC mining dominates the legacy finance activity
+NA     # Nano Labs, mining chips plus BTC treasury
+NCTY   # The9, BTC mining
+NUAI   # New Era Energy & Digital, mining/data-center infrastructure
+SAIH   # SAIHEAT, crypto-mining machines, hosting, pool, and heat reuse
+SGLY   # Singularity Future, crypto-mining equipment plus logistics
+SLAI   # SOLAI (ex-BIT Mining/BTCM), mining and SOL treasury
+SLNH   # Soluna, BTC hosting/mining remains the revenue majority

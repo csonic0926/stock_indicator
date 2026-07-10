@@ -3645,3 +3645,70 @@ def test_multi_bucket_daily_signal_applies_risk_score_priority_override(
     assert "Risk-score priority override active: month=2024-01" in (
         output_buffer.getvalue()
     )
+
+
+def test_load_symbol_exclude_list_parses_symbols_and_comments(
+    tmp_path: Path,
+) -> None:
+    import stock_indicator.manage as manage_module
+
+    exclude_list_path = tmp_path / "crypto_proxy_blocked_symbols.txt"
+    exclude_list_path.write_text(
+        "# tier 1\nMSTR  # treasury wrapper\nmara\n\nRIOT\n",
+        encoding="utf-8",
+    )
+    excluded_symbols = manage_module.load_symbol_exclude_list(
+        str(exclude_list_path)
+    )
+    assert excluded_symbols == {"MSTR", "MARA", "RIOT"}
+
+
+def test_load_symbol_exclude_list_is_fail_closed(tmp_path: Path) -> None:
+    import stock_indicator.manage as manage_module
+
+    assert manage_module.load_symbol_exclude_list(None) is None
+    with pytest.raises(ValueError, match="not found"):
+        manage_module.load_symbol_exclude_list(
+            str(tmp_path / "missing_exclude_list.txt")
+        )
+    empty_list_path = tmp_path / "empty_exclude_list.txt"
+    empty_list_path.write_text("# only comments\n\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="empty"):
+        manage_module.load_symbol_exclude_list(str(empty_list_path))
+
+
+def test_apply_symbol_exclude_list_subtracts_from_whitelist(
+    tmp_path: Path,
+) -> None:
+    import stock_indicator.manage as manage_module
+
+    exclude_list_path = tmp_path / "crypto_proxy_blocked_symbols.txt"
+    exclude_list_path.write_text("MSTR\nMARA\nDFDV\n", encoding="utf-8")
+    filtered_symbols, setup_message = manage_module.apply_symbol_exclude_list(
+        {"AAPL", "MSTR", "COIN", "MARA"}, str(exclude_list_path)
+    )
+    assert filtered_symbols == {"AAPL", "COIN"}
+    assert setup_message is not None
+    assert "listed=3" in setup_message
+    assert "removed=2" in setup_message
+
+
+def test_apply_symbol_exclude_list_requires_symbol_list(
+    tmp_path: Path,
+) -> None:
+    import stock_indicator.manage as manage_module
+
+    exclude_list_path = tmp_path / "crypto_proxy_blocked_symbols.txt"
+    exclude_list_path.write_text("MSTR\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="requires symbol_list"):
+        manage_module.apply_symbol_exclude_list(None, str(exclude_list_path))
+
+
+def test_apply_symbol_exclude_list_noop_without_configuration() -> None:
+    import stock_indicator.manage as manage_module
+
+    filtered_symbols, setup_message = manage_module.apply_symbol_exclude_list(
+        {"AAPL"}, None
+    )
+    assert filtered_symbols == {"AAPL"}
+    assert setup_message is None
