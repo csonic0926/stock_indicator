@@ -199,7 +199,7 @@ def test_evaluate_wr_gate_phantom_matches_entry_gate_logic() -> None:
     assert _s.evaluate_wr_gate_phantom(thin, cfg) is True
 
 
-def test_compute_adaptive_ft_close_matches_simulator() -> None:
+def test_compute_adaptive_tp_sl_virtual_trade_close_for_wr_gate_matches_simulator() -> None:
     """The live adaptive-exit helper reproduces the simulator's recorded
     ft adaptive exit (TP/max_hold) byte-for-byte on real trades."""
     import glob
@@ -218,7 +218,7 @@ def test_compute_adaptive_ft_close_matches_simulator() -> None:
     ].head(120)
     checked = 0
     for row in ft.itertuples():
-        result = mbt.compute_adaptive_ft_close(
+        result = mbt.compute_adaptive_tp_sl_virtual_trade_close_for_wr_gate(
             data_dir,
             row.symbol,
             str(row.entry_date.date()),
@@ -247,6 +247,9 @@ def test_daily_flow_sensor_matches_direct_feed() -> None:
     that matches the simulator's exported sensor byte-for-byte."""
     import glob
     import pathlib
+    from stock_indicator import (
+        adaptive_tp_sl_virtual_trade_history as adaptive_history,
+    )
     from stock_indicator import multi_bucket_today as mbt
     csvs = glob.glob("logs/multi_bucket_simulation_result/*rs25_2010*.csv")
     if not csvs:
@@ -269,10 +272,13 @@ def test_daily_flow_sensor_matches_direct_feed() -> None:
         )
 
     # Daily flow.
+    adaptive_history_state = adaptive_history.empty_adaptive_tp_sl_virtual_trade_history()
     state = {
         "wr_gate_sensor": {"cross_ema": None, "cross_window": [], "winner_pcts": [], "loser_pcts": []},
         "wr_gate_pending_ft": [],
-        "closed_trades": [],
+        adaptive_history.ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_KEY: (
+            adaptive_history_state
+        ),
     }
     by_signal: dict = {}
     sig_closes: dict = {}
@@ -286,17 +292,25 @@ def test_daily_flow_sensor_matches_direct_feed() -> None:
             )
     for day in pd.bdate_range(start, cut):
         for symbol, sig_d, exit_d, raw_pct in sig_closes.get(day.normalize(), []):
-            state["closed_trades"].append({
+            adaptive_history_state[
+                adaptive_history.ADAPTIVE_TP_SL_VIRTUAL_CLOSED_TRADES_KEY
+            ].append({
                 "symbol": symbol, "bucket": sb, "entry_date": sig_d,
                 "exit_date": exit_d, "raw_pct": raw_pct,
             })
         for row in by_signal.get(day.normalize(), []):
-            mbt.register_wr_gate_pending_entry(
+            mbt.register_wr_gate_pending_adaptive_tp_sl_virtual_trade(
                 state, cfg, row.bucket, row.symbol,
                 str((row.entry_date - pd.offsets.BDay(1)).date()),
                 float(row.adaptive_tp_pct), 1, 7,
             )
-        mbt.advance_wr_gate_sensor(state, cfg, str(day.date()), data_dir)
+        mbt.advance_wr_gate_sensor_from_adaptive_tp_sl_virtual_trade_history(
+            state,
+            adaptive_history_state,
+            cfg,
+            str(day.date()),
+            data_dir,
+        )
 
     sensor = state["wr_gate_sensor"]
     assert sensor["cross_ema"] == pytest.approx(reference["cross_ema"], abs=1e-9)

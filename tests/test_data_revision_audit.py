@@ -13,7 +13,13 @@ from typing import Any
 import pandas
 import pytest
 
-from stock_indicator import data_revision_audit, daily_job, manage, strategy
+from stock_indicator import (
+    adaptive_tp_sl_virtual_trade_history,
+    data_revision_audit,
+    daily_job,
+    manage,
+    strategy,
+)
 
 
 class FakeFutuTradeContext:
@@ -197,7 +203,7 @@ def test_reevaluate_entry_signal_reports_still_valid(
 
 
 def _build_runtime_context(tmp_path: Path) -> manage.MultiBucketDailyContext:
-    """Return a minimal runtime context with one accepted CL entry."""
+    """Return a context with one open ADAPTIVE TP/SL reference trade."""
 
     return manage.MultiBucketDailyContext(
         config=_build_audit_config(),
@@ -206,15 +212,18 @@ def _build_runtime_context(tmp_path: Path) -> manage.MultiBucketDailyContext:
         ff12_data_path=None,
         state_path=tmp_path / "adaptive_state.json",
         state={
-            "accepted_entries": [
-                {
-                    "symbol": "CL",
-                    "bucket": "fish_tail_production",
-                    "strategy_id": "fish_tail_blow_off_top",
-                    "entry_date": "2026-06-10",
-                    "dollar_volume_rank": 3,
-                }
-            ]
+            adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_KEY: {
+                "schema_version": 1,
+                adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_OPEN_TRADES_KEY: [
+                    {
+                        "symbol": "CL",
+                        "bucket": "fish_tail_production",
+                        "strategy_id": "fish_tail_blow_off_top",
+                        "entry_date": "2026-06-10",
+                        "dollar_volume_rank": 3,
+                    }
+                ],
+            }
         },
         symbol_first_eligible_trade_dates=None,
         setup_messages=[],

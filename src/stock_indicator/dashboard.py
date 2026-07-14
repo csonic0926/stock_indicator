@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import ast
+import csv
 import json
 import logging
 import math
+import os
 import re
+import threading
 from datetime import date, datetime, timedelta
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pandas
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from stock_indicator import daily_job
+from stock_indicator import adaptive_tp_sl_virtual_trade_history, daily_job
 from stock_indicator.futu_trade_metadata import (
     format_futu_order_remark,
     parse_futu_order_remark,
@@ -30,6 +35,105 @@ LIVE_STATE_DIRECTORY = DATA_DIRECTORY / "live_state"
 LOGS_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "logs"
 
 app = FastAPI(title="Stock Indicator Dashboard")
+
+
+def _is_loopback_host(host_text: str | None) -> bool:
+    """Return whether a request host resolves syntactically to loopback."""
+    if not host_text:
+        return False
+    normalized_host = host_text.strip().lower().strip("[]")
+    if normalized_host == "localhost":
+        return True
+    try:
+        return ip_address(normalized_host).is_loopback
+    except ValueError:
+        return False
+
+
+@app.middleware("http")
+async def _restrict_dashboard_to_local_requests(
+    request: Request,
+    call_next: Any,
+) -> Any:
+    """Reject remote clients and cross-origin mutation of real orders.
+
+    # TODO: review
+    Uvicorn is also bound to 127.0.0.1 in launchd.  This application-level
+    check keeps the real-order endpoints local if a future launch command
+    accidentally widens the bind address, while the Origin check blocks a
+    remote web page from driving a local browser session.
+    """
+    client_host = request.client.host if request.client is not None else None
+    if not _is_loopback_host(client_host):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Dashboard accepts local requests only"},
+        )
+
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        origin_text = request.headers.get("origin")
+        if origin_text:
+            origin_host = urlsplit(origin_text).hostname
+            if not _is_loopback_host(origin_host):
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Cross-origin order mutation rejected"},
+                )
+    return await call_next(request)
+
+
+def _normalize_symbol_text(symbol_value: Any) -> str:
+    """Return an uppercase ticker without a market prefix."""
+    normalized_symbol = str(symbol_value or "").strip().upper()
+    if normalized_symbol.startswith("US."):
+        normalized_symbol = normalized_symbol[3:]
+    return normalized_symbol
+
+
+def _symbol_rename_map_path() -> Path:
+    """Return the data file mapping strategy symbols to broker symbols."""
+    return DATA_DIRECTORY / "symbol_rename_map.csv"
+
+
+def _load_strategy_to_broker_symbol_map() -> dict[str, str]:
+    """Load ticker-renames where local strategy data uses an old symbol.
+
+    The strategy layer can keep using local CSV symbols such as SATS, while
+    Futu positions/orders may already use a renamed broker symbol such as ECHO.
+    Missing files mean no renames are configured.
+    """
+    rename_map_path = _symbol_rename_map_path()
+    if not rename_map_path.exists():
+        return {}
+
+    strategy_to_broker_symbol: dict[str, str] = {}
+    try:
+        with rename_map_path.open("r", newline="", encoding="utf-8") as rename_file:
+            for rename_record in csv.DictReader(rename_file):
+                strategy_symbol = _normalize_symbol_text(
+                    rename_record.get("strategy_symbol")
+                )
+                broker_symbol = _normalize_symbol_text(
+                    rename_record.get("broker_symbol")
+                )
+                if strategy_symbol and broker_symbol:
+                    strategy_to_broker_symbol[strategy_symbol] = broker_symbol
+    except OSError as rename_error:
+        LOGGER.warning("Failed to load symbol rename map: %s", rename_error)
+        return {}
+    return strategy_to_broker_symbol
+
+
+def _to_broker_symbol(
+    strategy_symbol: str,
+    strategy_to_broker_symbol: dict[str, str],
+) -> str:
+    """Map a strategy/log symbol to the symbol accepted by the broker."""
+    normalized_strategy_symbol = _normalize_symbol_text(strategy_symbol)
+    return strategy_to_broker_symbol.get(
+        normalized_strategy_symbol,
+        normalized_strategy_symbol,
+    )
 
 
 def _parse_log_key_value_tokens(line_body: str) -> dict[str, Any]:
@@ -57,9 +161,9 @@ def _parse_log_key_value_tokens(line_body: str) -> dict[str, Any]:
                 "min_hold_sl",
                 "dollar_volume_rank",
                 "max_hold",
-                "winners",
-                "losers",
-                "pending_rolling",
+                "winner_returns",
+                "loser_returns",
+                "pending_returns",
                 "closed_trades",
                 "open_pending",
                 "fed_this_run",
@@ -123,14 +227,14 @@ def _parse_log(log_path: Path) -> dict[str, Any]:
             _parse_log_key_value_tokens(line[len("[FROZEN_TP_SL]"):])
         )
     result["frozen_entries"] = frozen_entries
-    # Convenience: lists of new BUY symbols today (from frozen entries
-    # whose entry_date matches today's log date).
-    todays_buy_symbols = [
-        e.get("symbol") for e in frozen_entries
-        if e.get("entry_date") == log_path.stem and e.get("symbol")
+    # These are tradable candidates, not accepted BUY orders.  Bucket identity
+    # must remain attached because one symbol can be tradable in more than one
+    # bucket and only the dashboard may resolve that competition.
+    result["tradable_entry_candidates"] = [
+        entry
+        for entry in frozen_entries
+        if entry.get("entry_date") == log_path.stem and entry.get("symbol")
     ]
-    result["buy_actions"] = todays_buy_symbols
-    result["accepted_buy_actions"] = todays_buy_symbols
 
     bucket_tp_sl_records_by_key: dict[str, dict[str, Any]] = {}
     bucket_tp_sl_key_order: list[str] = []
@@ -166,40 +270,58 @@ def _parse_log(log_path: Path) -> dict[str, Any]:
         wr_gate_sensor_records[-1] if wr_gate_sensor_records else {}
     )
 
-    rolling_state_records: list[dict[str, Any]] = []
+    adaptive_tp_sl_virtual_history_state_records: list[dict[str, Any]] = []
     for line in text.splitlines():
-        if not line.startswith("[ROLLING_TP_SL_STATE]"):
-            continue
-        rolling_state_records.append(
-            _parse_log_key_value_tokens(line[len("[ROLLING_TP_SL_STATE]"):])
+        history_log_prefix = (
+            "[ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_STATE]"
         )
-    result["rolling_tp_sl_state"] = (
-        rolling_state_records[-1] if rolling_state_records else {}
+        if not line.startswith(history_log_prefix):
+            continue
+        adaptive_tp_sl_virtual_history_state_records.append(
+            _parse_log_key_value_tokens(line[len(history_log_prefix):])
+        )
+    result["adaptive_tp_sl_virtual_trade_history_state"] = (
+        adaptive_tp_sl_virtual_history_state_records[-1]
+        if adaptive_tp_sl_virtual_history_state_records
+        else {}
     )
 
-    accepted_matches = re.findall(r"^accepted:\s*(.+)$", text, re.MULTILINE)
-    rejected_matches = re.findall(r"^rejected:\s*(.+)$", text, re.MULTILINE)
-    result["slot_allocation"] = {
-        "accepted": _parse_slot_allocation_pairs(accepted_matches[-1])
-        if accepted_matches else [],
-        "rejected": _parse_slot_allocation_pairs(rejected_matches[-1])
-        if rejected_matches else [],
+    tradable_matches = re.findall(
+        r"^tradable_candidates:\s*(.+)$", text, re.MULTILINE
+    )
+    filtered_out_matches = re.findall(
+        r"^filtered_out:\s*(.+)$", text, re.MULTILINE
+    )
+    result["signal_candidate_summary"] = {
+        "tradable": _parse_slot_allocation_pairs(tradable_matches[-1])
+        if tradable_matches else [],
+        "filtered_out": _parse_slot_allocation_pairs(filtered_out_matches[-1])
+        if filtered_out_matches else [],
     }
-    allocation_summary_matches = re.findall(
-        r"max_position_count=(\d+)\s+"
+    adaptive_tp_sl_virtual_history_activity_matches = re.findall(
+        r"adaptive_tp_sl_virtual_open_trades_before_today=(\d+)\s+"
+        r"adaptive_tp_sl_virtual_trades_closed_today=(\d+)",
+        text,
+        re.MULTILINE,
+    )
+    legacy_virtual_history_activity_matches = re.findall(
+        r"max_position_count=\d+\s+"
         r"held_before_today=(\d+)\s+"
         r"same_day_closes=(\d+)",
         text,
         re.MULTILINE,
     )
-    if allocation_summary_matches:
-        max_position_count, held_before_today, same_day_closes = (
-            allocation_summary_matches[-1]
-        )
-        result["slot_allocation"].update({
-            "max_position_count": int(max_position_count),
-            "held_before_today": int(held_before_today),
-            "same_day_closes": int(same_day_closes),
+    virtual_history_activity_matches = (
+        adaptive_tp_sl_virtual_history_activity_matches
+        or legacy_virtual_history_activity_matches
+    )
+    if virtual_history_activity_matches:
+        open_before_today, closed_today = virtual_history_activity_matches[-1]
+        result["signal_candidate_summary"].update({
+            "adaptive_tp_sl_virtual_open_trades_before_today": int(
+                open_before_today
+            ),
+            "adaptive_tp_sl_virtual_trades_closed_today": int(closed_today),
         })
 
     # Exit signals (machine-readable per-symbol lines).
@@ -239,27 +361,25 @@ def _parse_log(log_path: Path) -> dict[str, Any]:
         result["rolling_ml"] = float(ml_m.group(1))
         result["rolling_ml_n"] = int(ml_m.group(2))
 
-    # Positions
+    # Legacy single-strategy logs called these "positions". Multi-bucket logs
+    # expose the count under its actual purpose: open ADAPTIVE TP/SL virtual
+    # reference trades.
     pos_m = re.search(r"Concurrent positions after entry \((\d+) total\)", text)
     if pos_m:
-        result["position_count"] = int(pos_m.group(1))
-    elif allocation_summary_matches:
-        _, position_count_held_before_today, position_count_same_day_closes = (
-            allocation_summary_matches[-1]
-        )
-        result["position_count"] = (
-            int(position_count_held_before_today)
-            - int(position_count_same_day_closes)
-            + len(result["slot_allocation"]["accepted"])
+        result["adaptive_tp_sl_virtual_open_trade_count"] = int(pos_m.group(1))
+    elif virtual_history_activity_matches:
+        open_before_today, closed_today = virtual_history_activity_matches[-1]
+        result["adaptive_tp_sl_virtual_open_trade_count"] = (
+            int(open_before_today) - int(closed_today)
         )
     else:
-        result["position_count"] = 0
+        result["adaptive_tp_sl_virtual_open_trade_count"] = 0
 
     return result
 
 
 def _parse_slot_allocation_pairs(raw_allocation_text: str) -> list[dict[str, str]]:
-    """Parse cron's accepted/rejected slot-allocation tuple summaries."""
+    """Parse cron's candidate/filter tuple summaries."""
     try:
         raw_records = ast.literal_eval(raw_allocation_text)
     except (ValueError, SyntaxError):
@@ -290,13 +410,16 @@ def _load_json(path: Path) -> dict:
     return {}
 
 
-def _load_current_bucket_tp_sl(adaptive_state: dict[str, Any]) -> list[dict[str, Any]]:
-    """Compute current per-bucket base TP/SL from config and rolling state.
+def _load_current_bucket_tp_sl_from_adaptive_tp_sl_virtual_trade_history(
+    adaptive_state_document: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Compute current bucket TP/SL from its virtual reference history.
 
     This diagnostic is intentionally separate from order preview. BUY orders
     still use entry-time [FROZEN_TP_SL] values from the cron log, while the
-    dashboard summary should reflect current config + rolling pool after a
-    restart or code fix rather than stale historical frozen lines.
+    dashboard summary should reflect current config plus the ADAPTIVE TP/SL
+    virtual trade return sample after a restart or code fix rather than stale
+    historical frozen lines.
     """
     try:
         from stock_indicator import multi_bucket_today, strategy
@@ -306,14 +429,27 @@ def _load_current_bucket_tp_sl(adaptive_state: dict[str, Any]) -> list[dict[str,
         )
         if config.adaptive_tp_sl is None:
             return []
+        adaptive_tp_sl_history = (
+            adaptive_tp_sl_virtual_trade_history.get_adaptive_tp_sl_virtual_trade_history(
+                adaptive_state_document
+            )
+        )
         bucket_states: list[dict[str, Any]] = []
         for bucket_label, bucket_definition in config.bucket_definitions.items():
             tp_pct, sl_pct, rolling_mp, rolling_ml = (
                 strategy.compute_frozen_tp_sl_for_bucket(
                     bucket_def=bucket_definition,
                     adaptive_tp_sl=config.adaptive_tp_sl,
-                    closed_winners=adaptive_state.get("winners", []),
-                    closed_losers=adaptive_state.get("losers", []),
+                    closed_winners=adaptive_tp_sl_history.get(
+                        adaptive_tp_sl_virtual_trade_history.
+                        ADAPTIVE_TP_SL_VIRTUAL_WINNER_RETURNS_KEY,
+                        [],
+                    ),
+                    closed_losers=adaptive_tp_sl_history.get(
+                        adaptive_tp_sl_virtual_trade_history.
+                        ADAPTIVE_TP_SL_VIRTUAL_LOSER_RETURNS_KEY,
+                        [],
+                    ),
                     entry_slope_60=None,
                 )
             )
@@ -351,9 +487,9 @@ def _build_cron_dashboard_contract() -> dict[str, Any]:
                 "owner": "Cron",
                 "label": "Signal layer",
                 "detail": (
-                    "Finds raw entry/exit signals, runs cross-bucket slot "
-                    "competition, freezes TP/SL for accepted entries, and "
-                    "updates the virtual rolling pool."
+                    "Finds every tradable entry/exit signal, freezes signal "
+                    "TP/SL metadata, and updates the separate ADAPTIVE TP/SL "
+                    "virtual trade history used only as a statistical sensor."
                 ),
             },
             {
@@ -376,7 +512,8 @@ def _build_cron_dashboard_contract() -> dict[str, Any]:
         ],
         "notes": [
             "Raw entries are strategy signals before order-layer checks.",
-            "Cron accepted buys have frozen TP/SL but may still be skipped by dashboard.",
+            "Cron publishes every tradable signal with frozen TP/SL metadata.",
+            "The ADAPTIVE TP/SL virtual trade history is statistical state, not positions.",
             "The local signal mirror is diagnostic; it is not the live portfolio.",
         ],
     }
@@ -419,6 +556,10 @@ def api_state():
     """Current system state: signal trades, adaptive state, latest log."""
     signal_trades = _load_json(LIVE_STATE_DIRECTORY / "signal_trades.json")
     adaptive = _load_json(LIVE_STATE_DIRECTORY / "adaptive_state.json")
+    if adaptive:
+        adaptive_tp_sl_virtual_trade_history.get_adaptive_tp_sl_virtual_trade_history(
+            adaptive
+        )
     dates = _get_log_dates()
     latest_log = None
     if dates:
@@ -443,11 +584,24 @@ def api_log(log_date: str):
 
 @app.get("/api/trades")
 def api_trades():
-    """Rolling trade history from adaptive_state.json."""
-    adaptive = _load_json(LIVE_STATE_DIRECTORY / "adaptive_state.json")
+    """ADAPTIVE TP/SL virtual trade history from adaptive_state.json."""
+    adaptive_state_document = _load_json(
+        LIVE_STATE_DIRECTORY / "adaptive_state.json"
+    )
+    adaptive_tp_sl_history = (
+        adaptive_tp_sl_virtual_trade_history.get_adaptive_tp_sl_virtual_trade_history(
+            adaptive_state_document
+        )
+    )
     return {
-        "raw_trade_profits": adaptive.get("raw_trade_profits", []),
-        "closed_trades": adaptive.get("closed_trades", []),
+        "adaptive_tp_sl_virtual_raw_returns": adaptive_tp_sl_history.get(
+            adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_RAW_RETURNS_KEY,
+            [],
+        ),
+        "adaptive_tp_sl_virtual_closed_trades": adaptive_tp_sl_history.get(
+            adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_CLOSED_TRADES_KEY,
+            [],
+        ),
     }
 
 
@@ -482,20 +636,20 @@ def api_futu_positions():
 
         positions = []
         if position_return_code == 0 and len(position_data) > 0:
-            for _, row in position_data.iterrows():
-                symbol = str(row.get("code", "")).replace("US.", "")
+            for _position_index, position_row in position_data.iterrows():
+                symbol = _normalize_symbol_text(position_row.get("code", ""))
                 entry_metadata = position_entries_by_symbol.get(symbol, {})
                 positions.append({
                     "symbol": symbol,
                     "bucket": entry_metadata.get("bucket"),
                     "strategy_id": entry_metadata.get("strategy_id"),
                     "entry_date": entry_metadata.get("entry_date"),
-                    "qty": float(row.get("qty", 0)),
-                    "cost_price": float(row.get("cost_price", 0)),
-                    "market_price": float(row.get("nominal_price", 0)),
-                    "market_val": float(row.get("market_val", 0)),
-                    "unrealized_pl": float(row.get("unrealized_pl", 0)),
-                    "pl_ratio": float(row.get("pl_ratio", 0)),
+                    "qty": float(position_row.get("qty", 0)),
+                    "cost_price": float(position_row.get("cost_price", 0)),
+                    "market_price": float(position_row.get("nominal_price", 0)),
+                    "market_val": float(position_row.get("market_val", 0)),
+                    "unrealized_pl": float(position_row.get("unrealized_pl", 0)),
+                    "pl_ratio": float(position_row.get("pl_ratio", 0)),
                 })
 
         account = {}
@@ -519,9 +673,15 @@ def api_futu_positions():
 # ---------------------------------------------------------------------------
 
 MARGIN_MULTIPLIER = 1.5
-# Use paper trading by default. Set to "REAL" to trade with real money.
-TRADING_ENV = "REAL"
+# TODO: review
+# Manual launches are safe by default. The installed production LaunchAgent
+# explicitly sets STOCK_INDICATOR_TRADING_ENV=REAL.
+TRADING_ENV = os.environ.get(
+    "STOCK_INDICATOR_TRADING_ENV",
+    "SIMULATE",
+).strip().upper()
 ORDER_LOG_DIR = LOGS_DIRECTORY
+ORDER_EXECUTION_LOCK = threading.Lock()
 
 PRODUCTION_CONFIG_PATH = (
     Path(__file__).resolve().parent.parent.parent
@@ -531,10 +691,19 @@ PRODUCTION_CONFIG_PATH = (
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent.parent
 PREVIEW_SKIP_STATUSES = {
     "bucket_cap",
+    "price_unavailable",
     "slot_full",
     "risk_score_stop",
     "min_hold_block",
     "wr_gate_phantom",
+}
+TERMINAL_BROKER_ORDER_STATUSES = {
+    "CANCELLED_PART",
+    "CANCELLED_ALL",
+    "DISABLED",
+    "FILLED_ALL",
+    "FAILED",
+    "DELETED",
 }
 
 # WR-gate phantom positions tracked by the ORDER LAYER (this module),
@@ -631,7 +800,7 @@ def _phantom_still_open(
     if entry_price is None:
         # Fill not yet available (entry just signalled) -> obviously open.
         return True
-    adaptive = multi_bucket_today.compute_adaptive_ft_close(
+    adaptive = multi_bucket_today.compute_adaptive_tp_sl_virtual_trade_close_for_wr_gate(
         PRODUCTION_DATA_DIRECTORY,
         phantom["symbol"],
         fill_date,
@@ -672,8 +841,16 @@ def _load_max_positions() -> int:
 
 
 # TODO: review
-def _load_current_bucket_entry_limits() -> dict[str, dict[str, Any]]:
-    """Load live per-bucket entry caps keyed by bucket label and strategy id."""
+def _load_current_bucket_entry_limits(
+    risk_score_value: int | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Load effective live priorities and caps for portfolio allocation.
+
+    Risk-score priority overrides are evaluated here, in the order layer,
+    rather than trusted from cron emission order.  This keeps the single live
+    competition pass dependent on the current production JSON and the same
+    risk score that gates today's orders.
+    """
     try:
         from stock_indicator import multi_bucket_today
 
@@ -686,6 +863,33 @@ def _load_current_bucket_entry_limits() -> dict[str, dict[str, Any]]:
         )
         return {}
 
+    priority_overrides: dict[str, int] = {}
+    raw_priority_overrides = config.raw_document.get(
+        "risk_score_priority_overrides"
+    )
+    if isinstance(raw_priority_overrides, dict) and risk_score_value is not None:
+        try:
+            override_scores = {
+                int(raw_score)
+                for raw_score in raw_priority_overrides.get("scores", [])
+            }
+        except (TypeError, ValueError):
+            override_scores = set()
+        raw_priorities = raw_priority_overrides.get("priorities")
+        if (
+            int(risk_score_value) in override_scores
+            and isinstance(raw_priorities, dict)
+        ):
+            for bucket_label, raw_priority in raw_priorities.items():
+                try:
+                    priority_overrides[str(bucket_label)] = int(raw_priority)
+                except (TypeError, ValueError):
+                    LOGGER.warning(
+                        "Ignoring invalid priority override %r=%r",
+                        bucket_label,
+                        raw_priority,
+                    )
+
     limits_by_key: dict[str, dict[str, Any]] = {}
     for bucket_label, bucket_definition in config.bucket_definitions.items():
         maximum_positions = (
@@ -696,8 +900,13 @@ def _load_current_bucket_entry_limits() -> dict[str, dict[str, Any]]:
         limit = {
             "bucket": bucket_label,
             "strategy_id": bucket_definition.strategy_identifier,
+            "entry_priority": priority_overrides.get(
+                bucket_label,
+                bucket_definition.entry_priority,
+            ),
             "maximum_positions": maximum_positions,
             "fill_remaining": bucket_definition.fill_remaining,
+            "max_same_symbol": config.max_same_symbol,
         }
         limits_by_key[bucket_label] = limit
         if bucket_definition.strategy_identifier:
@@ -707,13 +916,26 @@ def _load_current_bucket_entry_limits() -> dict[str, dict[str, Any]]:
     return limits_by_key
 
 
+def _load_current_max_same_symbol(
+    current_bucket_entry_limits: dict[str, dict[str, Any]],
+) -> int:
+    """Return the configured same-symbol cap from loaded allocation rules."""
+    for entry_limit in current_bucket_entry_limits.values():
+        try:
+            return int(entry_limit.get("max_same_symbol", 1))
+        except (TypeError, ValueError):
+            continue
+    return 1
+
+
 def _count_live_positions_by_bucket(
     *,
     held_symbols: set[str],
     futu_open_entries: dict[str, dict[str, Any]],
     open_phantom_positions: list[dict[str, Any]],
+    pending_buy_entries: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, int]:
-    """Count current broker and phantom positions by bucket label."""
+    """Count current broker, pending BUY, and phantom slots by bucket."""
     bucket_counts: dict[str, int] = {}
     for symbol in held_symbols:
         bucket_label = futu_open_entries.get(symbol, {}).get("bucket")
@@ -724,6 +946,15 @@ def _count_live_positions_by_bucket(
 
     for phantom_position in open_phantom_positions:
         bucket_label = phantom_position.get("bucket")
+        if not bucket_label:
+            continue
+        bucket_key = str(bucket_label)
+        bucket_counts[bucket_key] = bucket_counts.get(bucket_key, 0) + 1
+
+    for pending_symbol, pending_entry in (pending_buy_entries or {}).items():
+        if pending_symbol in held_symbols:
+            continue
+        bucket_label = pending_entry.get("bucket")
         if not bucket_label:
             continue
         bucket_key = str(bucket_label)
@@ -766,6 +997,35 @@ def _entry_limit_skip_reason(
     return None
 
 
+def _tradable_candidate_sort_key(
+    candidate_record: dict[str, Any],
+    current_bucket_entry_limits: dict[str, dict[str, Any]],
+) -> tuple[int, int, str, str]:
+    """Return the configured greedy competition key for one candidate."""
+    bucket_key = str(
+        candidate_record.get("bucket")
+        or candidate_record.get("strategy_id")
+        or ""
+    )
+    entry_limit = current_bucket_entry_limits.get(bucket_key, {})
+    try:
+        entry_priority = int(entry_limit.get("entry_priority", 0))
+    except (TypeError, ValueError):
+        entry_priority = 0
+    try:
+        dollar_volume_rank = int(
+            candidate_record.get("dollar_volume_rank", 2**31 - 1)
+        )
+    except (TypeError, ValueError):
+        dollar_volume_rank = 2**31 - 1
+    return (
+        entry_priority,
+        dollar_volume_rank,
+        str(candidate_record.get("bucket") or ""),
+        _normalize_symbol_text(candidate_record.get("symbol")),
+    )
+
+
 def _load_production_min_hold() -> int:
     """Read signal-exit `min_hold` (weekday bars) from the production config.
 
@@ -790,8 +1050,9 @@ def _load_risk_score_gate_state(signal_date: str | None) -> dict[str, Any]:
     """Return the dashboard order gate state for a signal date.
 
     The risk-score gate belongs to the dashboard/order layer: cron should
-    keep emitting signals and updating rolling state, while this function
-    decides whether BUY orders are allowed to leave the dashboard.
+    keep emitting signals and updating the ADAPTIVE TP/SL virtual trade
+    history, while this function decides whether BUY orders are allowed to
+    leave the dashboard.
     """
     default_state: dict[str, Any] = {
         "enabled": False,
@@ -953,6 +1214,37 @@ def _get_last_price(symbol: str) -> float | None:
     return None
 
 
+def _load_pending_buy_order_entries(
+    order_data: Any,
+) -> dict[str, dict[str, Any]]:
+    """Return non-terminal BUY metadata keyed by broker symbol."""
+    pending_buy_entries: dict[str, dict[str, Any]] = {}
+    if order_data is None or len(order_data) == 0:
+        return pending_buy_entries
+    for _order_index, order_row in order_data.iterrows():
+        if "BUY" not in str(order_row.get("trd_side", "")).upper():
+            continue
+        order_status = str(order_row.get("order_status", "")).upper()
+        if order_status in TERMINAL_BROKER_ORDER_STATUSES:
+            continue
+        broker_symbol = _normalize_symbol_text(order_row.get("code", ""))
+        if broker_symbol:
+            remark_text = str(
+                order_row.get("remark", "")
+                or order_row.get("order_remark", "")
+            )
+            pending_buy_entries[broker_symbol] = {
+                "symbol": broker_symbol,
+                **_parse_dashboard_order_remark(remark_text),
+            }
+    return pending_buy_entries
+
+
+def _load_pending_buy_order_symbols(order_data: Any) -> set[str]:
+    """Return broker symbols with a non-terminal BUY already submitted."""
+    return set(_load_pending_buy_order_entries(order_data))
+
+
 def _compute_order_size(
     total_assets_hkd: float, price_usd: float, max_positions: int
 ) -> int:
@@ -1084,6 +1376,35 @@ def _load_current_bucket_exit_rules() -> dict[str, dict[str, Any]]:
     return rules_by_key
 
 
+def _complete_order_metadata_from_exit_rules(
+    metadata: dict[str, Any],
+    bucket_exit_rules: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Fill missing live-management metadata from the current bucket config."""
+    lookup_keys = [
+        str(metadata.get("bucket") or ""),
+        str(metadata.get("strategy_id") or ""),
+    ]
+    for lookup_key in lookup_keys:
+        if not lookup_key:
+            continue
+        exit_rule = bucket_exit_rules.get(lookup_key)
+        if not exit_rule:
+            continue
+        if metadata.get("bucket") is None:
+            metadata["bucket"] = exit_rule.get("bucket")
+        if metadata.get("strategy_id") is None:
+            metadata["strategy_id"] = exit_rule.get("strategy_id")
+        if metadata.get("max_hold") is None:
+            metadata["max_hold"] = exit_rule.get("max_hold")
+        if metadata.get("reset_hold_on_reentry_signal") is None:
+            metadata["reset_hold_on_reentry_signal"] = exit_rule.get(
+                "reset_hold_on_reentry_signal"
+            )
+        break
+    return metadata
+
+
 def _format_dashboard_order_remark(order: dict[str, Any]) -> str:
     """Build a compact Futu order remark carrying strategy metadata."""
     return format_futu_order_remark(order)
@@ -1161,6 +1482,7 @@ def _load_futu_open_trade_entries(
     signal_date_text: str,
 ) -> dict[str, dict[str, Any]]:
     """Infer live open trade entries from Futu historical deals."""
+    strategy_to_broker_symbol = _load_strategy_to_broker_symbol_map()
     bucket_exit_rules = _load_current_bucket_exit_rules()
     max_hold_values = [
         int(rule["max_hold"])
@@ -1200,9 +1522,9 @@ def _load_futu_open_trade_entries(
             deal_data = deal_data.sort_values(time_column, kind="stable")
             break
 
-    for _, deal_row in deal_data.iterrows():
+    for _deal_index, deal_row in deal_data.iterrows():
         code_text = str(_row_value(deal_row, ["code"]) or "")
-        symbol = code_text.replace("US.", "")
+        symbol = _to_broker_symbol(code_text, strategy_to_broker_symbol)
         if not symbol:
             continue
         side_text = str(_row_value(deal_row, ["trd_side", "side"]) or "").upper()
@@ -1220,6 +1542,10 @@ def _load_futu_open_trade_entries(
             if not remark_text and order_id is not None:
                 remark_text = remarks_by_order_id.get(str(order_id), "")
             metadata = _parse_dashboard_order_remark(remark_text)
+            metadata = _complete_order_metadata_from_exit_rules(
+                metadata,
+                bucket_exit_rules,
+            )
             entry_date = _extract_deal_date(deal_row)
             if entry_date is None:
                 continue
@@ -1410,12 +1736,18 @@ def _remove_sell_from_signal_trades(symbol: str) -> None:
     Looks across all strategy buckets because Futu remains responsible for
     live position truth.
     """
+    strategy_to_broker_symbol = _load_strategy_to_broker_symbol_map()
+    sold_broker_symbol = _to_broker_symbol(symbol, strategy_to_broker_symbol)
     trades = _load_signal_trades()
     changed = False
     for strategy_id, bucket_list in list(trades.items()):
         before = len(bucket_list)
         trades[strategy_id] = [
-            entry for entry in bucket_list if entry.get("symbol") != symbol
+            entry for entry in bucket_list
+            if _to_broker_symbol(
+                str(entry.get("symbol") or ""),
+                strategy_to_broker_symbol,
+            ) != sold_broker_symbol
         ]
         if len(trades[strategy_id]) != before:
             changed = True
@@ -1427,21 +1759,37 @@ def _remove_sell_from_signal_trades(symbol: str) -> None:
 def api_preview_orders():
     """Build order preview from latest signal + account data."""
     max_positions = _load_max_positions()
+    strategy_to_broker_symbol = _load_strategy_to_broker_symbol_map()
     try:
         trd_ctx = _get_futu_trd_ctx()
         trd_env = _get_trd_env()
         ret_acc, acc_data = trd_ctx.accinfo_query(trd_env=trd_env)
         ret_pos, pos_data = trd_ctx.position_list_query(trd_env=trd_env)
+        ret_orders, broker_order_data = trd_ctx.order_list_query(trd_env=trd_env)
 
         if ret_acc != 0:
             trd_ctx.close()
             return {"error": "Failed to query account"}
+        if ret_orders != 0:
+            trd_ctx.close()
+            return {"error": "Failed to query current broker orders"}
 
         total_assets = float(acc_data.iloc[0].get("total_assets", 0))
-        held_symbols = set()
+        held_broker_symbols = set()
         if ret_pos == 0 and len(pos_data) > 0:
-            for _, row in pos_data.iterrows():
-                held_symbols.add(str(row.get("code", "")).replace("US.", ""))
+            for _position_index, position_row in pos_data.iterrows():
+                held_broker_symbol = _normalize_symbol_text(
+                    position_row.get("code", "")
+                )
+                if held_broker_symbol:
+                    held_broker_symbols.add(held_broker_symbol)
+        pending_buy_entries = _load_pending_buy_order_entries(
+            broker_order_data
+        )
+        pending_buy_symbols = set(pending_buy_entries)
+        pending_unfilled_buy_symbols = (
+            pending_buy_symbols - held_broker_symbols
+        )
 
     except Exception as exc:
         if "trd_ctx" in locals():
@@ -1460,17 +1808,25 @@ def api_preview_orders():
         return {"error": risk_gate_state.get("reason"), "risk_score_gate": risk_gate_state}
     buy_orders_blocked_by_risk_score = _risk_gate_blocks_buy_orders(risk_gate_state)
 
-    # Build per-symbol metadata from today's [FROZEN_TP_SL] lines so the
-    # preview can show bucket / tp_pct / sl_pct alongside each BUY.
-    frozen_today: dict[str, dict[str, Any]] = {
-        e.get("symbol"): e
-        for e in log.get("frozen_entries", [])
-        if e.get("entry_date") == log.get("date") and e.get("symbol")
-    }
-
     current_bucket_exit_rules = _load_current_bucket_exit_rules()
-    current_bucket_entry_limits = _load_current_bucket_entry_limits()
+    risk_score_value = risk_gate_state.get("risk_score")
+    current_bucket_entry_limits = _load_current_bucket_entry_limits(
+        risk_score_value
+        if isinstance(risk_score_value, int)
+        else None
+    )
+    max_same_symbol = _load_current_max_same_symbol(
+        current_bucket_entry_limits
+    )
+    tradable_candidates = sorted(
+        log.get("tradable_entry_candidates", []),
+        key=lambda candidate_record: _tradable_candidate_sort_key(
+            candidate_record,
+            current_bucket_entry_limits,
+        ),
+    )
     orders = []
+    buy_order_index_by_symbol: dict[str, int] = {}
 
     # WR-gate phantom accounting (read-only here; persistence happens at
     # execute). Resolve which previously-recorded phantoms still hold a
@@ -1479,7 +1835,6 @@ def api_preview_orders():
     # cron's wr_degrading flag ANDed with this month's risk score.
     eval_date_string = log.get("date") or ""
     wr_activation_threshold = _wr_gate_activation_threshold()
-    risk_score_value = risk_gate_state.get("risk_score")
     wr_gate_active = (
         wr_activation_threshold is not None
         and isinstance(risk_score_value, int)
@@ -1493,6 +1848,13 @@ def api_preview_orders():
     ]
     open_phantom_symbols = {
         phantom["symbol"] for phantom in open_phantom_positions
+    }
+    open_phantom_broker_symbols = {
+        _to_broker_symbol(
+            str(phantom_symbol),
+            strategy_to_broker_symbol,
+        )
+        for phantom_symbol in open_phantom_symbols
     }
     signal_date_text = str(log.get("date") or "")
     futu_open_entries: dict[str, dict[str, Any]] = {}
@@ -1509,9 +1871,10 @@ def api_preview_orders():
                 load_error,
             )
     bucket_position_counts = _count_live_positions_by_bucket(
-        held_symbols=held_symbols,
+        held_symbols=held_broker_symbols,
         futu_open_entries=futu_open_entries,
         open_phantom_positions=open_phantom_positions,
+        pending_buy_entries=pending_buy_entries,
     )
 
     # Slot cap based on REAL Futu portfolio PLUS phantom-held slots (this
@@ -1521,30 +1884,53 @@ def api_preview_orders():
     # would reclaim a slot the phantom is meant to hold. slots_remaining
     # counts down as each BUY (real or phantom) is queued.
     slots_remaining = max(
-        0, max_positions - len(held_symbols) - len(open_phantom_symbols)
+        0,
+        max_positions
+        - len(held_broker_symbols)
+        - len(open_phantom_broker_symbols)
+        - len(pending_unfilled_buy_symbols),
     )
-    occupied_position_count = len(held_symbols) + len(open_phantom_symbols)
+    occupied_position_count = (
+        len(held_broker_symbols)
+        + len(open_phantom_broker_symbols)
+        + len(pending_unfilled_buy_symbols)
+    )
 
-    # BUY orders (today's accepted entries from [FROZEN_TP_SL] lines).
-    # Iteration order follows log emission, which mirrors cron's
-    # priority + dollar_volume sort — so the first to consume slots
-    # are the highest-priority candidates.
-    for symbol in log.get("buy_actions", []):
-        if symbol in held_symbols:
+    occupied_symbol_counts = {
+        broker_symbol: 1
+        for broker_symbol in (
+            held_broker_symbols
+            | pending_unfilled_buy_symbols
+            | open_phantom_broker_symbols
+        )
+    }
+
+    # BUY competition happens exactly once here. Cron supplies every
+    # tradable bucket/symbol record; this loop orders them from the current
+    # settings and greedily admits against Futu positions, pending orders,
+    # phantom slots, the global cap, bucket caps, and same-symbol capacity.
+    for meta in tradable_candidates:
+        strategy_symbol = str(meta.get("symbol") or "")
+        broker_symbol = _to_broker_symbol(strategy_symbol, strategy_to_broker_symbol)
+        if broker_symbol in held_broker_symbols:
             # Already long; cron emitted the signal but the order
             # layer skips dupes.
             continue
-        ref_price = _get_last_price(symbol)
+        if broker_symbol in pending_buy_symbols:
+            # A previously-confirmed market order already owns this future
+            # position. Never preview or execute a duplicate while it waits
+            # for the next US session.
+            continue
+        ref_price = _get_last_price(broker_symbol)
         qty = (
             _compute_order_size(total_assets, ref_price, max_positions)
             if ref_price else 0
         )
-        meta = frozen_today.get(symbol, {})
         bucket_key = str(meta.get("bucket") or meta.get("strategy_id") or "")
         exit_rule = current_bucket_exit_rules.get(bucket_key, {})
         order_dict = {
             "side": "BUY",
-            "symbol": symbol,
+            "symbol": broker_symbol,
             "qty": qty,
             "ref_price": ref_price,
             "order_type": "MARKET",
@@ -1582,11 +1968,19 @@ def api_preview_orders():
             order_dict.pop("max_hold", None)
         if order_dict.get("reset_hold_on_reentry_signal") is None:
             order_dict.pop("reset_hold_on_reentry_signal", None)
+        normalized_strategy_symbol = _normalize_symbol_text(strategy_symbol)
+        if broker_symbol != normalized_strategy_symbol:
+            order_dict["signal_symbol"] = normalized_strategy_symbol
         # A candidate is a phantom when the cron flagged its win-rate cross
         # as degrading AND this month's risk score has activated the gate.
         # The flag is stamped gated-buckets-only by the cron, so non-gated
         # buckets read wr_degrading=False and never phantom here.
         is_phantom = wr_gate_active and bool(meta.get("wr_degrading"))
+        same_symbol_limit_reached = (
+            max_same_symbol < 999
+            and occupied_symbol_counts.get(broker_symbol, 0)
+            >= max_same_symbol
+        )
         if buy_orders_blocked_by_risk_score:
             order_dict["status"] = "risk_score_stop"
             order_dict["qty"] = 0
@@ -1599,7 +1993,7 @@ def api_preview_orders():
             order_dict["status"] = "slot_full"
             order_dict["skip_reason"] = (
                 f"max_positions={max_positions} already filled "
-                f"(Futu held: {len(held_symbols)}, "
+                f"(Futu held: {len(held_broker_symbols)}, "
                 f"phantom: {len(open_phantom_symbols)})"
             )
         elif (
@@ -1612,6 +2006,18 @@ def api_preview_orders():
             order_dict["status"] = "bucket_cap"
             order_dict["qty"] = 0
             order_dict["skip_reason"] = bucket_skip_reason
+        elif same_symbol_limit_reached:
+            # Do not expose a second order row with the same side/symbol.
+            # Execution authorization is keyed by side/symbol, so retaining
+            # the losing bucket here would overwrite the winning canonical
+            # order and make the valid BUY impossible to confirm.
+            continue
+        elif ref_price is None or qty <= 0:
+            order_dict["status"] = "price_unavailable"
+            order_dict["qty"] = 0
+            order_dict["skip_reason"] = (
+                "positive Futu reference price unavailable"
+            )
         elif is_phantom:
             # Phantom: hold the slot, deploy zero capital, place no real
             # order. Carries phantom_record so execute can persist it to
@@ -1626,7 +2032,7 @@ def api_preview_orders():
                 f"(slot held, no capital)"
             )
             order_dict["phantom_record"] = {
-                "symbol": symbol,
+                "symbol": normalized_strategy_symbol,
                 "signal_date": eval_date_string,
                 "bucket": meta.get("bucket"),
                 "tp_pct": meta.get("tp_pct"),
@@ -1640,6 +2046,9 @@ def api_preview_orders():
                 bucket_position_counts[bucket_label] = (
                     bucket_position_counts.get(bucket_label, 0) + 1
                 )
+            occupied_symbol_counts[broker_symbol] = (
+                occupied_symbol_counts.get(broker_symbol, 0) + 1
+            )
         else:
             slots_remaining -= 1
             occupied_position_count += 1
@@ -1648,7 +2057,25 @@ def api_preview_orders():
                 bucket_position_counts[bucket_label] = (
                     bucket_position_counts.get(bucket_label, 0) + 1
                 )
-        orders.append(order_dict)
+            occupied_symbol_counts[broker_symbol] = (
+                occupied_symbol_counts.get(broker_symbol, 0) + 1
+            )
+        existing_order_index = buy_order_index_by_symbol.get(broker_symbol)
+        if existing_order_index is None:
+            buy_order_index_by_symbol[broker_symbol] = len(orders)
+            orders.append(order_dict)
+        else:
+            existing_order = orders[existing_order_index]
+            existing_order_won_allocation = (
+                existing_order.get("status") not in PREVIEW_SKIP_STATUSES
+                or existing_order.get("status") == "wr_gate_phantom"
+            )
+            current_order_won_allocation = (
+                order_dict.get("status") not in PREVIEW_SKIP_STATUSES
+                or order_dict.get("status") == "wr_gate_phantom"
+            )
+            if current_order_won_allocation and not existing_order_won_allocation:
+                orders[existing_order_index] = order_dict
 
     # SELL orders (exit signals for held positions). The signal layer (cron)
     # treats its own sim portfolio as truth, so it can emit an exit signal for
@@ -1672,24 +2099,28 @@ def api_preview_orders():
                 min(entry_dates), signal_date_text
             )
 
-    for symbol in log.get("sell_actions", []):
-        if symbol not in held_symbols:
+    for strategy_symbol in log.get("sell_actions", []):
+        broker_symbol = _to_broker_symbol(strategy_symbol, strategy_to_broker_symbol)
+        if broker_symbol not in held_broker_symbols:
             continue
         qty = 0
         if ret_pos == 0 and len(pos_data) > 0:
-            match = pos_data[pos_data["code"] == f"US.{symbol}"]
+            match = pos_data[pos_data["code"] == f"US.{broker_symbol}"]
             if len(match) > 0:
                 qty = int(match.iloc[0].get("qty", 0))
-        price = _get_last_price(symbol)
+        price = _get_last_price(broker_symbol)
         order_dict: dict[str, Any] = {
             "side": "SELL",
-            "symbol": symbol,
+            "symbol": broker_symbol,
             "qty": qty,
             "price": price,
             "order_type": "MARKET",
             "exit_reason": "signal",
         }
-        futu_entry = futu_open_entries.get(symbol)
+        normalized_strategy_symbol = _normalize_symbol_text(strategy_symbol)
+        if broker_symbol != normalized_strategy_symbol:
+            order_dict["signal_symbol"] = normalized_strategy_symbol
+        futu_entry = futu_open_entries.get(broker_symbol)
         if production_min_hold > 0 and futu_entry is not None:
             entry_date_text = str(futu_entry.get("entry_date") or "")
             try:
@@ -1701,7 +2132,7 @@ def api_preview_orders():
                 LOGGER.warning(
                     "Skipping min_hold check for %s due to invalid Futu "
                     "entry date %r",
-                    symbol,
+                    broker_symbol,
                     entry_date_text,
                 )
             if bars_held is not None and bars_held < production_min_hold:
@@ -1725,11 +2156,14 @@ def api_preview_orders():
         _build_max_hold_sell_orders(
             trade_context=trd_ctx,
             trading_environment=trd_env,
-            held_symbols=held_symbols,
+            held_symbols=held_broker_symbols,
             signal_date_text=signal_date_text,
             position_data=pos_data,
             existing_sell_symbols=existing_sell_symbols,
-            entry_signal_symbols=set(log.get("entry_signals", [])),
+            entry_signal_symbols={
+                _to_broker_symbol(strategy_symbol, strategy_to_broker_symbol)
+                for strategy_symbol in log.get("entry_signals", [])
+            },
             futu_open_entries=futu_open_entries,
             trading_days=trading_days,
         )
@@ -1742,7 +2176,8 @@ def api_preview_orders():
         "total_assets_hkd": total_assets,
         "margin": MARGIN_MULTIPLIER,
         "max_positions": max_positions,
-        "held_count": len(held_symbols),
+        "held_count": len(held_broker_symbols),
+        "pending_buy_count": len(pending_unfilled_buy_symbols),
         "phantom_count": len(open_phantom_symbols),
         "trading_env": TRADING_ENV,
         "signal_date": log.get("date"),
@@ -1777,14 +2212,90 @@ class ExecuteRequest(BaseModel):
     orders: list[dict]
 
 
+def _validate_requested_orders_against_server_preview(
+    requested_orders: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return canonical preview orders selected by the dashboard client.
+
+    # TODO: review
+    The client may choose a subset, but it cannot introduce a symbol, side,
+    quantity, or status not present in a fresh server-side preview. Execution
+    uses the canonical server dictionaries so client-supplied metadata never
+    reaches Futu.
+    """
+    preview_document = api_preview_orders()
+    if preview_document.get("error"):
+        reason = str(preview_document.get("error"))
+        return [], [
+            {
+                "symbol": _normalize_symbol_text(order.get("symbol")),
+                "status": "rejected",
+                "reason": f"server preview failed: {reason}",
+            }
+            for order in requested_orders
+        ]
+
+    canonical_orders_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for preview_order in preview_document.get("orders", []):
+        preview_side = str(preview_order.get("side") or "").upper()
+        preview_symbol = _normalize_symbol_text(preview_order.get("symbol"))
+        if preview_side in {"BUY", "SELL"} and preview_symbol:
+            canonical_orders_by_key[(preview_side, preview_symbol)] = preview_order
+
+    authorized_orders: list[dict[str, Any]] = []
+    rejected_results: list[dict[str, Any]] = []
+    selected_order_keys: set[tuple[str, str]] = set()
+    for requested_order in requested_orders:
+        requested_side = str(requested_order.get("side") or "").upper()
+        requested_symbol = _normalize_symbol_text(requested_order.get("symbol"))
+        requested_key = (requested_side, requested_symbol)
+        canonical_order = canonical_orders_by_key.get(requested_key)
+        rejection_reason: str | None = None
+        if requested_key in selected_order_keys:
+            rejection_reason = "duplicate order selection"
+        elif canonical_order is None:
+            rejection_reason = "order is not present in the current server preview"
+        elif requested_order.get("qty") != canonical_order.get("qty"):
+            rejection_reason = "quantity changed; refresh the preview"
+        elif requested_order.get("status") != canonical_order.get("status"):
+            rejection_reason = "order status changed; refresh the preview"
+
+        if rejection_reason is not None:
+            rejected_results.append(
+                {
+                    "symbol": requested_symbol,
+                    "status": "rejected",
+                    "reason": rejection_reason,
+                }
+            )
+            continue
+
+        selected_order_keys.add(requested_key)
+        authorized_orders.append(dict(canonical_order))
+
+    return authorized_orders, rejected_results
+
+
 @app.post("/api/execute_orders")
 def api_execute_orders(req: ExecuteRequest):
-    """Execute confirmed orders via Futu API."""
+    """Serialize execution so simultaneous confirms cannot duplicate orders."""
+    # TODO: review
+    with ORDER_EXECUTION_LOCK:
+        return _execute_orders_from_fresh_server_preview(req)
+
+
+def _execute_orders_from_fresh_server_preview(req: ExecuteRequest):
+    """Execute confirmed orders via Futu API after fresh authorization."""
     from futu import ModifyOrderOp, OrderType, TrdSide
+
+    authorized_orders, results = _validate_requested_orders_against_server_preview(
+        req.orders
+    )
+    if not authorized_orders:
+        return {"results": results}
 
     trd_ctx = _get_futu_trd_ctx()
     trd_env = _get_trd_env()
-    results = []
 
     latest_gate_state: dict[str, Any] | None = None
     latest_dates = _get_log_dates()
@@ -1795,7 +2306,7 @@ def api_execute_orders(req: ExecuteRequest):
     # loop alongside a prune of any phantom that has since closed.
     confirmed_phantom_records: list[dict[str, Any]] = []
 
-    for order in req.orders:
+    for order in authorized_orders:
         symbol = order["symbol"]
         side = TrdSide.BUY if order["side"] == "BUY" else TrdSide.SELL
         qty = order["qty"]
@@ -1844,9 +2355,8 @@ def api_execute_orders(req: ExecuteRequest):
                         if (
                             str(orow.get("code", "")) == code
                             and str(orow.get("trd_side", "")) == "SELL"
-                            and str(orow.get("order_status", "")) not in (
-                                "CANCELLED_ALL", "FILLED_ALL", "FAILED", "DELETED",
-                            )
+                            and str(orow.get("order_status", "")).upper()
+                            not in TERMINAL_BROKER_ORDER_STATUSES
                         ):
                             cancel_id = str(orow.get("order_id", ""))
                             ret_cancel, _ = trd_ctx.modify_order(
@@ -1893,9 +2403,16 @@ def api_execute_orders(req: ExecuteRequest):
                 # the source of truth for all live decisions.
                 if order["side"] == "BUY":
                     _record_buy_in_signal_trades(
-                        symbol=symbol,
+                        symbol=(
+                            order.get("signal_symbol")
+                            or symbol
+                        ),
                         strategy_id=order.get("strategy_id", "") or "",
-                        entry_date=date.today().isoformat(),
+                        entry_date=(
+                            latest_dates[0]
+                            if latest_dates
+                            else date.today().isoformat()
+                        ),
                     )
                 else:
                     _remove_sell_from_signal_trades(symbol)
@@ -2202,7 +2719,7 @@ function renderCommunicationContract(contract) {
       {
         owner: 'Cron',
         label: 'Signal layer',
-        detail: 'Finds signals, accepts slots, freezes TP/SL, and updates the rolling pool.'
+        detail: 'Finds every tradable signal, freezes TP/SL metadata, and updates the separate ADAPTIVE TP/SL virtual statistical history.'
       },
       {
         owner: 'Dashboard',
@@ -2217,7 +2734,8 @@ function renderCommunicationContract(contract) {
     ],
     notes: [
       'Raw entries are not orders.',
-      'Cron accepted buys may still be skipped by dashboard.',
+      'Cron publishes every tradable signal with frozen TP/SL metadata.',
+      'The ADAPTIVE TP/SL virtual trade history is statistical state, not positions.',
       'The local signal mirror is diagnostic only.'
     ]
   };
@@ -2261,13 +2779,14 @@ function renderAdaptiveTpSlFromLog(log, adaptive) {
     html += stat('TP source', (log.date || 'selected date') + ' log');
   }
 
-  const rollingState = log.rolling_tp_sl_state || {};
-  if (rollingState.winners != null || rollingState.losers != null) {
-    html += stat('Pool', `${rollingState.winners || 0} winners + ${rollingState.losers || 0} losers`);
+  const virtualHistoryState = log.adaptive_tp_sl_virtual_trade_history_state || {};
+  if (virtualHistoryState.winner_returns != null || virtualHistoryState.loser_returns != null) {
+    html += stat('Virtual reference sample', `${virtualHistoryState.winner_returns || 0} winners + ${virtualHistoryState.loser_returns || 0} losers`);
   } else {
-    const winners = (adaptive.winners || []);
-    const losers = (adaptive.losers || []);
-    html += stat('Pool', `${winners.length} winners + ${losers.length} losers`);
+    const virtualHistory = adaptive.adaptive_tp_sl_virtual_trade_history || {};
+    const winnerReturns = virtualHistory.winner_returns || [];
+    const loserReturns = virtualHistory.loser_returns || [];
+    html += stat('Virtual reference sample', `${winnerReturns.length} winners + ${loserReturns.length} losers`);
   }
   $('#adaptive-stats').innerHTML = html;
 }
@@ -2290,6 +2809,7 @@ async function load() {
 function render(state, futu) {
   const log = state.latest_log || {};
   const adaptive = state.adaptive_state || {};
+  const adaptiveTpSlVirtualTradeHistory = adaptive.adaptive_tp_sl_virtual_trade_history || {};
   const positions = state.signal_trades || {}; // diagnostic local mirror only
   renderCommunicationContract(state.communication_contract);
 
@@ -2325,12 +2845,13 @@ function render(state, futu) {
     html += (log.entry_signals && log.entry_signals.length) ? log.entry_signals.map(s => tagWithBucket(s, 'neutral', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   }
   html += '</div>';
-  html += '<div class="signal-row"><strong style="color:var(--text2)">BUY (cron accepted):</strong> ';
-  html += (log.accepted_buy_actions && log.accepted_buy_actions.length) ? log.accepted_buy_actions.map(s => tagWithBucket(s, 'buy', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
+  const tradableCandidates = log.tradable_entry_candidates || [];
+  html += '<div class="signal-row"><strong style="color:var(--text2)">TRADABLE (cron):</strong> ';
+  html += tradableCandidates.length ? tradableCandidates.map(candidate => tagWithBucketLabel(candidate.symbol, 'buy', shortBucket(candidate.bucket))).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
-  const rejectedRecords = ((log.slot_allocation||{}).rejected) || [];
-  html += '<div class="signal-row"><strong style="color:var(--text2)">REJECTED (cron):</strong> ';
-  html += rejectedRecords.length ? rejectedRecords.map(r => tagWithBucketLabel(r.symbol, 'neutral', shortBucket(r.bucket), r.reason || '?')).join('') : '<span style="color:var(--text2)">—</span>';
+  const filteredOutRecords = ((log.signal_candidate_summary||{}).filtered_out) || [];
+  html += '<div class="signal-row"><strong style="color:var(--text2)">FILTERED OUT (signal):</strong> ';
+  html += filteredOutRecords.length ? filteredOutRecords.map(record => tagWithBucketLabel(record.symbol, 'neutral', shortBucket(record.bucket), record.reason || '?')).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">SELL:</strong> ';
   html += (log.sell_actions && log.sell_actions.length) ? log.sell_actions.map(s => tagWithBucket(s, 'sell', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
@@ -2341,10 +2862,10 @@ function render(state, futu) {
   // Entry/exit signal count
   html += '<div style="margin-top:8px; font-size:0.85em; color:var(--text2)">';
   html += 'Raw entries: ' + (log.entry_signals||[]).length + ' | ';
-  html += 'Cron accepted buys: ' + (log.accepted_buy_actions||[]).length + ' | ';
-  html += 'Rejected: ' + (((log.slot_allocation||{}).rejected)||[]).length + ' | ';
+  html += 'Tradable candidates: ' + tradableCandidates.length + ' | ';
+  html += 'Filtered out: ' + filteredOutRecords.length + ' | ';
   html += 'Exit signals: ' + (log.exit_signals||[]).length + ' | ';
-  html += 'Positions: ' + (log.position_count||0);
+  html += 'Virtual reference open trades: ' + (log.adaptive_tp_sl_virtual_open_trade_count||0);
   html += '</div>';
   $('#signals-content').innerHTML = html;
 
@@ -2372,7 +2893,7 @@ function render(state, futu) {
   $('#positions-content').innerHTML = html;
 
   // Trade history — cache full list, render via setTradeTab.
-  __all_trades_cache = adaptive.closed_trades || [];
+  __all_trades_cache = adaptiveTpSlVirtualTradeHistory.closed_trades || [];
   renderTrades();
 
   // Date nav
@@ -2391,7 +2912,8 @@ async function loadDate(d) {
   $('#signal-date').textContent = log.date || d;
   let html = '';
   // For historical dates, bucket map comes only from that day's
-  // [ENTRY_SIGNAL] / [FROZEN_TP_SL] lines (no current accepted_entries lookup).
+  // [ENTRY_SIGNAL] / [FROZEN_TP_SL] lines only; never infer Futu positions
+  // from the ADAPTIVE TP/SL virtual trade history.
   const bucketMap = buildBucketMap(log, {});
   html += '<div class="signal-row"><strong style="color:var(--text2)">ENTRY (raw):</strong> ';
   if (log.entry_signal_records && log.entry_signal_records.length) {
@@ -2402,12 +2924,13 @@ async function loadDate(d) {
     html += (log.entry_signals && log.entry_signals.length) ? log.entry_signals.map(s => tagWithBucket(s, 'neutral', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
   }
   html += '</div>';
-  html += '<div class="signal-row"><strong style="color:var(--text2)">BUY (cron accepted):</strong> ';
-  html += (log.accepted_buy_actions && log.accepted_buy_actions.length) ? log.accepted_buy_actions.map(s => tagWithBucket(s, 'buy', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
+  const tradableCandidates = log.tradable_entry_candidates || [];
+  html += '<div class="signal-row"><strong style="color:var(--text2)">TRADABLE (cron):</strong> ';
+  html += tradableCandidates.length ? tradableCandidates.map(candidate => tagWithBucketLabel(candidate.symbol, 'buy', shortBucket(candidate.bucket))).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
-  const rejectedRecords = ((log.slot_allocation||{}).rejected) || [];
-  html += '<div class="signal-row"><strong style="color:var(--text2)">REJECTED (cron):</strong> ';
-  html += rejectedRecords.length ? rejectedRecords.map(r => tagWithBucketLabel(r.symbol, 'neutral', shortBucket(r.bucket), r.reason || '?')).join('') : '<span style="color:var(--text2)">—</span>';
+  const filteredOutRecords = ((log.signal_candidate_summary||{}).filtered_out) || [];
+  html += '<div class="signal-row"><strong style="color:var(--text2)">FILTERED OUT (signal):</strong> ';
+  html += filteredOutRecords.length ? filteredOutRecords.map(record => tagWithBucketLabel(record.symbol, 'neutral', shortBucket(record.bucket), record.reason || '?')).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">SELL:</strong> ';
   html += (log.sell_actions && log.sell_actions.length) ? log.sell_actions.map(s => tagWithBucket(s, 'sell', bucketMap)).join('') : '<span style="color:var(--text2)">—</span>';
@@ -2417,10 +2940,10 @@ async function loadDate(d) {
   html += '</div>';
   html += '<div style="margin-top:8px; font-size:0.85em; color:var(--text2)">';
   html += 'Raw entries: ' + (log.entry_signals||[]).length + ' | ';
-  html += 'Cron accepted buys: ' + (log.accepted_buy_actions||[]).length + ' | ';
-  html += 'Rejected: ' + (((log.slot_allocation||{}).rejected)||[]).length + ' | ';
+  html += 'Tradable candidates: ' + tradableCandidates.length + ' | ';
+  html += 'Filtered out: ' + filteredOutRecords.length + ' | ';
   html += 'Exit signals: ' + (log.exit_signals||[]).length + ' | ';
-  html += 'Positions: ' + (log.position_count||0);
+  html += 'Virtual reference open trades: ' + (log.adaptive_tp_sl_virtual_open_trade_count||0);
   html += '</div>';
   renderAdaptiveTpSlFromLog(log, {});
   $('#signals-content').innerHTML = html;
@@ -2449,16 +2972,19 @@ async function previewOrders() {
     badge.className = env === 'REAL' ? 'env-badge env-real' : 'env-badge env-simulate';
 
     if (data.orders.length === 0) {
-      $('#orders-content').innerHTML = '<div style="color:var(--text2)">No dashboard-sendable orders (signal date: ' + (data.signal_date||'—') + '). Cron may still have raw or accepted signals that were already held, blocked, or not actionable live.</div>';
+      const pendingBuyText = (data.pending_buy_count||0) ? ' Pending broker buys: ' + data.pending_buy_count + '.' : '';
+      $('#orders-content').innerHTML = '<div style="color:var(--text2)">No dashboard-sendable orders (signal date: ' + (data.signal_date||'—') + ').' + pendingBuyText + ' Cron may still have tradable candidates that Futu holdings or allocation settings make non-actionable.</div>';
       return;
     }
 
     const phantomCount = data.phantom_count || 0;
-    const slotsFree = Math.max(0, (data.max_positions||0) - (data.held_count||0) - phantomCount);
+    const pendingBuyCount = data.pending_buy_count || 0;
+    const slotsFree = Math.max(0, (data.max_positions||0) - (data.held_count||0) - phantomCount - pendingBuyCount);
     let html = '<div style="font-size:0.8em; color:var(--text2); margin-bottom:8px">';
     html += 'Assets: HK$' + (data.total_assets_hkd||0).toLocaleString(undefined,{minimumFractionDigits:0});
     html += ' | Margin: ' + data.margin + 'x';
     html += ' | Futu held: ' + data.held_count + '/' + data.max_positions;
+    if (pendingBuyCount > 0) html += ' | Pending buys: ' + pendingBuyCount;
     if (phantomCount > 0) {
       html += ' | <span title="WR-gate phantom slots (held, zero capital)">👻 phantom: ' + phantomCount + '</span>';
     }
@@ -2501,7 +3027,7 @@ async function previewOrders() {
       html += wrHtml;
     }
     html += '<div style="font-size:0.78em; color:var(--text2); margin-bottom:8px">';
-    html += 'This table is dashboard-sendable orders. It starts from cron accepted buys, then removes or marks items blocked by live Futu holdings, account slots, or risk gate.';
+    html += 'Cron supplies every tradable candidate. This table is the single settings + Futu allocation pass that decides which orders are sendable.';
     html += '</div>';
 
     html += '<div class="order-row order-header"><span>Side</span><span>Symbol</span><span>Bucket</span><span>Rank</span><span>Qty</span><span>Ref Price</span><span>TP%</span><span>SL%</span></div>';
@@ -2516,7 +3042,7 @@ async function previewOrders() {
         ? `max ${o.bars_held}/${o.max_hold}`
         : (o.dollar_volume_rank != null) ? '#' + o.dollar_volume_rank : '—';
       const isPhantom = o.status === 'wr_gate_phantom';
-      const skipped = o.status === 'bucket_cap' || o.status === 'slot_full' || o.status === 'risk_score_stop' || o.status === 'min_hold_block' || isPhantom;
+      const skipped = o.status === 'bucket_cap' || o.status === 'slot_full' || o.status === 'risk_score_stop' || o.status === 'min_hold_block' || o.status === 'price_unavailable' || isPhantom;
       const rowStyle = skipped ? ' style="opacity:0.45"' : '';
       const statusDetail = o.status === 'min_hold_block' && o.bars_held != null && o.min_hold != null
         ? `min_hold_block ${o.bars_held}/${o.min_hold}`

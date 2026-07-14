@@ -8,12 +8,14 @@ import datetime
 import logging
 import math
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
 from zoneinfo import ZoneInfo
 
 import numpy
 import pandas
+import yfinance
 from pandas.tseries.offsets import BDay
 
 from .cron import parse_daily_task_arguments, run_daily_tasks
@@ -32,6 +34,8 @@ MINIMUM_HISTORY_DATE = "2014-01-01"
 # indicator windows safely when recomputing signals for a single date.
 SIGNAL_HISTORY_LOOKBACK_DAYS = 756
 YAHOO_CACHE_REFRESH_LOOKBACK_DAYS = 365
+YAHOO_MISSING_DATE_RETRY_BATCH_SIZE = 50
+YAHOO_MISSING_DATE_RETRY_TIMEOUT_SECONDS = 20
 DATA_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "data"
 STOCK_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
 BACKTEST_UNIVERSE_DIRECTORY = DATA_DIRECTORY / "backtest_universe_alpha_vantage"
@@ -58,6 +62,16 @@ CRON_RUNTIME_FIELD_NAMES = [
     "update_seconds",
     "signal_seconds",
 ]
+
+
+@dataclass(frozen=True)
+class YahooMissingDateRetryResult:
+    """Summary for a post-refresh Yahoo missing-date retry pass."""
+
+    target_date: str
+    attempted_symbols: int
+    recovered_symbols: tuple[str, ...]
+    remaining_missing_symbols: tuple[str, ...]
 
 
 def record_cron_runtime(
@@ -402,6 +416,245 @@ def update_all_data_from_yf(
             LOGGER.warning(
                 "Failed to refresh data for %s: %s", symbol_name, download_error
             )
+
+
+def _normalize_cache_datetime_index(frame: pandas.DataFrame) -> pandas.DataFrame:
+    """Return ``frame`` with a timezone-naive ``DatetimeIndex``."""
+
+    normalized_frame = frame.copy()
+    normalized_index = pandas.to_datetime(normalized_frame.index)
+    if getattr(normalized_index, "tz", None) is not None:
+        normalized_index = normalized_index.tz_localize(None)
+    normalized_frame.index = normalized_index
+    return normalized_frame
+
+
+def _cache_has_target_date(
+    cache_path: Path,
+    target_timestamp: pandas.Timestamp,
+) -> bool:
+    """Return whether a cache file contains the requested trading date."""
+
+    if not cache_path.exists():
+        return False
+    try:
+        cached_frame = pandas.read_csv(cache_path, index_col=0, parse_dates=True)
+    except (OSError, ValueError, pandas.errors.ParserError) as read_error:
+        LOGGER.warning("Failed to inspect cache %s: %s", cache_path, read_error)
+        return False
+    if cached_frame.empty:
+        return False
+    cached_frame = _normalize_cache_datetime_index(cached_frame)
+    return bool((cached_frame.index.normalize() == target_timestamp).any())
+
+
+def _find_symbols_missing_cache_date(
+    symbol_names: list[str],
+    data_directory: Path,
+    target_timestamp: pandas.Timestamp,
+) -> list[str]:
+    """Return symbols whose cache lacks ``target_timestamp``."""
+
+    missing_symbol_names: list[str] = []
+    for symbol_name in symbol_names:
+        cache_path = data_directory / f"{symbol_name}.csv"
+        if not _cache_has_target_date(cache_path, target_timestamp):
+            missing_symbol_names.append(symbol_name)
+    return missing_symbol_names
+
+
+def _normalize_retry_download_columns(frame: pandas.DataFrame) -> pandas.DataFrame:
+    """Return ``frame`` with cache-compatible lower snake case columns."""
+
+    normalized_frame = frame.copy()
+    normalized_frame.columns = [
+        str(column_name).lower().replace(" ", "_")
+        for column_name in normalized_frame.columns
+    ]
+    return normalized_frame
+
+
+def _extract_symbol_frame_from_retry_download(
+    downloaded_frame: pandas.DataFrame,
+    symbol_name: str,
+    batch_symbol_names: list[str],
+    target_timestamp: pandas.Timestamp,
+) -> pandas.DataFrame:
+    """Extract one symbol's target-date rows from a Yahoo batch response."""
+
+    if downloaded_frame.empty:
+        return pandas.DataFrame()
+
+    if isinstance(downloaded_frame.columns, pandas.MultiIndex):
+        first_level_values = downloaded_frame.columns.get_level_values(0)
+        second_level_values = downloaded_frame.columns.get_level_values(1)
+        if symbol_name in first_level_values:
+            symbol_frame = downloaded_frame[symbol_name]
+        elif symbol_name in second_level_values:
+            symbol_frame = downloaded_frame.xs(symbol_name, level=1, axis=1)
+        else:
+            return pandas.DataFrame()
+    elif len(batch_symbol_names) == 1:
+        symbol_frame = downloaded_frame
+    else:
+        return pandas.DataFrame()
+
+    symbol_frame = symbol_frame.dropna(how="all")
+    if symbol_frame.empty:
+        return pandas.DataFrame()
+
+    symbol_frame = _normalize_retry_download_columns(symbol_frame)
+    symbol_frame = _normalize_cache_datetime_index(symbol_frame)
+    return symbol_frame.loc[symbol_frame.index.normalize() == target_timestamp]
+
+
+def _merge_retry_rows_into_cache(
+    cache_path: Path,
+    target_rows: pandas.DataFrame,
+) -> bool:
+    """Merge target-date retry rows into ``cache_path``."""
+
+    if target_rows.empty:
+        return False
+
+    if cache_path.exists():
+        try:
+            cached_frame = pandas.read_csv(cache_path, index_col=0, parse_dates=True)
+        except (OSError, ValueError, pandas.errors.ParserError) as read_error:
+            LOGGER.warning(
+                "Failed to read cache %s before retry merge: %s",
+                cache_path,
+                read_error,
+            )
+            cached_frame = pandas.DataFrame()
+    else:
+        cached_frame = pandas.DataFrame()
+
+    if not cached_frame.empty:
+        cached_frame = _normalize_cache_datetime_index(cached_frame)
+
+    merged_frame = pandas.concat([cached_frame, target_rows]).sort_index()
+    merged_frame = merged_frame.loc[~merged_frame.index.duplicated(keep="last")]
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    merged_frame.to_csv(cache_path)
+    return True
+
+
+def retry_missing_date_from_yf(
+    target_date: str,
+    data_directory: Path,
+    *,
+    symbol_names: list[str] | None = None,
+    batch_size: int = YAHOO_MISSING_DATE_RETRY_BATCH_SIZE,
+) -> YahooMissingDateRetryResult:
+    """Retry Yahoo only for symbols missing ``target_date`` in local cache.
+
+    The main cron refresh already tries every runtime symbol individually.
+    This post-pass is intentionally narrow: it inspects the final target
+    trading date and performs batched one-day retries only for caches that
+    still lack that date. A slow or temporarily incomplete Yahoo response can
+    then self-heal without re-running the full 5k-symbol annual refresh.
+    """
+
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+
+    target_timestamp = pandas.Timestamp(datetime.date.fromisoformat(target_date))
+    exclusive_end_date = (
+        datetime.date.fromisoformat(target_date) + datetime.timedelta(days=1)
+    ).isoformat()
+    runtime_symbol_names = (
+        list(symbol_names)
+        if symbol_names is not None
+        else load_runtime_download_symbols()
+    )
+    missing_symbol_names = _find_symbols_missing_cache_date(
+        runtime_symbol_names,
+        data_directory,
+        target_timestamp,
+    )
+
+    if not missing_symbol_names:
+        LOGGER.info(
+            "Yahoo missing-date retry skipped for %s: no missing symbols",
+            target_date,
+        )
+        return YahooMissingDateRetryResult(
+            target_date=target_date,
+            attempted_symbols=0,
+            recovered_symbols=(),
+            remaining_missing_symbols=(),
+        )
+
+    LOGGER.info(
+        "Retrying Yahoo missing-date rows for %s: %d symbols",
+        target_date,
+        len(missing_symbol_names),
+    )
+
+    recovered_symbol_names: list[str] = []
+    for batch_start_index in range(0, len(missing_symbol_names), batch_size):
+        batch_symbol_names = missing_symbol_names[
+            batch_start_index : batch_start_index + batch_size
+        ]
+        try:
+            downloaded_frame = yfinance.download(
+                tickers=batch_symbol_names,
+                start=target_date,
+                end=exclusive_end_date,
+                progress=False,
+                auto_adjust=True,
+                threads=True,
+                group_by="ticker",
+                timeout=YAHOO_MISSING_DATE_RETRY_TIMEOUT_SECONDS,
+            )
+        except Exception as download_error:  # noqa: BLE001
+            LOGGER.warning(
+                "Yahoo missing-date retry batch failed for %s symbols %s: %s",
+                target_date,
+                batch_symbol_names,
+                download_error,
+            )
+            continue
+
+        for symbol_name in batch_symbol_names:
+            target_rows = _extract_symbol_frame_from_retry_download(
+                downloaded_frame,
+                symbol_name,
+                batch_symbol_names,
+                target_timestamp,
+            )
+            cache_path = data_directory / f"{symbol_name}.csv"
+            if _merge_retry_rows_into_cache(cache_path, target_rows):
+                recovered_symbol_names.append(symbol_name)
+
+    remaining_missing_symbol_names = _find_symbols_missing_cache_date(
+        runtime_symbol_names,
+        data_directory,
+        target_timestamp,
+    )
+    if recovered_symbol_names:
+        LOGGER.info(
+            "Yahoo missing-date retry recovered %d/%d symbols for %s",
+            len(recovered_symbol_names),
+            len(missing_symbol_names),
+            target_date,
+        )
+    if remaining_missing_symbol_names:
+        LOGGER.warning(
+            "Yahoo missing-date retry left %d symbols without %s; "
+            "first symbols: %s",
+            len(remaining_missing_symbol_names),
+            target_date,
+            remaining_missing_symbol_names[:20],
+        )
+
+    return YahooMissingDateRetryResult(
+        target_date=target_date,
+        attempted_symbols=len(missing_symbol_names),
+        recovered_symbols=tuple(recovered_symbol_names),
+        remaining_missing_symbols=tuple(remaining_missing_symbol_names),
+    )
 
 
 def _load_current_symbols_with_cached_price(

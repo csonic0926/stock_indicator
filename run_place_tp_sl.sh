@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Place TP/SL orders for today's filled BUY entries.
-# Run ~10 minutes after US market open (09:40 ET = 21:40 HKT).
+# Normal automation is owned by run_take_profit_scheduler.sh + launchd, which
+# resolves America/New_York time directly and survives HKT DST changes.
 # Requires Futu OpenD to be running and logged in.
 
 SCRIPT_DIRECTORY="$(cd "$(dirname "$0")" && pwd)"

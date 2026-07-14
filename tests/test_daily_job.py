@@ -288,6 +288,105 @@ def test_update_all_data_from_yf_logs_warning_on_error(
     assert any("BBB" in record.message for record in caplog.records)
 
 
+def test_retry_missing_date_from_yf_merges_recovered_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The missing-date retry should patch only symbols missing the target row."""
+
+    target_date = "2024-01-02"
+    (tmp_path / "AAA.csv").write_text(
+        "Date,close\n2024-01-01,1.0\n2024-01-02,2.0\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "BBB.csv").write_text(
+        "Date,close\n2024-01-01,1.0\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "CCC.csv").write_text(
+        "Date,close\n2024-01-01,1.0\n",
+        encoding="utf-8",
+    )
+
+    recorded_retry_arguments: list[dict[str, object]] = []
+
+    def fake_yahoo_retry_download(
+        tickers: list[str],
+        start: str,
+        end: str,
+        progress: bool = False,
+        auto_adjust: bool = True,
+        threads: bool = True,
+        group_by: str = "ticker",
+        timeout: int = daily_job.YAHOO_MISSING_DATE_RETRY_TIMEOUT_SECONDS,
+    ) -> pandas.DataFrame:
+        recorded_retry_arguments.append(
+            {
+                "tickers": tickers,
+                "start": start,
+                "end": end,
+                "progress": progress,
+                "auto_adjust": auto_adjust,
+                "threads": threads,
+                "group_by": group_by,
+                "timeout": timeout,
+            }
+        )
+        retry_columns = pandas.MultiIndex.from_tuples(
+            [
+                ("BBB", "Open"),
+                ("BBB", "High"),
+                ("BBB", "Low"),
+                ("BBB", "Close"),
+                ("BBB", "Volume"),
+            ]
+        )
+        return pandas.DataFrame(
+            [[1.0, 2.0, 0.5, 1.5, 1000]],
+            index=pandas.to_datetime([target_date]),
+            columns=retry_columns,
+        )
+
+    monkeypatch.setattr(
+        daily_job.yfinance,
+        "download",
+        fake_yahoo_retry_download,
+    )
+
+    retry_result = daily_job.retry_missing_date_from_yf(
+        target_date,
+        tmp_path,
+        symbol_names=["AAA", "BBB", "CCC"],
+        batch_size=10,
+    )
+
+    assert retry_result.attempted_symbols == 2
+    assert retry_result.recovered_symbols == ("BBB",)
+    assert retry_result.remaining_missing_symbols == ("CCC",)
+    assert recorded_retry_arguments == [
+        {
+            "tickers": ["BBB", "CCC"],
+            "start": "2024-01-02",
+            "end": "2024-01-03",
+            "progress": False,
+            "auto_adjust": True,
+            "threads": True,
+            "group_by": "ticker",
+            "timeout": daily_job.YAHOO_MISSING_DATE_RETRY_TIMEOUT_SECONDS,
+        }
+    ]
+
+    recovered_frame = pandas.read_csv(
+        tmp_path / "BBB.csv",
+        index_col=0,
+        parse_dates=True,
+    )
+    assert list(recovered_frame.index.strftime("%Y-%m-%d")) == [
+        "2024-01-01",
+        "2024-01-02",
+    ]
+    assert recovered_frame.loc[pandas.Timestamp(target_date), "close"] == 1.5
+
 
 def test_load_runtime_download_symbols_skips_missing_sector_only(
     monkeypatch: pytest.MonkeyPatch,

@@ -20,6 +20,11 @@ import yfinance
 
 LOGGER = logging.getLogger(__name__)
 
+PRICE_SCALE_RATIO_LOWER_BOUND = 0.5
+PRICE_SCALE_RATIO_UPPER_BOUND = 2.0
+VOLUME_INVERSE_RATIO_LOWER_BOUND = 0.5
+VOLUME_INVERSE_RATIO_UPPER_BOUND = 2.0
+
 
 def _normalize_columns(frame: pandas.DataFrame) -> pandas.DataFrame:
     """Return ``frame`` with flattened, snake_case column names."""
@@ -31,6 +36,139 @@ def _normalize_columns(frame: pandas.DataFrame) -> pandas.DataFrame:
         for column_name in frame.columns
     ]
     return frame
+
+
+def _safe_ratio(numerator_value: Any, denominator_value: Any) -> float | None:
+    """Return a positive finite ratio, or ``None`` when inputs are unusable."""
+    try:
+        numerator_float = float(numerator_value)
+        denominator_float = float(denominator_value)
+    except (TypeError, ValueError):
+        return None
+    if (
+        not pandas.notna(numerator_float)
+        or not pandas.notna(denominator_float)
+        or numerator_float <= 0
+        or denominator_float <= 0
+    ):
+        return None
+    return numerator_float / denominator_float
+
+
+def _is_large_price_scale_ratio(price_ratio: float | None) -> bool:
+    """Return whether a price ratio is too large for a safe partial merge."""
+    if price_ratio is None:
+        return False
+    return (
+        price_ratio <= PRICE_SCALE_RATIO_LOWER_BOUND
+        or price_ratio >= PRICE_SCALE_RATIO_UPPER_BOUND
+    )
+
+
+def _has_incompatible_overlap_scale(
+    cached_frame: pandas.DataFrame,
+    downloaded_frame: pandas.DataFrame,
+) -> bool:
+    """Return whether overlapping rows use incompatible price scales.
+
+    Partial Yahoo refreshes are unsafe when a split has changed the adjusted
+    price basis: newly downloaded rows can be split-adjusted while older cached
+    rows remain on the pre-split basis. Same-date close ratios expose that case
+    before mixed-scale rows are written back to disk.
+    """
+    required_columns = {"close", "volume"}
+    if (
+        not required_columns.issubset(cached_frame.columns)
+        or not required_columns.issubset(downloaded_frame.columns)
+    ):
+        return False
+    common_index = cached_frame.index.intersection(downloaded_frame.index)
+    if common_index.empty:
+        return False
+    price_ratios: list[float] = []
+    volume_ratios: list[float] = []
+    for common_timestamp in common_index:
+        price_ratio = _safe_ratio(
+            downloaded_frame.at[common_timestamp, "close"],
+            cached_frame.at[common_timestamp, "close"],
+        )
+        volume_ratio = _safe_ratio(
+            downloaded_frame.at[common_timestamp, "volume"],
+            cached_frame.at[common_timestamp, "volume"],
+        )
+        if price_ratio is not None and volume_ratio is not None:
+            price_ratios.append(price_ratio)
+            volume_ratios.append(volume_ratio)
+    if not price_ratios:
+        return False
+    median_price_ratio = float(pandas.Series(price_ratios).median())
+    median_volume_ratio = float(pandas.Series(volume_ratios).median())
+    price_volume_product = median_price_ratio * median_volume_ratio
+    return _is_large_price_scale_ratio(median_price_ratio) and (
+        VOLUME_INVERSE_RATIO_LOWER_BOUND
+        <= price_volume_product
+        <= VOLUME_INVERSE_RATIO_UPPER_BOUND
+    )
+
+
+def _has_incompatible_adjacent_scale(
+    cached_frame: pandas.DataFrame,
+    downloaded_frame: pandas.DataFrame,
+) -> bool:
+    """Return whether the cache/download boundary looks like a split splice."""
+    required_columns = {"close", "volume"}
+    if (
+        not required_columns.issubset(cached_frame.columns)
+        or not required_columns.issubset(downloaded_frame.columns)
+        or cached_frame.empty
+        or downloaded_frame.empty
+    ):
+        return False
+    last_cached_row = cached_frame.sort_index().iloc[-1]
+    first_downloaded_row = downloaded_frame.sort_index().iloc[0]
+    price_ratio = _safe_ratio(
+        first_downloaded_row["close"],
+        last_cached_row["close"],
+    )
+    if not _is_large_price_scale_ratio(price_ratio):
+        return False
+    volume_ratio = _safe_ratio(
+        first_downloaded_row["volume"],
+        last_cached_row["volume"],
+    )
+    if volume_ratio is None or price_ratio is None:
+        return False
+    price_volume_product = price_ratio * volume_ratio
+    return (
+        VOLUME_INVERSE_RATIO_LOWER_BOUND
+        <= price_volume_product
+        <= VOLUME_INVERSE_RATIO_UPPER_BOUND
+    )
+
+
+def _download_and_normalize_history(
+    symbol: str,
+    start: str,
+    end: str,
+    download_options: dict[str, Any],
+) -> pandas.DataFrame:
+    """Download one Yahoo history range and normalize the column names."""
+    downloaded_frame = yfinance.download(
+        symbol,
+        start=start,
+        end=end,
+        progress=False,
+        **download_options,
+    )
+    return _normalize_columns(downloaded_frame)
+
+
+def _save_cache_frame(frame: pandas.DataFrame, cache_path: Path | None) -> None:
+    """Write ``frame`` to ``cache_path`` when caching is enabled."""
+    if cache_path is None:
+        return
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_csv(cache_path)
 
 
 def download_history(
@@ -78,17 +216,25 @@ def download_history(
     """
     from .symbols import load_symbols, SP500_SYMBOL
 
+    requested_start = start
     available_symbol_list = load_symbols()
-    if available_symbol_list and symbol not in available_symbol_list and symbol != SP500_SYMBOL:
+    if (
+        available_symbol_list
+        and symbol not in available_symbol_list
+        and symbol != SP500_SYMBOL
+    ):
         LOGGER.warning(
-            "Symbol %s is not in the local cache; attempting download from Yahoo Finance anyway",
+            "Symbol %s is not in the local cache; attempting download from "
+            "Yahoo Finance anyway",
             symbol,
         )
 
     cached_frame = pandas.DataFrame()
     if cache_path is not None and cache_path.exists():
         cached_frame = pandas.read_csv(cache_path, index_col=0, parse_dates=True)
+    original_cached_frame = cached_frame.copy()
     cached_frame_before_refresh: pandas.DataFrame | None = None
+    cached_frame_before_download = pandas.DataFrame()
 
     if "auto_adjust" not in download_options:
         download_options["auto_adjust"] = True
@@ -111,6 +257,7 @@ def download_history(
                 )
                 earlier_frame = _normalize_columns(earlier_frame)
                 cached_frame = pandas.concat([earlier_frame, cached_frame]).sort_index()
+                original_cached_frame = cached_frame.copy()
             except Exception as download_error:  # noqa: BLE001
                 LOGGER.warning(
                     "Failed to download missing history for %s: %s",
@@ -128,6 +275,7 @@ def download_history(
             cached_frame = cached_frame.loc[
                 cached_frame.index < refresh_start_timestamp
             ]
+            cached_frame_before_download = cached_frame.copy()
             start = refresh_start_timestamp.strftime("%Y-%m-%d")
         else:
             next_download_date = cached_frame.index.max() + pandas.Timedelta(days=1)
@@ -135,23 +283,20 @@ def download_history(
             # missing date is exactly equal to the requested end date, the cache is
             # already complete for the requested half-open date range.
             if next_download_date >= requested_end_timestamp:
-                if cache_path is not None:
-                    cache_path.parent.mkdir(parents=True, exist_ok=True)
-                    cached_frame.to_csv(cache_path)
+                _save_cache_frame(cached_frame, cache_path)
                 return cached_frame
+            cached_frame_before_download = cached_frame.copy()
             start = next_download_date.strftime("%Y-%m-%d")
 
     maximum_attempts = 3
     for attempt_number in range(1, maximum_attempts + 1):
         try:
-            downloaded_frame = yfinance.download(
+            downloaded_frame = _download_and_normalize_history(
                 symbol,
-                start=start,
-                end=end,
-                progress=False,
-                **download_options,
+                start,
+                end,
+                download_options,
             )
-            downloaded_frame = _normalize_columns(downloaded_frame)
             if (
                 downloaded_frame.empty
                 and refresh_lookback_days is not None
@@ -159,13 +304,66 @@ def download_history(
                 and not cached_frame_before_refresh.empty
             ):
                 LOGGER.warning(
-                    "Yahoo returned no refreshed data for %s; preserving existing cache",
+                    "Yahoo returned no refreshed data for %s; preserving "
+                    "existing cache",
                     symbol,
                 )
-                if cache_path is not None:
-                    cache_path.parent.mkdir(parents=True, exist_ok=True)
-                    cached_frame_before_refresh.to_csv(cache_path)
+                _save_cache_frame(cached_frame_before_refresh, cache_path)
                 return cached_frame_before_refresh
+            if (
+                cached_frame_before_refresh is not None
+                and not downloaded_frame.empty
+                and _has_incompatible_overlap_scale(
+                    cached_frame_before_refresh,
+                    downloaded_frame,
+                )
+            ):
+                LOGGER.warning(
+                    "Detected incompatible adjusted price scale for %s; "
+                    "redownloading full requested history from %s",
+                    symbol,
+                    requested_start,
+                )
+                downloaded_frame = _download_and_normalize_history(
+                    symbol,
+                    requested_start,
+                    end,
+                    download_options,
+                )
+                if downloaded_frame.empty and not original_cached_frame.empty:
+                    LOGGER.warning(
+                        "Yahoo returned no full refresh data for %s; "
+                        "preserving existing cache",
+                        symbol,
+                    )
+                    _save_cache_frame(original_cached_frame, cache_path)
+                    return original_cached_frame
+                cached_frame = pandas.DataFrame()
+            elif _has_incompatible_adjacent_scale(
+                cached_frame_before_download,
+                downloaded_frame,
+            ):
+                LOGGER.warning(
+                    "Detected split-like cache/download boundary for %s; "
+                    "redownloading full requested history from %s",
+                    symbol,
+                    requested_start,
+                )
+                downloaded_frame = _download_and_normalize_history(
+                    symbol,
+                    requested_start,
+                    end,
+                    download_options,
+                )
+                if downloaded_frame.empty and not original_cached_frame.empty:
+                    LOGGER.warning(
+                        "Yahoo returned no full refresh data for %s; "
+                        "preserving existing cache",
+                        symbol,
+                    )
+                    _save_cache_frame(original_cached_frame, cache_path)
+                    return original_cached_frame
+                cached_frame = pandas.DataFrame()
             if not cached_frame.empty:
                 downloaded_frame = (
                     pandas.concat([cached_frame, downloaded_frame]).sort_index()
@@ -173,9 +371,7 @@ def download_history(
             downloaded_frame = downloaded_frame.loc[
                 ~downloaded_frame.index.duplicated(keep="last")
             ]
-            if cache_path is not None:
-                cache_path.parent.mkdir(parents=True, exist_ok=True)
-                downloaded_frame.to_csv(cache_path)
+            _save_cache_frame(downloaded_frame, cache_path)
             return downloaded_frame
         except Exception as download_error:  # noqa: BLE001
             LOGGER.warning(

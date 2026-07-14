@@ -10,7 +10,7 @@ from typing import Any
 
 import pandas
 
-from stock_indicator import dashboard
+from stock_indicator import adaptive_tp_sl_virtual_trade_history, dashboard
 from stock_indicator.futu_trade_metadata import parse_futu_order_remark
 
 
@@ -86,6 +86,28 @@ class FakeTradeContext:
             columns=["order_id", "remark"],
         )
 
+    def order_list_query(
+        self,
+        trd_env: Any = None,
+    ) -> tuple[int, pandas.DataFrame]:
+        """Return non-terminal current broker orders only."""
+        current_orders = [
+            order
+            for order in self.orders
+            if order.get("code") and order.get("trd_side")
+        ]
+        return 0, pandas.DataFrame(
+            current_orders,
+            columns=[
+                "code",
+                "trd_side",
+                "order_status",
+                "order_type",
+                "order_id",
+                "remark",
+            ],
+        )
+
     def close(self) -> None:
         """Match the Futu context close contract."""
         self.is_closed = True
@@ -126,10 +148,13 @@ def _write_dashboard_fixture(
         "strategy_id=fish_head_vacuum_turn symbol=AAA\n"
         "[ENTRY_SIGNAL] bucket=fish_tail_explore "
         "strategy_id=fish_tail_blow_off_top symbol=BBB\n"
-        "accepted: [('AAA', 'fish_head_production')]\n"
-        "rejected: [('BBB', 'fish_tail_explore', 'bucket_cap')]\n"
-        "max_position_count=6 held_before_today=2 same_day_closes=0\n"
-        "[ROLLING_TP_SL_STATE] winners=20 losers=20 pending_rolling=0 closed_trades=40\n"
+        "tradable_candidates: [('AAA', 'fish_head_production')]\n"
+        "filtered_out: [('BBB', 'fish_tail_explore', 'symbol_seasoning')]\n"
+        "adaptive_tp_sl_virtual_open_trades_before_today=2 "
+        "adaptive_tp_sl_virtual_trades_closed_today=0\n"
+        "[ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_STATE] "
+        "winner_returns=20 loser_returns=20 pending_returns=0 "
+        "closed_trades=40\n"
         "[BUCKET_TP_SL] date=2026-05-15 bucket=fish_head_production "
         "strategy_id=fish_head_vacuum_turn tp_pct=0.074200 sl_pct=0.043400 "
         "rolling_mp=0.055000 rolling_ml=-0.030000 min_hold_tp=1 "
@@ -146,10 +171,10 @@ def _write_dashboard_fixture(
     return config_path, log_directory
 
 
-def test_parse_log_separates_raw_entries_from_accepted_buys(
+def test_parse_log_separates_raw_entries_from_tradable_candidates(
     tmp_path: Path,
 ) -> None:
-    """New cron logs should show raw entries without changing order inputs."""
+    """Cron should preserve bucket-aware tradable records for allocation."""
     _config_path, log_directory = _write_dashboard_fixture(
         tmp_path,
         signal_date="2026-05-15",
@@ -159,22 +184,21 @@ def test_parse_log_separates_raw_entries_from_accepted_buys(
     parsed_log = dashboard._parse_log(log_directory / "2026-05-15.log")
 
     assert parsed_log["entry_signals"] == ["AAA", "BBB"]
-    assert parsed_log["buy_actions"] == ["AAA"]
-    assert parsed_log["accepted_buy_actions"] == ["AAA"]
-    assert parsed_log["slot_allocation"]["accepted"] == [
+    assert parsed_log["tradable_entry_candidates"][0]["symbol"] == "AAA"
+    assert parsed_log["signal_candidate_summary"]["tradable"] == [
         {"symbol": "AAA", "bucket": "fish_head_production"}
     ]
-    assert parsed_log["slot_allocation"]["rejected"] == [
+    assert parsed_log["signal_candidate_summary"]["filtered_out"] == [
         {
             "symbol": "BBB",
             "bucket": "fish_tail_explore",
-            "reason": "bucket_cap",
+            "reason": "symbol_seasoning",
         }
     ]
-    assert parsed_log["rolling_tp_sl_state"] == {
-        "winners": 20,
-        "losers": 20,
-        "pending_rolling": 0,
+    assert parsed_log["adaptive_tp_sl_virtual_trade_history_state"] == {
+        "winner_returns": 20,
+        "loser_returns": 20,
+        "pending_returns": 0,
         "closed_trades": 40,
     }
     assert parsed_log["bucket_tp_sl"] == [
@@ -193,7 +217,7 @@ def test_parse_log_separates_raw_entries_from_accepted_buys(
             "reset_hold_on_reentry_signal": False,
         }
     ]
-    assert parsed_log["position_count"] == 3
+    assert parsed_log["adaptive_tp_sl_virtual_open_trade_count"] == 2
 
 
 def test_parse_log_uses_last_cron_run_when_log_was_appended(
@@ -205,8 +229,9 @@ def test_parse_log_uses_last_cron_run_when_log_was_appended(
     log_path.write_text(
         "[multi_bucket_daily_signal mode=live state=adaptive_state.json]\n"
         "[multi_bucket_daily_signal] eval_date=2026-06-19\n"
-        "accepted: [('OLD', 'fish_head_production')]\n"
-        "max_position_count=7 held_before_today=1 same_day_closes=0\n"
+        "tradable_candidates: [('OLD', 'fish_head_production')]\n"
+        "adaptive_tp_sl_virtual_open_trades_before_today=1 "
+        "adaptive_tp_sl_virtual_trades_closed_today=0\n"
         "[BUCKET_TP_SL] date=2026-06-19 bucket=fish_head_production "
         "strategy_id=fish_head_vacuum_turn tp_pct=0.010000 sl_pct=0.020000 "
         "rolling_mp=0.010000 rolling_ml=-0.020000 min_hold_tp=1 "
@@ -214,8 +239,9 @@ def test_parse_log_uses_last_cron_run_when_log_was_appended(
         "reset_hold_on_reentry_signal=False\n"
         "[multi_bucket_daily_signal mode=live state=adaptive_state.json]\n"
         "[multi_bucket_daily_signal] eval_date=2026-06-19\n"
-        "accepted: []\n"
-        "max_position_count=7 held_before_today=8 same_day_closes=0\n"
+        "tradable_candidates: []\n"
+        "adaptive_tp_sl_virtual_open_trades_before_today=8 "
+        "adaptive_tp_sl_virtual_trades_closed_today=0\n"
         "[BUCKET_TP_SL] date=2026-06-19 bucket=fish_head_production "
         "strategy_id=fish_head_vacuum_turn tp_pct=0.060502 sl_pct=0.037015 "
         "rolling_mp=0.034519 rolling_ml=0.037015 min_hold_tp=1 "
@@ -226,8 +252,8 @@ def test_parse_log_uses_last_cron_run_when_log_was_appended(
 
     parsed_log = dashboard._parse_log(log_path)
 
-    assert parsed_log["slot_allocation"]["accepted"] == []
-    assert parsed_log["position_count"] == 8
+    assert parsed_log["signal_candidate_summary"]["tradable"] == []
+    assert parsed_log["adaptive_tp_sl_virtual_open_trade_count"] == 8
     assert parsed_log["bucket_tp_sl"] == [
         {
             "date": "2026-06-19",
@@ -378,6 +404,45 @@ def test_preview_orders_allows_buy_orders_when_risk_score_is_below_stop(
     assert order["symbol"] == "AAA"
     assert order["qty"] == 250
     assert "status" not in order
+
+
+def test_preview_does_not_duplicate_pending_broker_buy(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A submitted BUY must consume a slot and disappear from fresh preview."""
+    config_path, log_directory = _write_dashboard_fixture(
+        tmp_path,
+        signal_date="2026-05-15",
+        risk_score=50,
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: FakeTradeContext(
+            orders=[
+                {
+                    "code": "US.AAA",
+                    "trd_side": "BUY",
+                    "order_status": "SUBMITTED",
+                    "order_type": "MARKET",
+                    "order_id": "pending-buy",
+                    "remark": "",
+                }
+            ]
+        ),
+    )
+
+    preview = dashboard.api_preview_orders()
+
+    assert preview["orders"] == []
+    assert preview["pending_buy_count"] == 1
 
 
 def test_futu_positions_include_bucket_metadata(monkeypatch) -> None:
@@ -637,6 +702,343 @@ def test_preview_orders_blocks_buy_when_live_bucket_is_at_cap(
     ]
 
 
+def test_preview_orders_backfills_lower_priority_candidate_after_bucket_cap(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A broker-blocked high candidate must not erase the next candidate."""
+    signal_date = "2026-07-10"
+    config_path = tmp_path / "multi_bucket_production.json"
+    risk_score_path = tmp_path / "historical_risk_scores.csv"
+    log_directory = tmp_path / "logs"
+    log_directory.mkdir()
+    config_path.write_text(
+        json.dumps({
+            "max_position_count": 2,
+            "risk_score_gate": {
+                "csv_path": "historical_risk_scores.csv",
+                "stop_threshold": 75,
+            },
+            "buckets": [
+                {
+                    "label": "fish_head_production",
+                    "strategy_id": "fish_head_vacuum_turn",
+                    "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                    "priority": 1,
+                    "max_positions": 1,
+                },
+                {
+                    "label": "fish_tail_production",
+                    "strategy_id": "fish_tail_blow_off_top",
+                    "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                    "priority": 2,
+                    "max_positions": 2,
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+    risk_score_path.write_text(
+        "year_month,risk_score\n2026-07,0\n",
+        encoding="utf-8",
+    )
+    (log_directory / f"{signal_date}.log").write_text(
+        "[FROZEN_TP_SL] entry_date=2026-07-10 "
+        "bucket=fish_head_production strategy_id=fish_head_vacuum_turn "
+        "symbol=HIGH dollar_volume_rank=0 tp_pct=0.050000 sl_pct=0.030000 "
+        "min_hold_sl=1 disable_sl_trigger=True "
+        "reset_hold_on_reentry_signal=False\n"
+        "[FROZEN_TP_SL] entry_date=2026-07-10 "
+        "bucket=fish_tail_production strategy_id=fish_tail_blow_off_top "
+        "symbol=LOW dollar_volume_rank=0 tp_pct=0.060000 sl_pct=0.030000 "
+        "min_hold_sl=1 disable_sl_trigger=True max_hold=7 "
+        "reset_hold_on_reentry_signal=False\n",
+        encoding="utf-8",
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: FakeTradeContext(
+            positions=[{"code": "US.HELD", "qty": 1}],
+            deals=[{
+                "code": "US.HELD",
+                "trd_side": "BUY",
+                "qty": 1,
+                "create_time": "2026-07-01 09:30:00",
+                "order_id": "held-buy",
+            }],
+            orders=[{
+                "order_id": "held-buy",
+                "remark": "si2|s=h|tp=500|sl=300|ms=1|ds=1|rr=0",
+            }],
+        ),
+    )
+
+    preview = dashboard.api_preview_orders()
+    buy_orders = [
+        order for order in preview["orders"] if order["side"] == "BUY"
+    ]
+
+    assert buy_orders[0]["symbol"] == "HIGH"
+    assert buy_orders[0]["status"] == "bucket_cap"
+    assert buy_orders[1]["symbol"] == "LOW"
+    assert "status" not in buy_orders[1]
+
+
+def test_pending_buy_counts_toward_its_bucket_and_allows_backfill(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A pending BUY must reserve both its global slot and bucket slot."""
+    signal_date = "2026-07-10"
+    config_path = tmp_path / "multi_bucket_production.json"
+    risk_score_path = tmp_path / "historical_risk_scores.csv"
+    log_directory = tmp_path / "logs"
+    log_directory.mkdir()
+    config_path.write_text(
+        json.dumps({
+            "max_position_count": 2,
+            "risk_score_gate": {
+                "csv_path": "historical_risk_scores.csv",
+                "stop_threshold": 75,
+            },
+            "buckets": [
+                {
+                    "label": "fish_head_production",
+                    "strategy_id": "fish_head_vacuum_turn",
+                    "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                    "priority": 1,
+                    "max_positions": 1,
+                },
+                {
+                    "label": "fish_tail_production",
+                    "strategy_id": "fish_tail_blow_off_top",
+                    "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                    "priority": 2,
+                    "max_positions": 2,
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+    risk_score_path.write_text(
+        "year_month,risk_score\n2026-07,0\n",
+        encoding="utf-8",
+    )
+    (log_directory / f"{signal_date}.log").write_text(
+        "[FROZEN_TP_SL] entry_date=2026-07-10 "
+        "bucket=fish_head_production strategy_id=fish_head_vacuum_turn "
+        "symbol=HIGH dollar_volume_rank=0 tp_pct=0.050000 sl_pct=0.030000 "
+        "min_hold_sl=1 disable_sl_trigger=True "
+        "reset_hold_on_reentry_signal=False\n"
+        "[FROZEN_TP_SL] entry_date=2026-07-10 "
+        "bucket=fish_tail_production strategy_id=fish_tail_blow_off_top "
+        "symbol=LOW dollar_volume_rank=0 tp_pct=0.060000 sl_pct=0.030000 "
+        "min_hold_sl=1 disable_sl_trigger=True max_hold=7 "
+        "reset_hold_on_reentry_signal=False\n",
+        encoding="utf-8",
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: FakeTradeContext(orders=[{
+            "code": "US.PENDING",
+            "trd_side": "BUY",
+            "order_status": "SUBMITTING",
+            "order_type": "MARKET",
+            "order_id": "pending-buy",
+            "remark": "si2|s=h|tp=500|sl=300|ms=1|ds=1|rr=0",
+        }]),
+    )
+
+    preview = dashboard.api_preview_orders()
+    buy_orders = [
+        order for order in preview["orders"] if order["side"] == "BUY"
+    ]
+
+    assert preview["pending_buy_count"] == 1
+    assert buy_orders[0]["symbol"] == "HIGH"
+    assert buy_orders[0]["status"] == "bucket_cap"
+    assert buy_orders[1]["symbol"] == "LOW"
+    assert "status" not in buy_orders[1]
+
+
+def test_preview_orders_resolves_same_symbol_competition_by_bucket_priority(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Two bucket signals for one symbol should produce one winning BUY."""
+    signal_date = "2026-07-10"
+    config_path = tmp_path / "multi_bucket_production.json"
+    risk_score_path = tmp_path / "historical_risk_scores.csv"
+    log_directory = tmp_path / "logs"
+    log_directory.mkdir()
+    config_path.write_text(
+        json.dumps({
+            "max_position_count": 2,
+            "max_same_symbol": 1,
+            "risk_score_gate": {
+                "csv_path": "historical_risk_scores.csv",
+                "stop_threshold": 75,
+            },
+            "buckets": [
+                {
+                    "label": "fish_tail_squeeze",
+                    "strategy_id": "fish_tail_blow_off_top",
+                    "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                    "priority": 1,
+                    "max_positions": 2,
+                    "max_hold": 7,
+                },
+                {
+                    "label": "fish_tail_production",
+                    "strategy_id": "fish_tail_blow_off_top",
+                    "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                    "priority": 2,
+                    "max_positions": 2,
+                    "max_hold": 7,
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+    risk_score_path.write_text(
+        "year_month,risk_score\n2026-07,0\n",
+        encoding="utf-8",
+    )
+    (log_directory / f"{signal_date}.log").write_text(
+        "[FROZEN_TP_SL] entry_date=2026-07-10 "
+        "bucket=fish_tail_production strategy_id=fish_tail_blow_off_top "
+        "symbol=DUAL dollar_volume_rank=0 tp_pct=0.040000 sl_pct=0.030000 "
+        "min_hold_sl=1 disable_sl_trigger=True max_hold=7 "
+        "reset_hold_on_reentry_signal=False\n"
+        "[FROZEN_TP_SL] entry_date=2026-07-10 "
+        "bucket=fish_tail_squeeze strategy_id=fish_tail_blow_off_top "
+        "symbol=DUAL dollar_volume_rank=0 tp_pct=0.070000 sl_pct=0.030000 "
+        "min_hold_sl=1 disable_sl_trigger=True max_hold=7 "
+        "reset_hold_on_reentry_signal=False\n",
+        encoding="utf-8",
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+
+    preview = dashboard.api_preview_orders()
+    buy_orders = [
+        order for order in preview["orders"] if order["side"] == "BUY"
+    ]
+
+    assert len(buy_orders) == 1
+    assert buy_orders[0]["symbol"] == "DUAL"
+    assert buy_orders[0]["bucket"] == "fish_tail_squeeze"
+    assert buy_orders[0]["tp_pct"] == 0.07
+    assert parse_futu_order_remark(
+        dashboard._format_dashboard_order_remark(buy_orders[0])
+    )["bucket"] == "fish_tail_squeeze"
+
+
+def test_preview_orders_applies_risk_score_priority_override_in_dashboard(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Current risk-score settings, not log order, should choose the slot."""
+    signal_date = "2026-07-10"
+    config_path = tmp_path / "multi_bucket_production.json"
+    risk_score_path = tmp_path / "historical_risk_scores.csv"
+    log_directory = tmp_path / "logs"
+    log_directory.mkdir()
+    config_path.write_text(
+        json.dumps({
+            "max_position_count": 1,
+            "risk_score_gate": {
+                "csv_path": "historical_risk_scores.csv",
+                "stop_threshold": 75,
+            },
+            "risk_score_priority_overrides": {
+                "scores": [25],
+                "priorities": {
+                    "fish_head_production": 2,
+                    "fish_tail_production": 1,
+                },
+            },
+            "buckets": [
+                {
+                    "label": "fish_head_production",
+                    "strategy_id": "fish_head_vacuum_turn",
+                    "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                    "priority": 1,
+                },
+                {
+                    "label": "fish_tail_production",
+                    "strategy_id": "fish_tail_blow_off_top",
+                    "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                    "priority": 2,
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+    risk_score_path.write_text(
+        "year_month,risk_score\n2026-07,25\n",
+        encoding="utf-8",
+    )
+    (log_directory / f"{signal_date}.log").write_text(
+        "[FROZEN_TP_SL] entry_date=2026-07-10 "
+        "bucket=fish_head_production strategy_id=fish_head_vacuum_turn "
+        "symbol=HEAD dollar_volume_rank=0 tp_pct=0.050000 sl_pct=0.030000 "
+        "min_hold_sl=1 disable_sl_trigger=True "
+        "reset_hold_on_reentry_signal=False\n"
+        "[FROZEN_TP_SL] entry_date=2026-07-10 "
+        "bucket=fish_tail_production strategy_id=fish_tail_blow_off_top "
+        "symbol=TAIL dollar_volume_rank=9 tp_pct=0.060000 sl_pct=0.030000 "
+        "min_hold_sl=1 disable_sl_trigger=True max_hold=7 "
+        "reset_hold_on_reentry_signal=False\n",
+        encoding="utf-8",
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+
+    preview = dashboard.api_preview_orders()
+    buy_orders = [
+        order for order in preview["orders"] if order["side"] == "BUY"
+    ]
+
+    assert buy_orders[0]["symbol"] == "TAIL"
+    assert "status" not in buy_orders[0]
+    assert buy_orders[1]["symbol"] == "HEAD"
+    assert buy_orders[1]["status"] == "slot_full"
+
+
+def test_dashboard_contract_names_virtual_history_as_statistical_state() -> None:
+    """The UI contract must not describe adaptive history as a portfolio."""
+
+    contract = dashboard._build_cron_dashboard_contract()
+    serialized_contract = json.dumps(contract)
+
+    assert "ADAPTIVE TP/SL virtual trade history" in serialized_contract
+    assert "statistical" in serialized_contract
+    assert "virtual portfolio" not in serialized_contract.lower()
+
+
 def test_dashboard_buy_remark_uses_compact_v2_schema() -> None:
     """BUY remarks should fit Futu limits and round-trip live metadata."""
     order = {
@@ -791,6 +1193,114 @@ def test_preview_orders_adds_max_hold_sell_order(
             "exit_reason": "max_hold",
             "bars_held": 11,
             "max_hold": 10,
+            "entry_source": "futu_history_deals",
+        }
+    ]
+
+
+def test_preview_orders_fills_missing_fish_head_max_hold_from_config(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Current bucket config should repair old fish-head remarks missing mh."""
+    config_path, log_directory = _write_dashboard_fixture(
+        tmp_path,
+        signal_date="2026-07-01",
+        risk_score=50,
+    )
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 6,
+                "starting_cash": 60_000,
+                "margin": 1.5,
+                "withdraw": 0,
+                "risk_score_gate": {
+                    "csv_path": "historical_risk_scores.csv",
+                    "stop_threshold": 75,
+                },
+                "buckets": [
+                    {
+                        "label": "fish_head_production",
+                        "strategy_id": "fish_head_vacuum_turn",
+                        "dollar_volume_filter": (
+                            "dollar_volume>0.02%,Top500,Pick5"
+                        ),
+                        "max_hold": 14,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_load_us_trading_days",
+        lambda start_date_text, end_date_text: [
+            "2026-06-10",
+            "2026-06-11",
+            "2026-06-12",
+            "2026-06-15",
+            "2026-06-16",
+            "2026-06-17",
+            "2026-06-18",
+            "2026-06-22",
+            "2026-06-23",
+            "2026-06-24",
+            "2026-06-25",
+            "2026-06-26",
+            "2026-06-29",
+            "2026-06-30",
+            "2026-07-01",
+        ],
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: FakeTradeContext(
+            positions=[{"code": "US.LYB", "qty": 75}],
+            deals=[
+                {
+                    "code": "US.LYB",
+                    "trd_side": "BUY",
+                    "qty": 75,
+                    "create_time": "2026-06-10 09:30:00",
+                    "order_id": "201",
+                }
+            ],
+            orders=[
+                {
+                    "order_id": "201",
+                    "remark": "si2|s=h|tp=628|sl=248|ms=1|ds=1|rr=0",
+                }
+            ],
+        ),
+    )
+
+    preview = dashboard.api_preview_orders()
+
+    max_hold_orders = [
+        order for order in preview["orders"]
+        if order.get("exit_reason") == "max_hold"
+    ]
+    assert max_hold_orders == [
+        {
+            "side": "SELL",
+            "symbol": "LYB",
+            "qty": 75,
+            "price": 10.0,
+            "order_type": "MARKET",
+            "bucket": "fish_head_production",
+            "strategy_id": "fish_head_vacuum_turn",
+            "exit_reason": "max_hold",
+            "bars_held": 14,
+            "max_hold": 14,
             "entry_source": "futu_history_deals",
         }
     ]
@@ -969,11 +1479,28 @@ def test_current_bucket_tp_sl_uses_config_sigma_not_stale_frozen_log(
         lambda: {},
     )
     adaptive_state = {
-        "winners": [0.03, 0.05, 0.07, 0.09, 0.11],
-        "losers": [-0.02, -0.03, -0.04],
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_KEY: {
+            "schema_version": 1,
+            adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_WINNER_RETURNS_KEY: [
+                0.03,
+                0.05,
+                0.07,
+                0.09,
+                0.11,
+            ],
+            adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_LOSER_RETURNS_KEY: [
+                -0.02,
+                -0.03,
+                -0.04,
+            ],
+        }
     }
 
-    bucket_states = dashboard._load_current_bucket_tp_sl(adaptive_state)
+    bucket_states = (
+        dashboard._load_current_bucket_tp_sl_from_adaptive_tp_sl_virtual_trade_history(
+            adaptive_state
+        )
+    )
     tp_by_bucket = {state["bucket"]: state["tp_pct"] for state in bucket_states}
 
     assert tp_by_bucket["fish_head_production"] > tp_by_bucket["fish_tail_explore"]
@@ -1120,6 +1647,181 @@ def test_preview_orders_allows_sell_when_min_hold_satisfied(
     assert passed_order["exit_reason"] == "signal"
 
 
+def test_preview_orders_sells_broker_symbol_after_strategy_symbol_rename(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A SATS signal exit should sell the renamed ECHO broker position."""
+    config_path, log_directory = _write_min_hold_fixture(
+        tmp_path,
+        signal_date="2026-06-26",
+        held_symbol="SATS",
+        min_hold=1,
+    )
+    (tmp_path / "symbol_rename_map.csv").write_text(
+        "strategy_symbol,broker_symbol\nSATS,ECHO\n",
+        encoding="utf-8",
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_load_us_trading_days",
+        lambda start_date_text, end_date_text: [
+            "2026-06-22",
+            "2026-06-23",
+            "2026-06-24",
+            "2026-06-25",
+            "2026-06-26",
+        ],
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: FakeTradeContext(
+            positions=[{"code": "US.ECHO", "qty": 9}],
+            deals=[
+                {
+                    "code": "US.SATS",
+                    "trd_side": "BUY",
+                    "qty": 9,
+                    "create_time": "2026-06-22 09:30:00",
+                    "order_id": "31",
+                }
+            ],
+            orders=[],
+        ),
+    )
+
+    preview = dashboard.api_preview_orders()
+    sell_orders = [
+        order for order in preview["orders"] if order["side"] == "SELL"
+    ]
+
+    assert sell_orders == [
+        {
+            "side": "SELL",
+            "symbol": "ECHO",
+            "qty": 9,
+            "price": 10.0,
+            "order_type": "MARKET",
+            "exit_reason": "signal",
+            "signal_symbol": "SATS",
+        }
+    ]
+
+
+def test_preview_orders_max_hold_uses_renamed_broker_symbol(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Max-hold should match a SATS buy history to the live ECHO position."""
+    config_path, log_directory = _write_dashboard_fixture(
+        tmp_path,
+        signal_date="2026-06-26",
+        risk_score=50,
+    )
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 6,
+                "risk_score_gate": {
+                    "csv_path": "historical_risk_scores.csv",
+                    "stop_threshold": 75,
+                },
+                "buckets": [
+                    {
+                        "label": "fish_head_production",
+                        "strategy_id": "fish_head_vacuum_turn",
+                        "dollar_volume_filter": (
+                            "dollar_volume>0.02%,Top500,Pick5"
+                        ),
+                        "max_hold": 2,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (log_directory / "2026-06-26.log").write_text(
+        "[multi_bucket_daily_signal mode=live state=adaptive_state.json]\n"
+        "[multi_bucket_daily_signal] eval_date=2026-06-26\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "symbol_rename_map.csv").write_text(
+        "strategy_symbol,broker_symbol\nSATS,ECHO\n",
+        encoding="utf-8",
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_load_us_trading_days",
+        lambda start_date_text, end_date_text: [
+            "2026-06-22",
+            "2026-06-23",
+            "2026-06-24",
+            "2026-06-25",
+            "2026-06-26",
+        ],
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: FakeTradeContext(
+            positions=[{"code": "US.ECHO", "qty": 5}],
+            deals=[
+                {
+                    "code": "US.SATS",
+                    "trd_side": "BUY",
+                    "qty": 5,
+                    "create_time": "2026-06-22 09:30:00",
+                    "order_id": "41",
+                }
+            ],
+            orders=[
+                {
+                    "order_id": "41",
+                    "remark": (
+                        "si|sid=fish_head_vacuum_turn|"
+                        "b=fish_head_production|mh=2|rr=0"
+                    ),
+                }
+            ],
+        ),
+    )
+
+    preview = dashboard.api_preview_orders()
+    max_hold_orders = [
+        order for order in preview["orders"]
+        if order.get("exit_reason") == "max_hold"
+    ]
+
+    assert max_hold_orders == [
+        {
+            "side": "SELL",
+            "symbol": "ECHO",
+            "qty": 5,
+            "price": 10.0,
+            "order_type": "MARKET",
+            "bucket": "fish_head_production",
+            "strategy_id": "fish_head_vacuum_turn",
+            "exit_reason": "max_hold",
+            "bars_held": 4,
+            "max_hold": 2,
+            "entry_source": "futu_history_deals",
+        }
+    ]
+
+
 def test_cron_dashboard_contract_names_layer_ownership() -> None:
     """Dashboard should expose a plain-language source-of-truth contract."""
     communication_contract = dashboard._build_cron_dashboard_contract()
@@ -1148,7 +1850,7 @@ def _write_phantom_csv(
     rows: list[tuple[str, float, float, float]],
 ) -> None:
     """Write a per-symbol daily CSV (Date,open,high,low) compatible with
-    both _read_open_price and compute_adaptive_ft_close."""
+    both _read_open_price and compute_adaptive_tp_sl_virtual_trade_close_for_wr_gate."""
     data_directory.mkdir(parents=True, exist_ok=True)
     lines = ["Date,open,high,low"]
     for date_text, open_price, high_price, low_price in rows:
@@ -1204,10 +1906,13 @@ def _write_phantom_fixture(
     (log_directory / f"{signal_date}.log").write_text(
         f"[ENTRY_SIGNAL] bucket=fish_tail_production "
         f"strategy_id=fish_tail_blow_off_top symbol={symbol}\n"
-        f"accepted: [('{symbol}', 'fish_tail_production')]\n"
-        "rejected: []\n"
-        "max_position_count=6 held_before_today=0 same_day_closes=0\n"
-        "[ROLLING_TP_SL_STATE] winners=20 losers=20 pending_rolling=0 closed_trades=40\n"
+        f"tradable_candidates: [('{symbol}', 'fish_tail_production')]\n"
+        "filtered_out: []\n"
+        "adaptive_tp_sl_virtual_open_trades_before_today=0 "
+        "adaptive_tp_sl_virtual_trades_closed_today=0\n"
+        "[ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_STATE] "
+        "winner_returns=20 loser_returns=20 pending_returns=0 "
+        "closed_trades=40\n"
         "[WR_GATE_SENSOR] ema=0.4800 sma=0.6000 breakeven=0.4500 "
         f"degrading={wr_degrading} window=12/12 window_full=True "
         "open_pending=1 fed_this_run=0\n"
@@ -1487,6 +2192,11 @@ def test_execute_records_phantom_and_places_no_order(
             }
         ]
     )
+    monkeypatch.setattr(
+        dashboard,
+        "api_preview_orders",
+        lambda: {"orders": [dict(request.orders[0])]},
+    )
     response = dashboard.api_execute_orders(request)
 
     assert placed == []  # no real order placed for a phantom
@@ -1496,3 +2206,134 @@ def test_execute_records_phantom_and_places_no_order(
     # Re-executing the same phantom must not double-book the slot.
     dashboard.api_execute_orders(request)
     assert len(dashboard._load_phantom_positions()) == 1
+
+
+# TODO: review
+def test_successful_dashboard_buy_does_not_write_adaptive_tp_sl_history(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Real execution must not admit or reconcile statistical observations."""
+
+    log_directory = tmp_path / "logs"
+    log_directory.mkdir()
+    (log_directory / "2026-05-15.log").write_text(
+        "[multi_bucket_daily_signal] eval_date=2026-05-15\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "multi_bucket_production.json"
+    config_path.write_text(
+        json.dumps({"max_position_count": 6}),
+        encoding="utf-8",
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    _patch_phantom_paths(monkeypatch, tmp_path)
+
+    adaptive_state_path = (
+        tmp_path / "live_state" / "adaptive_state.json"
+    )
+    original_adaptive_state_text = json.dumps({
+        "schema_version": 2,
+        "adaptive_tp_sl_virtual_trade_history": {
+            "schema_version": 1,
+            "open_trades": [{"symbol": "REFERENCE_ONLY"}],
+            "closed_trades": [],
+            "pending_returns": [],
+            "winner_returns": [],
+            "loser_returns": [],
+            "raw_returns": [],
+        },
+    })
+    adaptive_state_path.write_text(
+        original_adaptive_state_text,
+        encoding="utf-8",
+    )
+
+    placed_orders: list[dict[str, Any]] = []
+
+    class SuccessfulBuyTradeContext(FakeTradeContext):
+        """Record one successful market BUY for boundary verification."""
+
+        def place_order(self, **order_arguments: Any):
+            placed_orders.append(order_arguments)
+            return 0, pandas.DataFrame([{"order_id": "BUY-1"}])
+
+    futu_module = types.SimpleNamespace(
+        TrdSide=types.SimpleNamespace(BUY="BUY", SELL="SELL"),
+        OrderType=types.SimpleNamespace(MARKET="MARKET"),
+        ModifyOrderOp=types.SimpleNamespace(CANCEL="CANCEL"),
+    )
+    monkeypatch.setitem(sys.modules, "futu", futu_module)
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: SuccessfulBuyTradeContext(),
+    )
+    monkeypatch.setattr(dashboard, "_get_trd_env", lambda: object())
+    monkeypatch.setattr(
+        dashboard,
+        "_load_risk_score_gate_state",
+        lambda signal_date_text: {"status": "open"},
+    )
+
+    canonical_buy_order = {
+        "side": "BUY",
+        "symbol": "REALBUY",
+        "signal_symbol": "REALBUY",
+        "qty": 1,
+        "bucket": "fish_head_production",
+        "strategy_id": "fish_head_vacuum_turn",
+        "tp_pct": 0.05,
+        "sl_pct": 0.03,
+        "min_hold_sl": 1,
+        "disable_sl_trigger": True,
+        "reset_hold_on_reentry_signal": False,
+    }
+    monkeypatch.setattr(
+        dashboard,
+        "api_preview_orders",
+        lambda: {"orders": [dict(canonical_buy_order)]},
+    )
+
+    response = dashboard.api_execute_orders(
+        dashboard.ExecuteRequest(orders=[dict(canonical_buy_order)])
+    )
+
+    assert response["results"][0]["status"] == "sent", response
+    assert len(placed_orders) == 1
+    assert adaptive_state_path.read_text(
+        encoding="utf-8"
+    ) == original_adaptive_state_text
+
+
+def test_execute_rejects_order_not_in_fresh_server_preview(monkeypatch) -> None:
+    """Arbitrary client JSON must never reach the Futu trade context."""
+    context_created = False
+
+    def create_trade_context() -> Any:
+        nonlocal context_created
+        context_created = True
+        return FakeTradeContext()
+
+    monkeypatch.setattr(dashboard, "_get_futu_trd_ctx", create_trade_context)
+    monkeypatch.setattr(dashboard, "api_preview_orders", lambda: {"orders": []})
+
+    response = dashboard.api_execute_orders(
+        dashboard.ExecuteRequest(
+            orders=[{"side": "BUY", "symbol": "ARBITRARY", "qty": 999999}]
+        )
+    )
+
+    assert context_created is False
+    assert response["results"] == [
+        {
+            "symbol": "ARBITRARY",
+            "status": "rejected",
+            "reason": "order is not present in the current server preview",
+        }
+    ]

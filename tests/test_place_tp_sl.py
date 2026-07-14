@@ -42,7 +42,14 @@ class FakeTradeContext:
         """Return deterministic open orders."""
         return 0, pandas.DataFrame(
             self.orders,
-            columns=["code", "trd_side", "order_status", "order_type"],
+            columns=[
+                "code",
+                "trd_side",
+                "order_status",
+                "order_type",
+                "qty",
+                "dealt_qty",
+            ],
         )
 
     def history_deal_list_query(
@@ -155,12 +162,16 @@ def test_place_tp_sl_does_not_duplicate_existing_orders(
                 "trd_side": "SELL",
                 "order_status": "SUBMITTED",
                 "order_type": "NORMAL",
+                "qty": 10,
+                "dealt_qty": 0,
             },
             {
                 "code": "US.HELD",
                 "trd_side": "SELL",
                 "order_status": "SUBMITTED",
                 "order_type": "STOP",
+                "qty": 10,
+                "dealt_qty": 0,
             },
         ],
         historical_deals=[
@@ -185,6 +196,52 @@ def test_place_tp_sl_does_not_duplicate_existing_orders(
     place_tp_sl.main()
 
     assert fake_context.placed_orders == []
+
+
+def test_place_tp_sl_covers_quantity_filled_after_first_partial_fill(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A TP for an early partial fill must not hide later uncovered shares."""
+    (tmp_path / "2026-05-18.log").write_text(
+        "[FROZEN_TP_SL] entry_date=2026-05-18 "
+        "bucket=fish_tail_explore strategy_id=fish_tail_blow_off_top "
+        "symbol=PARTIAL tp_pct=0.05 sl_pct=0.03 "
+        "min_hold_sl=1 disable_sl_trigger=True\n",
+        encoding="utf-8",
+    )
+    fake_context = FakeTradeContext(
+        positions=[{"code": "US.PARTIAL", "qty": 10, "cost_price": 100.0}],
+        orders=[
+            {
+                "code": "US.PARTIAL",
+                "trd_side": "SELL",
+                "order_status": "SUBMITTED",
+                "order_type": "NORMAL",
+                "qty": 4,
+                "dealt_qty": 0,
+            }
+        ],
+        historical_deals=[
+            {
+                "code": "US.PARTIAL",
+                "trd_side": "BUY",
+                "qty": 10,
+                "create_time": "2026-05-18 09:30:00",
+                "order_id": "partial_buy",
+            }
+        ],
+        historical_orders=[{"order_id": "partial_buy", "remark": ""}],
+    )
+    _install_fake_futu_module(monkeypatch, fake_context)
+    monkeypatch.setattr(place_tp_sl, "LOGS_DIRECTORY", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["place_tp_sl"])
+
+    place_tp_sl.main()
+
+    assert len(fake_context.placed_orders) == 1
+    assert fake_context.placed_orders[0]["qty"] == 6
+    assert fake_context.placed_orders[0]["price"] == 105.0
 
 
 def test_place_tp_sl_does_not_use_local_accepted_entries(
@@ -334,10 +391,11 @@ def test_signal_metadata_can_match_futu_order_create_date() -> None:
     merged_entry = place_tp_sl._merge_production_signal_metadata(
         symbol="PEP",
         entry=open_entries["PEP"],
-        signal_entries_by_symbol_and_date={
+        signal_entries_by_symbol_date_and_bucket={
             (
                 "PEP",
                 "2026-05-15",
+                "fish_head_production",
             ): {
                 "symbol": "PEP",
                 "entry_date": "2026-05-15",
@@ -366,7 +424,7 @@ def test_signal_metadata_can_fallback_to_entry_date_bucket_snapshot() -> None:
             "bucket": "fish_head_production",
             "strategy_id": "fish_head_vacuum_turn",
         },
-        signal_entries_by_symbol_and_date={},
+        signal_entries_by_symbol_date_and_bucket={},
         bucket_tp_sl_entries_by_key_and_date={
             (
                 "fish_head_production",
@@ -400,7 +458,7 @@ def test_bucket_snapshot_walks_back_when_anchor_date_has_no_entry() -> None:
             "bucket": "fish_tail_explore",
             "strategy_id": "fish_tail_blow_off_top",
         },
-        signal_entries_by_symbol_and_date={},
+        signal_entries_by_symbol_date_and_bucket={},
         bucket_tp_sl_entries_by_key_and_date={
             (
                 "fish_tail_explore",
@@ -421,6 +479,97 @@ def test_bucket_snapshot_walks_back_when_anchor_date_has_no_entry() -> None:
     assert merged_entry["tp_pct"] == 0.0586
 
 
+def test_per_symbol_signal_walks_back_before_using_bucket_snapshot() -> None:
+    """A weekend-delayed fill keeps its frozen symbol-specific TP percent."""
+    merged_entry = place_tp_sl._merge_production_signal_metadata(
+        symbol="LIN",
+        entry={
+            "symbol": "LIN",
+            "entry_date": "2026-07-13",
+            "futu_buy_order_date": "2026-07-12",
+            "bucket": "fish_tail_production",
+            "strategy_id": "fish_tail_blow_off_top",
+        },
+        signal_entries_by_symbol_date_and_bucket={
+            (
+                "LIN",
+                "2026-07-10",
+                "fish_tail_production",
+            ): {
+                "symbol": "LIN",
+                "entry_date": "2026-07-10",
+                "bucket": "fish_tail_production",
+                "strategy_id": "fish_tail_blow_off_top",
+                "tp_pct": 0.051399,
+                "sl_pct": 0.042,
+            }
+        },
+        bucket_tp_sl_entries_by_key_and_date={
+            (
+                "fish_tail_production",
+                "2026-07-10",
+            ): {
+                "date": "2026-07-10",
+                "bucket": "fish_tail_production",
+                "strategy_id": "fish_tail_blow_off_top",
+                "tp_pct": 0.037279,
+                "sl_pct": 0.042,
+            }
+        },
+        production_exit_rules={},
+    )
+
+    assert merged_entry is not None
+    assert merged_entry["supports_tp_sl"] is True
+    assert merged_entry["tp_pct"] == 0.051399
+
+
+def test_signal_metadata_uses_futu_bucket_when_symbol_has_two_candidates() -> None:
+    """The executed bucket must select its own frozen TP for a dual signal."""
+    merged_entry = place_tp_sl._merge_production_signal_metadata(
+        symbol="DUAL",
+        entry={
+            "symbol": "DUAL",
+            "entry_date": "2026-07-10",
+            "futu_buy_order_date": "2026-07-10",
+            "bucket": "fish_tail_squeeze",
+            "strategy_id": "fish_tail_blow_off_top",
+        },
+        signal_entries_by_symbol_date_and_bucket={
+            (
+                "DUAL",
+                "2026-07-10",
+                "fish_tail_production",
+            ): {
+                "symbol": "DUAL",
+                "entry_date": "2026-07-10",
+                "bucket": "fish_tail_production",
+                "strategy_id": "fish_tail_blow_off_top",
+                "tp_pct": 0.04,
+                "sl_pct": 0.03,
+            },
+            (
+                "DUAL",
+                "2026-07-10",
+                "fish_tail_squeeze",
+            ): {
+                "symbol": "DUAL",
+                "entry_date": "2026-07-10",
+                "bucket": "fish_tail_squeeze",
+                "strategy_id": "fish_tail_blow_off_top",
+                "tp_pct": 0.07,
+                "sl_pct": 0.03,
+            },
+        },
+        bucket_tp_sl_entries_by_key_and_date={},
+        production_exit_rules={},
+    )
+
+    assert merged_entry is not None
+    assert merged_entry["bucket"] == "fish_tail_squeeze"
+    assert merged_entry["tp_pct"] == 0.07
+
+
 def test_bucket_snapshot_walk_back_rejects_older_than_cap() -> None:
     """A snapshot older than BUCKET_TP_SL_WALK_BACK_DAYS must not match."""
     merged_entry = place_tp_sl._merge_production_signal_metadata(
@@ -431,7 +580,7 @@ def test_bucket_snapshot_walk_back_rejects_older_than_cap() -> None:
             "bucket": "fish_tail_explore",
             "strategy_id": "fish_tail_blow_off_top",
         },
-        signal_entries_by_symbol_and_date={},
+        signal_entries_by_symbol_date_and_bucket={},
         bucket_tp_sl_entries_by_key_and_date={
             (
                 "fish_tail_explore",
@@ -460,7 +609,7 @@ def test_bucket_snapshot_walk_back_prefers_closest_date() -> None:
             "bucket": "fish_tail_explore",
             "strategy_id": "fish_tail_blow_off_top",
         },
-        signal_entries_by_symbol_and_date={},
+        signal_entries_by_symbol_date_and_bucket={},
         bucket_tp_sl_entries_by_key_and_date={
             (
                 "fish_tail_explore",

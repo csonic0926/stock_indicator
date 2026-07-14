@@ -9,7 +9,41 @@ from typing import Any
 import pandas
 import pytest
 
-from stock_indicator import multi_bucket_today, strategy, symbol_seasoning
+from stock_indicator import (
+    adaptive_tp_sl_virtual_trade_history,
+    multi_bucket_today,
+    strategy,
+    symbol_seasoning,
+)
+from stock_indicator.multi_bucket_today import (
+    compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history
+)
+
+
+# TODO: review
+def _build_adaptive_tp_sl_virtual_trade_history_state(
+    *,
+    winner_returns: list[float] | None = None,
+    loser_returns: list[float] | None = None,
+) -> dict[str, Any]:
+    """Create a state document with an explicit statistical namespace."""
+
+    history_state = (
+        adaptive_tp_sl_virtual_trade_history.
+        empty_adaptive_tp_sl_virtual_trade_history()
+    )
+    history_state[
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_WINNER_RETURNS_KEY
+    ] = list(winner_returns or [])
+    history_state[
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_LOSER_RETURNS_KEY
+    ] = list(loser_returns or [])
+    return {
+        "schema_version": multi_bucket_today.SCHEMA_VERSION,
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_KEY: (
+            history_state
+        ),
+    }
 
 
 def test_load_multi_bucket_config_preserves_bucket_sigma_overrides(
@@ -147,11 +181,11 @@ def _build_test_config() -> multi_bucket_today.MultiBucketRunConfig:
     )
 
 
-def test_compute_today_signals_rejects_ineligible_symbol_before_slots(
+def test_compute_today_signals_filters_ineligible_symbol_before_publication(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    """Seasoning should reject entry candidates before slot competition."""
+    """Seasoning should filter candidates before tradable publication."""
 
     signal_results_by_strategy: dict[str, dict[str, Any]] = {
         "fish_head_production_buy": {
@@ -204,20 +238,13 @@ def test_compute_today_signals_rejects_ineligible_symbol_before_slots(
         enabled=True,
         eligibility_path="eligibility.csv",
     )
-    state: dict[str, Any] = {
-        "schema_version": multi_bucket_today.SCHEMA_VERSION,
-        "winners": [],
-        "losers": [],
-        "pending_rolling": [],
-        "closed_trades": [],
-        "accepted_entries": [],
-    }
+    state = _build_adaptive_tp_sl_virtual_trade_history_state()
 
-    result = multi_bucket_today.compute_today_signals(
+    result = compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
         config=config,
         eval_date=pandas.Timestamp("2026-05-14"),
-        held_positions={},
-        state=state,
+        adaptive_tp_sl_virtual_open_trades_by_strategy={},
+        state_document=state,
         data_directory=tmp_path,
         allowed_symbols=None,
         symbol_first_eligible_trade_dates={
@@ -226,12 +253,26 @@ def test_compute_today_signals_rejects_ineligible_symbol_before_slots(
         },
     )
 
-    assert [(record.symbol, reason) for record, reason in result.rejected_records] == [
-        ("VST", "symbol_seasoning")
-    ]
-    assert [record.symbol for record in result.accepted_records] == ["AMZN"]
+    assert [
+        (record.symbol, reason)
+        for record, reason in result.filtered_out_records
+    ] == [("VST", "symbol_seasoning")]
+    assert [record.symbol for record in result.tradable_records] == ["AMZN"]
+    adaptive_tp_sl_history = (
+        adaptive_tp_sl_virtual_trade_history.
+        get_adaptive_tp_sl_virtual_trade_history(state)
+    )
+    assert [
+        virtual_trade["symbol"]
+        for virtual_trade in adaptive_tp_sl_history[
+            adaptive_tp_sl_virtual_trade_history.
+            ADAPTIVE_TP_SL_VIRTUAL_OPEN_TRADES_KEY
+        ]
+    ] == ["AMZN"]
     assert "('VST', 'fish_head_production', 'symbol_seasoning')" in next(
-        log_line for log_line in result.log_lines if log_line.startswith("rejected:")
+        log_line
+        for log_line in result.log_lines
+        if log_line.startswith("filtered_out:")
     )
 
 
@@ -294,20 +335,18 @@ def test_compute_today_signals_emits_all_dashboard_exit_signals(
         fake_compute_frozen_tp_sl_for_bucket,
     )
 
-    state: dict[str, Any] = {
-        "schema_version": multi_bucket_today.SCHEMA_VERSION,
-        "winners": [0.04],
-        "losers": [-0.02],
-        "pending_rolling": [],
-        "closed_trades": [],
-        "accepted_entries": [],
-    }
+    state = _build_adaptive_tp_sl_virtual_trade_history_state(
+        winner_returns=[0.04],
+        loser_returns=[-0.02],
+    )
 
-    result = multi_bucket_today.compute_today_signals(
-        config=_build_test_config(),
+    config = _build_test_config()
+    config.maximum_position_count = 1
+    result = compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
+        config=config,
         eval_date=pandas.Timestamp("2026-05-14"),
-        held_positions={},
-        state=state,
+        adaptive_tp_sl_virtual_open_trades_by_strategy={},
+        state_document=state,
         data_directory=tmp_path,
         allowed_symbols=None,
     )
@@ -346,7 +385,10 @@ def test_compute_today_signals_emits_all_dashboard_exit_signals(
         ),
     ]
     assert any(
-        log_line.startswith("[ROLLING_TP_SL_STATE] winners=1 losers=1")
+        log_line.startswith(
+            "[ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_STATE] "
+            "winner_returns=1 loser_returns=1"
+        )
         for log_line in result.log_lines
     )
     assert sum(
@@ -357,10 +399,56 @@ def test_compute_today_signals_emits_all_dashboard_exit_signals(
         log_line.startswith("[FROZEN_TP_SL]")
         for log_line in result.log_lines
     ) == 2
+    history_state = (
+        adaptive_tp_sl_virtual_trade_history.get_adaptive_tp_sl_virtual_trade_history(
+            state
+        )
+    )
     assert [
-        entry["disable_sl_trigger"]
-        for entry in state["accepted_entries"]
-    ] == [True, True]
+        (virtual_trade["symbol"], virtual_trade["bucket"])
+        for virtual_trade in history_state[
+            adaptive_tp_sl_virtual_trade_history.
+            ADAPTIVE_TP_SL_VIRTUAL_OPEN_TRADES_KEY
+        ]
+    ] == [
+        ("VST", "fish_head_production"),
+        ("AMZN", "fish_tail_explore"),
+    ]
+    assert [
+        record.symbol for record in result.tradable_records
+    ] == ["VST", "AMZN"]
+    assert any(
+        log_line == (
+            "[ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_ADMISSION] "
+            "tradable_signals=2 new_open_trades=2 "
+            "source=cron_tradable_signals"
+        )
+        for log_line in result.log_lines
+    )
+
+    repeated_result = (
+        compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
+            config=config,
+            eval_date=pandas.Timestamp("2026-05-14"),
+            adaptive_tp_sl_virtual_open_trades_by_strategy={},
+            state_document=state,
+            data_directory=tmp_path,
+            allowed_symbols=None,
+        )
+    )
+
+    assert len(history_state[
+        adaptive_tp_sl_virtual_trade_history.
+        ADAPTIVE_TP_SL_VIRTUAL_OPEN_TRADES_KEY
+    ]) == 2
+    assert any(
+        log_line == (
+            "[ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_ADMISSION] "
+            "tradable_signals=2 new_open_trades=0 "
+            "source=cron_tradable_signals"
+        )
+        for log_line in repeated_result.log_lines
+    )
 
 
 def test_compute_today_signals_stamps_wr_degrading_on_gated_buckets_only(
@@ -369,10 +457,9 @@ def test_compute_today_signals_stamps_wr_degrading_on_gated_buckets_only(
 ) -> None:
     """When the gate is configured and the bootstrapped sensor is
     degrading, the cron stamps wr_degrading=True on FROZEN_TP_SL lines of
-    GATED buckets only (non-gated buckets always read False), and the
-    accepted sensor-bucket entry is registered as a pending position for
-    future sensor feeding. This is the cron's endogenous half of the
-    phantom decision; the RS combine + execution belong to the dashboard."""
+    GATED buckets only (non-gated buckets always read False). Every tradable
+    sensor-bucket signal enters the sensor stream independently of dashboard
+    allocation or Futu execution."""
 
     signal_results_by_strategy: dict[str, dict[str, Any]] = {
         "fish_head_production_buy": {
@@ -422,13 +509,11 @@ def test_compute_today_signals_stamps_wr_degrading_on_gated_buckets_only(
 
     # Bootstrapped sensor in a clearly DEGRADING state: cross_window full
     # (len==window) with EMA below SMA -> evaluate_wr_gate_phantom True.
-    state: dict[str, Any] = {
-        "schema_version": multi_bucket_today.SCHEMA_VERSION,
-        "winners": [0.04],
-        "losers": [-0.02],
-        "pending_rolling": [],
-        "closed_trades": [],
-        "accepted_entries": [],
+    state = {
+        **_build_adaptive_tp_sl_virtual_trade_history_state(
+            winner_returns=[0.04],
+            loser_returns=[-0.02],
+        ),
         "wr_gate_sensor": {
             "cross_ema": 0.5,
             "cross_window": [1.0, 1.0, 0.0],
@@ -441,11 +526,11 @@ def test_compute_today_signals_stamps_wr_degrading_on_gated_buckets_only(
         state["wr_gate_sensor"], config.wr_gate
     ) is True
 
-    result = multi_bucket_today.compute_today_signals(
+    result = compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
         config=config,
         eval_date=pandas.Timestamp("2026-05-14"),
-        held_positions={},
-        state=state,
+        adaptive_tp_sl_virtual_open_trades_by_strategy={},
+        state_document=state,
         data_directory=tmp_path,
         allowed_symbols=None,
     )
@@ -467,11 +552,21 @@ def test_compute_today_signals_stamps_wr_degrading_on_gated_buckets_only(
     # Gated bucket entry carries the degrading flag; ungated does not.
     assert frozen_by_symbol["AMZN"]["wr_degrading"] == "True"
     assert frozen_by_symbol["VST"]["wr_degrading"] == "False"
-    # The sensor-bucket entry is now awaiting its adaptive close.
+    # The statistical sensor follows the tradable signal, not a real order.
     pending_symbols = {
         position["symbol"] for position in state["wr_gate_pending_ft"]
     }
     assert pending_symbols == {"AMZN"}
+
+    compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
+        config=config,
+        eval_date=pandas.Timestamp("2026-05-14"),
+        adaptive_tp_sl_virtual_open_trades_by_strategy={},
+        state_document=state,
+        data_directory=tmp_path,
+        allowed_symbols=None,
+    )
+    assert len(state["wr_gate_pending_ft"]) == 1
 
     # A sensor heartbeat is emitted every run so a quiet day still shows
     # the cross reading and degrading verdict.
@@ -499,19 +594,12 @@ def test_compute_today_signals_emits_no_heartbeat_without_gate(
             "exit_signals": [],
         },
     )
-    state: dict[str, Any] = {
-        "schema_version": multi_bucket_today.SCHEMA_VERSION,
-        "winners": [],
-        "losers": [],
-        "pending_rolling": [],
-        "closed_trades": [],
-        "accepted_entries": [],
-    }
-    result = multi_bucket_today.compute_today_signals(
+    state = _build_adaptive_tp_sl_virtual_trade_history_state()
+    result = compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
         config=_build_test_config(),
         eval_date=pandas.Timestamp("2026-05-14"),
-        held_positions={},
-        state=state,
+        adaptive_tp_sl_virtual_open_trades_by_strategy={},
+        state_document=state,
         data_directory=tmp_path,
         allowed_symbols=None,
     )
@@ -560,22 +648,17 @@ def test_held_exit_debug_uses_bucket_exit_alpha_factor(
         fake_filter_debug_values,
     )
 
-    multi_bucket_today.compute_today_signals(
+    compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
         config=config,
         eval_date=pandas.Timestamp("2026-06-05"),
-        held_positions={
+        adaptive_tp_sl_virtual_open_trades_by_strategy={
             "fish_head_vacuum_turn": [
                 {"symbol": "WMT", "entry_date": "2026-05-26"},
             ],
         },
-        state={
-            "schema_version": multi_bucket_today.SCHEMA_VERSION,
-            "winners": [],
-            "losers": [],
-            "pending_rolling": [],
-            "closed_trades": [],
-            "accepted_entries": [],
-        },
+        state_document=(
+            _build_adaptive_tp_sl_virtual_trade_history_state()
+        ),
         data_directory=tmp_path,
         allowed_symbols=None,
     )

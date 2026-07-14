@@ -12,12 +12,17 @@ def test_run_daily_job_uses_production_universe_without_refresh() -> None:
 
     script_text = Path("run_daily_job.sh").read_text(encoding="utf-8")
     yahoo_update_position = script_text.index("update_all_data_from_yf")
+    yahoo_retry_position = script_text.index("retry_missing_date_from_yf")
     daily_signal_position = script_text.index("multi_bucket_daily_signal")
     assert "update_universe_pipeline" not in script_text
     assert yahoo_update_position < daily_signal_position
+    assert yahoo_update_position < yahoo_retry_position < daily_signal_position
     assert "YAHOO_CACHE_REFRESH_LOOKBACK_DAYS" in script_text
     assert "determine_latest_cached_market_date" in script_text
     assert "timedelta(days=183)" not in script_text
+    # TODO: review
+    assert "every tradable signal" in script_text
+    assert "per accepted entry" not in script_text
 
 
 def test_run_daily_tasks_detects_signals(tmp_path, monkeypatch):

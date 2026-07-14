@@ -29,15 +29,19 @@ cd "$SOURCE_DIRECTORY"
 REFRESH_END_DATE="$("$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -c 'from stock_indicator.daily_job import determine_latest_trading_date as determine_date;print(determine_date())')"
 START_DATE="$("$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -c 'from datetime import datetime, timedelta; import sys; from stock_indicator.daily_job import YAHOO_CACHE_REFRESH_LOOKBACK_DAYS; print((datetime.fromisoformat(sys.argv[1]) - timedelta(days=YAHOO_CACHE_REFRESH_LOOKBACK_DAYS)).date().isoformat())' "$REFRESH_END_DATE")"
 
-# Update the production daily price cache, then record live signals.
+# Update the production daily price cache, retry missing target-date Yahoo
+# rows, then record live signals.
 CRON_START_EPOCH=$(date +%s)
 "$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage update_all_data_from_yf "$START_DATE" "$REFRESH_END_DATE" >> "$LOG_DIRECTORY/cron_stdout.log" 2>&1
+"$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage retry_missing_date_from_yf "$REFRESH_END_DATE" >> "$LOG_DIRECTORY/cron_stdout.log" 2>&1
 UPDATE_END_EPOCH=$(date +%s)
 LATEST_DATE="$("$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -c 'from stock_indicator.daily_job import determine_latest_cached_market_date, STOCK_DATA_DIRECTORY;print(determine_latest_cached_market_date(STOCK_DATA_DIRECTORY))')"
 
-# Multi-bucket signal generation. compute_today_signals emits one
-# [FROZEN_TP_SL] line per accepted entry — that line carries the
-# bucket-specific tp_pct / sl_pct that place_tp_sl reads next morning.
+# TODO: review
+# Multi-bucket signal generation. The cron publishes every tradable signal and
+# starts its ADAPTIVE TP/SL virtual-history observation independently of Futu
+# execution. Each [FROZEN_TP_SL] line carries the bucket-specific tp_pct /
+# sl_pct used by the separate dashboard allocation layer.
 # compute_adaptive_tp_sl + show_positions were the legacy single-bucket
 # display path; per-bucket frozen values made them misleading (the
 # global TP/SL ignored per-bucket sigma / fixed_sl), so they are no

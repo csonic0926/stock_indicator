@@ -1,10 +1,14 @@
 """Production today-slice signal generator for multi-bucket configs.
 
 Reads `data/multi_bucket_production.json` (or any compatible config) and
-reproduces the simulator's single-day decision: per-bucket signals,
-cross-bucket slot competition, frozen TP/SL via the shared helper.
-Persists rolling state (winners/losers/pending_rolling) in
-`adaptive_state.json` for the next day.
+reproduces the simulator's single-day signal mathematics: per-bucket signals,
+entry filters, and frozen TP/SL via the shared helper.  It deliberately does
+not allocate portfolio slots.  The dashboard owns the one live allocation
+pass because only that layer has the current settings plus Futu holdings and
+pending orders.
+Persists the ADAPTIVE TP/SL virtual trade history in `adaptive_state.json`.
+That history is a statistical reference sample, never a portfolio or broker
+position ledger.
 
 Design contract: the simulator (run_complex_simulation in strategy.py)
 remains the source of truth. Anything in this module that touches
@@ -25,6 +29,7 @@ from typing import Any, Dict, List, Sequence, Tuple
 import pandas
 
 from . import (
+    adaptive_tp_sl_virtual_trade_history,
     daily_job,
     futu_trade_metadata,
     simulator,
@@ -453,6 +458,13 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
                     f"bucket {label}: sma_150_angle_min must be a number"
                 ) from parse_error
 
+        cohort_co_movement_gate_config = (
+            strategy.parse_cohort_co_movement_gate_config(
+                raw_bucket.get("cohort_co_movement_gate"),
+                bucket_label=label,
+            )
+        )
+
         bucket_definitions[label] = strategy.ComplexStrategySetDefinition(
             label=label,
             buy_strategy_name=buy_strategy_name,
@@ -611,6 +623,7 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
                 and raw_bucket["min_hold_sl"] is not None
                 else None
             ),
+            cohort_co_movement_gate=cohort_co_movement_gate_config,
         )
 
     adaptive_tp_sl_config: strategy.AdaptiveTPSLConfig | None = None
@@ -742,79 +755,108 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
 
 
 # ----------------------------------------------------------------------
-# Rolling state load / save
+# ADAPTIVE TP/SL virtual trade history state load / save
 # ----------------------------------------------------------------------
 
 
-def _empty_state() -> Dict[str, Any]:
+def empty_adaptive_tp_sl_virtual_trade_history_state_document() -> Dict[str, Any]:
+    """Return an empty persisted document for the statistical history."""
+
     return {
         "schema_version": SCHEMA_VERSION,
-        "winners": [],
-        "losers": [],
-        "pending_rolling": [],
-        "closed_trades": [],
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_KEY: (
+            adaptive_tp_sl_virtual_trade_history.empty_adaptive_tp_sl_virtual_trade_history()
+        ),
     }
 
 
-def load_state(state_path: Path) -> Dict[str, Any]:
-    """Load `adaptive_state.json` (new schema). Returns an empty state
+def load_adaptive_tp_sl_virtual_trade_history_state(
+    state_path: Path,
+) -> Dict[str, Any]:
+    """Load the ADAPTIVE TP/SL virtual trade history state document.
+
+    Returns an empty state
     when the file is missing, malformed, or stamped with an older
     schema_version. Caller should treat schema-mismatch as a cold-start
     signal and re-bootstrap via the simulator's --export-state-on-date
     helper rather than silently overwrite."""
     if not state_path.exists():
-        return _empty_state()
+        return empty_adaptive_tp_sl_virtual_trade_history_state_document()
     try:
         with state_path.open("r", encoding="utf-8") as state_file:
             state = json.load(state_file)
     except (json.JSONDecodeError, OSError):
-        return _empty_state()
+        return empty_adaptive_tp_sl_virtual_trade_history_state_document()
     if not isinstance(state, dict) or state.get("schema_version") != SCHEMA_VERSION:
-        return _empty_state()
-    state.setdefault("winners", [])
-    state.setdefault("losers", [])
-    state.setdefault("pending_rolling", [])
-    state.setdefault("closed_trades", [])
+        return empty_adaptive_tp_sl_virtual_trade_history_state_document()
+    adaptive_tp_sl_virtual_trade_history.get_adaptive_tp_sl_virtual_trade_history(
+        state
+    )
     return state
 
 
-def save_state_atomically(state_path: Path, state: Dict[str, Any]) -> None:
-    """Write the state via tmp + os.replace so a crash mid-write cannot
-    corrupt the file. Crucial: pending_rolling holds (closed_date, pct)
-    pairs that flush only on a future entry — losing them means the
-    rolling window forgets a closed trade."""
+def save_adaptive_tp_sl_virtual_trade_history_state_atomically(
+    state_path: Path,
+    state_document: Dict[str, Any],
+) -> None:
+    """Atomically persist the ADAPTIVE TP/SL virtual trade history.
+
+    Pending returns flush only on a later signal date.  Losing them would make
+    the statistical sensor forget a completed reference trade.
+    """
+
+    adaptive_tp_sl_virtual_trade_history.get_adaptive_tp_sl_virtual_trade_history(
+        state_document
+    )
     state_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = state_path.with_suffix(state_path.suffix + ".tmp")
     with temp_path.open("w", encoding="utf-8") as temp_file:
-        json.dump(state, temp_file, indent=2)
+        json.dump(state_document, temp_file, indent=2)
     import os as _os
     _os.replace(temp_path, state_path)
 
 
 # ----------------------------------------------------------------------
-# Rolling-window flush + per-bucket entry filters
+# ADAPTIVE TP/SL virtual return-window updates + per-bucket entry filters
 # ----------------------------------------------------------------------
 
 
-def flush_pending_rolling_into_deques(
-    state: Dict[str, Any],
+def flush_pending_adaptive_tp_sl_virtual_trade_returns(
+    adaptive_tp_sl_virtual_trade_history_state: Dict[str, Any],
     eval_date: pandas.Timestamp,
     window: int,
 ) -> None:
     """Mirror simulator strategy.py:1647-1668.
 
-    `pending_rolling` holds (closed_date, pct) entries deposited by trades
+    `pending_returns` holds (closed_date, pct) entries deposited by virtual
+    reference trades
     that closed on/after the entry day they should NOT contribute to (the
     `delayed_rolling_update` invariant). When today's eval_date is strictly
     later than a pending entry's closed_date, the entry is flushed into
-    `winners` (pct > 0) or `losers` (pct < 0), each capped at `window`.
+    `winner_returns` (pct > 0) or `loser_returns` (pct < 0), each capped at
+    `window`.
     """
-    if not state.get("pending_rolling"):
+    pending_returns_key = (
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_PENDING_RETURNS_KEY
+    )
+    winner_returns_key = (
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_WINNER_RETURNS_KEY
+    )
+    loser_returns_key = (
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_LOSER_RETURNS_KEY
+    )
+    if not adaptive_tp_sl_virtual_trade_history_state.get(pending_returns_key):
         return
-    winners = list(state.get("winners", []))
-    losers = list(state.get("losers", []))
+    winner_returns = list(
+        adaptive_tp_sl_virtual_trade_history_state.get(winner_returns_key, [])
+    )
+    loser_returns = list(
+        adaptive_tp_sl_virtual_trade_history_state.get(loser_returns_key, [])
+    )
     remaining: List[Dict[str, Any]] = []
-    for pending_entry in state["pending_rolling"]:
+    for pending_entry in adaptive_tp_sl_virtual_trade_history_state[
+        pending_returns_key
+    ]:
         closed_date_string = pending_entry.get("closed_date")
         try:
             closed_date_ts = pandas.Timestamp(closed_date_string)
@@ -826,54 +868,81 @@ def flush_pending_rolling_into_deques(
             continue
         if closed_date_ts < eval_date:
             if pct_value > 0:
-                winners.append(pct_value)
-                if len(winners) > window:
-                    winners = winners[-window:]
+                winner_returns.append(pct_value)
+                if len(winner_returns) > window:
+                    winner_returns = winner_returns[-window:]
             elif pct_value < 0:
-                losers.append(pct_value)
-                if len(losers) > window:
-                    losers = losers[-window:]
+                loser_returns.append(pct_value)
+                if len(loser_returns) > window:
+                    loser_returns = loser_returns[-window:]
         else:
             remaining.append(pending_entry)
-    state["winners"] = winners
-    state["losers"] = losers
-    state["pending_rolling"] = remaining
+    adaptive_tp_sl_virtual_trade_history_state[
+        winner_returns_key
+    ] = winner_returns
+    adaptive_tp_sl_virtual_trade_history_state[
+        loser_returns_key
+    ] = loser_returns
+    adaptive_tp_sl_virtual_trade_history_state[pending_returns_key] = remaining
 
 
-def append_rolling_update(
-    state: Dict[str, Any],
+def append_adaptive_tp_sl_virtual_trade_return(
+    adaptive_tp_sl_virtual_trade_history_state: Dict[str, Any],
     closed_date: pandas.Timestamp,
     pct: float,
     *,
     delayed: bool,
     window: int,
 ) -> None:
-    """Append a freshly-closed trade's pct into rolling state. When
-    `delayed` is true, parks it in `pending_rolling` (the simulator's
+    """Append one completed virtual reference trade return. When
+    `delayed` is true, parks it in `pending_returns` (the simulator's
     delayed_rolling_update path); otherwise flushes directly into
-    winners/losers. Mirrors strategy.py:1610-1636.
+    winner/loser return samples. Mirrors strategy.py:1610-1636.
     """
+    pending_returns_key = (
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_PENDING_RETURNS_KEY
+    )
+    winner_returns_key = (
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_WINNER_RETURNS_KEY
+    )
+    loser_returns_key = (
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_LOSER_RETURNS_KEY
+    )
     if delayed:
-        state.setdefault("pending_rolling", []).append({
+        adaptive_tp_sl_virtual_trade_history_state.setdefault(
+            pending_returns_key, []
+        ).append({
             "closed_date": closed_date.strftime("%Y-%m-%d"),
             "pct": float(pct),
         })
         return
     if pct > 0:
-        winners = list(state.get("winners", []))
-        winners.append(float(pct))
-        if len(winners) > window:
-            winners = winners[-window:]
-        state["winners"] = winners
+        winner_returns = list(
+            adaptive_tp_sl_virtual_trade_history_state.get(
+                winner_returns_key, []
+            )
+        )
+        winner_returns.append(float(pct))
+        if len(winner_returns) > window:
+            winner_returns = winner_returns[-window:]
+        adaptive_tp_sl_virtual_trade_history_state[
+            winner_returns_key
+        ] = winner_returns
     elif pct < 0:
-        losers = list(state.get("losers", []))
-        losers.append(float(pct))
-        if len(losers) > window:
-            losers = losers[-window:]
-        state["losers"] = losers
+        loser_returns = list(
+            adaptive_tp_sl_virtual_trade_history_state.get(
+                loser_returns_key, []
+            )
+        )
+        loser_returns.append(float(pct))
+        if len(loser_returns) > window:
+            loser_returns = loser_returns[-window:]
+        adaptive_tp_sl_virtual_trade_history_state[
+            loser_returns_key
+        ] = loser_returns
 
 
-def compute_adaptive_ft_close(
+def compute_adaptive_tp_sl_virtual_trade_close_for_wr_gate(
     data_directory: Path,
     symbol: str,
     entry_date_string: str,
@@ -960,8 +1029,9 @@ def compute_adaptive_ft_close(
     )
 
 
-def advance_wr_gate_sensor(
-    state: Dict[str, Any],
+def advance_wr_gate_sensor_from_adaptive_tp_sl_virtual_trade_history(
+    state_document: Dict[str, Any],
+    adaptive_tp_sl_virtual_trade_history_state: Dict[str, Any],
     gate_config: "strategy.WRGateConfig | None",
     eval_date_string: str,
     data_directory: Path,
@@ -984,13 +1054,18 @@ def advance_wr_gate_sensor(
     log_messages: List[str] = []
     if gate_config is None:
         return log_messages
-    sensor = state.get("wr_gate_sensor")
+    sensor = state_document.get("wr_gate_sensor")
     if sensor is None:
         return log_messages
-    pending: List[Dict[str, Any]] = state.setdefault("wr_gate_pending_ft", [])
+    pending: List[Dict[str, Any]] = state_document.setdefault(
+        "wr_gate_pending_ft", []
+    )
     eval_timestamp = pandas.Timestamp(eval_date_string)
     signal_exit_by_key: Dict[tuple, str] = {}
-    for closed_trade in state.get("closed_trades", []):
+    for closed_trade in adaptive_tp_sl_virtual_trade_history_state.get(
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_CLOSED_TRADES_KEY,
+        [],
+    ):
         if (
             closed_trade.get("bucket") == gate_config.sensor_bucket
             and closed_trade.get("exit_date")
@@ -1004,43 +1079,59 @@ def advance_wr_gate_sensor(
 
     feeds: List[tuple] = []
     still_pending: List[Dict[str, Any]] = []
-    for position in pending:
-        signal_date_string = position["signal_date"]
+    for pending_adaptive_tp_sl_virtual_trade in pending:
+        signal_date_string = pending_adaptive_tp_sl_virtual_trade[
+            "signal_date"
+        ]
         # Lazy fill resolution: entry fills at signal+1 open.
-        fill_date_string = position.get("fill_date") or _execution_date_string(
-            signal_date_string
+        fill_date_string = (
+            pending_adaptive_tp_sl_virtual_trade.get("fill_date")
+            or _execution_date_string(signal_date_string)
         )
-        entry_price = position.get("entry_price")
+        entry_price = pending_adaptive_tp_sl_virtual_trade.get("entry_price")
         if entry_price is None:
             resolved = _read_open_price(
-                data_directory, position["symbol"], fill_date_string
+                data_directory,
+                pending_adaptive_tp_sl_virtual_trade["symbol"],
+                fill_date_string,
             )
             if resolved is not None:
-                position["fill_date"] = fill_date_string
-                position["entry_price"] = round(float(resolved), 4)
-                entry_price = position["entry_price"]
+                pending_adaptive_tp_sl_virtual_trade[
+                    "fill_date"
+                ] = fill_date_string
+                pending_adaptive_tp_sl_virtual_trade[
+                    "entry_price"
+                ] = round(float(resolved), 4)
+                entry_price = pending_adaptive_tp_sl_virtual_trade[
+                    "entry_price"
+                ]
         if entry_price is None:
-            still_pending.append(position)
+            still_pending.append(pending_adaptive_tp_sl_virtual_trade)
             continue
         signal_close = signal_exit_by_key.get(
-            (position["symbol"], signal_date_string)
+            (
+                pending_adaptive_tp_sl_virtual_trade["symbol"],
+                signal_date_string,
+            )
         )
         signal_exit_string = signal_close[0] if signal_close else None
         # Replay only detects TP / max_hold (which fire before any signal
         # exit). Horizon = the signal exit when known, else today.
         horizon_string = signal_exit_string or eval_date_string
-        adaptive = compute_adaptive_ft_close(
+        adaptive = compute_adaptive_tp_sl_virtual_trade_close_for_wr_gate(
             data_directory,
-            position["symbol"],
+            pending_adaptive_tp_sl_virtual_trade["symbol"],
             fill_date_string,
             float(entry_price),
             horizon_string,
-            float(position["tp_pct"]),
-            min_hold_tp=int(position["min_hold_tp"]),
-            max_hold=position.get("max_hold"),
+            float(pending_adaptive_tp_sl_virtual_trade["tp_pct"]),
+            min_hold_tp=int(
+                pending_adaptive_tp_sl_virtual_trade["min_hold_tp"]
+            ),
+            max_hold=pending_adaptive_tp_sl_virtual_trade.get("max_hold"),
         )
         if adaptive is None:
-            still_pending.append(position)
+            still_pending.append(pending_adaptive_tp_sl_virtual_trade)
             continue
         win, pct, reason, adaptive_exit_timestamp = adaptive
         if reason in ("adaptive_take_profit", "max_hold"):
@@ -1048,10 +1139,13 @@ def advance_wr_gate_sensor(
             if adaptive_exit_timestamp < eval_timestamp:
                 feeds.append((
                     adaptive_exit_timestamp, fill_date_string,
-                    position["symbol"], win, pct, reason,
+                    pending_adaptive_tp_sl_virtual_trade["symbol"],
+                    win,
+                    pct,
+                    reason,
                 ))
             else:
-                still_pending.append(position)
+                still_pending.append(pending_adaptive_tp_sl_virtual_trade)
         elif signal_close is not None:
             # No TP/max_hold before the signal exit -> the signal exit IS
             # the adaptive exit; use the recorded raw_pct (the replay's
@@ -1059,18 +1153,19 @@ def advance_wr_gate_sensor(
             signal_raw_pct = signal_close[1]
             signal_exit_timestamp = pandas.Timestamp(signal_exit_string)
             if signal_raw_pct is None:
-                still_pending.append(position)
+                still_pending.append(pending_adaptive_tp_sl_virtual_trade)
             elif signal_exit_timestamp < eval_timestamp:
                 feeds.append((
                     signal_exit_timestamp, fill_date_string,
-                    position["symbol"], float(signal_raw_pct) > 0,
+                    pending_adaptive_tp_sl_virtual_trade["symbol"],
+                    float(signal_raw_pct) > 0,
                     float(signal_raw_pct), "signal",
                 ))
             else:
-                still_pending.append(position)
+                still_pending.append(pending_adaptive_tp_sl_virtual_trade)
         else:
             # Still open: no TP/max_hold and not signal-closed yet.
-            still_pending.append(position)
+            still_pending.append(pending_adaptive_tp_sl_virtual_trade)
 
     # Feed in adaptive-exit-date order; tie-break by (fill_date, symbol)
     # to approximate the simulator's insertion (entry) order for closes
@@ -1084,12 +1179,12 @@ def advance_wr_gate_sensor(
             f"  WR-gate sensor fed {symbol} "
             f"({reason} {adaptive_date.date()}): {pct:+.2%}"
         )
-    state["wr_gate_pending_ft"] = still_pending
+    state_document["wr_gate_pending_ft"] = still_pending
     return log_messages
 
 
 def build_wr_gate_sensor_summary(
-    state: Dict[str, Any],
+    state_document: Dict[str, Any],
     gate_config: "strategy.WRGateConfig | None",
     fed_this_run: int,
 ) -> str | None:
@@ -1102,7 +1197,7 @@ def build_wr_gate_sensor_summary(
 
     if gate_config is None:
         return None
-    sensor = state.get("wr_gate_sensor")
+    sensor = state_document.get("wr_gate_sensor")
     if sensor is None:
         return "[WR_GATE_SENSOR] status=not_bootstrapped (gate inert until --export-state-on-date)"
     cross_window = sensor.get("cross_window", [])
@@ -1129,13 +1224,14 @@ def build_wr_gate_sensor_summary(
         f"breakeven={breakeven_text} degrading={degrading} "
         f"window={len(cross_window)}/{gate_config.window} "
         f"window_full={window_full} "
-        f"open_pending={len(state.get('wr_gate_pending_ft', []))} "
+        "open_pending="
+        f"{len(state_document.get('wr_gate_pending_ft', []))} "
         f"fed_this_run={fed_this_run}"
     )
 
 
-def register_wr_gate_pending_entry(
-    state: Dict[str, Any],
+def register_wr_gate_pending_adaptive_tp_sl_virtual_trade(
+    state_document: Dict[str, Any],
     gate_config: "strategy.WRGateConfig | None",
     bucket_label: str,
     symbol: str,
@@ -1144,15 +1240,31 @@ def register_wr_gate_pending_entry(
     min_hold_tp: int,
     max_hold: int | None,
 ) -> None:
-    """Track a newly accepted gated-bucket entry as awaiting its adaptive
-    close, so advance_wr_gate_sensor will feed the sensor when it closes.
+    """Register a gated-bucket ADAPTIVE TP/SL reference observation.
+
+    The WR sensor waits for this virtual trade's adaptive close, so
+    ``advance_wr_gate_sensor_from_adaptive_tp_sl_virtual_trade_history``
+    feeds the sensor when it closes.
     Fill price is resolved lazily on a later run."""
 
     # Only the sensor bucket feeds the WR cross stream (gated_buckets are
     # phantom-gated by it, but the sensor reads sensor_bucket alone).
     if gate_config is None or bucket_label != gate_config.sensor_bucket:
         return
-    state.setdefault("wr_gate_pending_ft", []).append({
+
+    # TODO: review
+    pending_virtual_trades = state_document.setdefault(
+        "wr_gate_pending_ft", []
+    )
+    already_registered = any(
+        pending_virtual_trade.get("symbol") == symbol
+        and pending_virtual_trade.get("signal_date") == signal_date_string
+        for pending_virtual_trade in pending_virtual_trades
+    )
+    if already_registered:
+        return
+
+    pending_virtual_trades.append({
         "symbol": symbol,
         "signal_date": signal_date_string,
         "tp_pct": float(tp_pct),
@@ -1198,6 +1310,80 @@ def compute_fuel_drawdown_for_today(
     return float((window_closes / running_maximum - 1.0).min())
 
 
+# TODO: review
+def compute_cohort_co_movement_for_today(
+    data_directory: Path,
+    symbol_name: str,
+    signal_date_string: str,
+    gate_config: strategy.CohortCoMovementGateConfig,
+) -> strategy.TradeDetail:
+    """Compute the live-day cohort token with simulator-compatible timing."""
+
+    signal_timestamp = pandas.Timestamp(signal_date_string)
+    symbol_to_group_map = strategy.load_ff12_groups_by_symbol()
+    target_group_identifier = symbol_to_group_map.get(symbol_name.upper())
+
+    def _read_lookback_return(candidate_symbol: str) -> float | None:
+        price_path = data_directory / f"{candidate_symbol}.csv"
+        if not price_path.exists():
+            return None
+        try:
+            price_frame = pandas.read_csv(price_path, parse_dates=["Date"])
+        except (OSError, ValueError):
+            return None
+        if "close" not in price_frame.columns or "Date" not in price_frame.columns:
+            return None
+        close_series = price_frame.set_index("Date").sort_index()["close"]
+        known_close_series = close_series[
+            close_series.index <= signal_timestamp
+        ].dropna()
+        if len(known_close_series) < gate_config.lookback_bars + 1:
+            return None
+        return float(
+            known_close_series.iloc[-1]
+            / known_close_series.iloc[-(gate_config.lookback_bars + 1)]
+            - 1.0
+        )
+
+    symbol_return = _read_lookback_return(symbol_name)
+    peer_returns: list[float] = []
+    if target_group_identifier is not None:
+        for peer_symbol, peer_group_identifier in symbol_to_group_map.items():
+            if (
+                peer_symbol == symbol_name.upper()
+                or peer_group_identifier != target_group_identifier
+            ):
+                continue
+            peer_return = _read_lookback_return(peer_symbol)
+            if peer_return is not None:
+                peer_returns.append(peer_return)
+    cohort_median_return: float | None = None
+    idiosyncratic_gap: float | None = None
+    negative_peer_share: float | None = None
+    if peer_returns:
+        peer_return_series = pandas.Series(peer_returns)
+        cohort_median_return = float(peer_return_series.median())
+        negative_peer_share = float((peer_return_series < 0.0).mean())
+        if symbol_return is not None:
+            idiosyncratic_gap = symbol_return - cohort_median_return
+    market_return = _read_lookback_return(strategy.SP500_SYMBOL)
+    return strategy.TradeDetail(
+        date=signal_timestamp,
+        symbol=symbol_name,
+        action="open",
+        price=0.0,
+        simple_moving_average_dollar_volume=0.0,
+        total_simple_moving_average_dollar_volume=0.0,
+        simple_moving_average_dollar_volume_ratio=0.0,
+        cohort_symbol_lookback_return=symbol_return,
+        cohort_median_lookback_return=cohort_median_return,
+        cohort_market_lookback_return=market_return,
+        cohort_idiosyncratic_gap=idiosyncratic_gap,
+        cohort_negative_peer_share=negative_peer_share,
+        cohort_peer_count=len(peer_returns),
+    )
+
+
 def passes_per_bucket_entry_filters(
     bucket_def: strategy.ComplexStrategySetDefinition,
     slope_60: float | None,
@@ -1205,6 +1391,7 @@ def passes_per_bucket_entry_filters(
     above_pv: float | None = None,
     above_pv_previous: float | None = None,
     fuel_drawdown: float | None = None,
+    cohort_entry_detail: strategy.TradeDetail | None = None,
 ) -> bool:
     """Mirror simulator strategy.py:1684-1780 entry filters.
 
@@ -1261,6 +1448,15 @@ def passes_per_bucket_entry_filters(
             or fuel_drawdown > bucket_def.fuel_drawdown_max
         ):
             return False
+    if (
+        bucket_def.cohort_co_movement_gate is not None
+        and cohort_entry_detail is not None
+        and strategy.should_skip_for_cohort_co_movement_gate(
+            cohort_entry_detail,
+            bucket_def.cohort_co_movement_gate,
+        )
+    ):
+        return False
     return True
 
 
@@ -1270,8 +1466,8 @@ def passes_per_bucket_entry_filters(
 
 
 @dataclass
-class AcceptedEntry:
-    """Entry-time metadata accepted by live cron and consumed by dashboard."""
+class TradableEntrySignal:
+    """Complete entry metadata for one tradable bucket/symbol signal."""
 
     bucket_label: str
     strategy_id: str
@@ -1289,10 +1485,14 @@ class AcceptedEntry:
 
 @dataclass
 class TodaySignalsResult:
+    """Signal-layer output before any live portfolio-slot allocation."""
+
     eval_date_string: str
-    accepted_per_strategy: Dict[str, List[Dict[str, str]]]
-    accepted_records: List[AcceptedEntry]
-    rejected_records: List[Tuple[AcceptedEntry, str]]
+    retained_adaptive_tp_sl_virtual_trades_per_strategy: Dict[
+        str, List[Dict[str, str]]
+    ]
+    tradable_records: List[TradableEntrySignal]
+    filtered_out_records: List[Tuple[TradableEntrySignal, str]]
     log_lines: List[str]
 
 
@@ -1352,24 +1552,34 @@ def _bars_held(entry_date_string: str, eval_date_string: str) -> int:
     return max(0, len(trading_days) - 1)
 
 
-def _fill_deferred_pcts(
-    state: Dict[str, Any],
+def resolve_deferred_adaptive_tp_sl_virtual_trade_returns(
+    adaptive_tp_sl_virtual_trade_history_state: Dict[str, Any],
     data_directory: Path,
 ) -> List[str]:
-    """Iterate `closed_trades` for entries where `raw_pct` is still None
-    and try to compute it now. Returns a list of human-readable log
-    messages describing fills.
+    """Resolve reference-trade returns awaiting the next available open.
+
+    Iterates completed ADAPTIVE TP/SL virtual trades where ``raw_pct`` is
+    still ``None``. Returns human-readable log messages describing resolved
+    returns.
 
     Why this is needed: when an exit signal fires at end-of-day T, the
     actual execution open price is on T+1's bar — not yet present in the
     CSV at the time of T's cron run. The pct is filled on the next cron
     run after T+1's bar materializes. This mirrors the existing
     `compute_adaptive_tp_sl` defer pattern (manage.py:3683-3713) but
-    appends to the new schema's `pending_rolling` list instead of the
-    legacy mixed `raw_trade_profits`."""
+    appends to the namespaced ``pending_returns`` list instead of the former
+    mixed raw-return field."""
     log_messages: List[str] = []
-    delayed_pending: List[Dict[str, Any]] = state.setdefault("pending_rolling", [])
-    for closed_trade in state.get("closed_trades", []):
+    delayed_pending: List[Dict[str, Any]] = (
+        adaptive_tp_sl_virtual_trade_history_state.setdefault(
+            adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_PENDING_RETURNS_KEY,
+            [],
+        )
+    )
+    for closed_trade in adaptive_tp_sl_virtual_trade_history_state.get(
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_CLOSED_TRADES_KEY,
+        [],
+    ):
         if closed_trade.get("raw_pct") is not None:
             continue
         symbol = closed_trade.get("symbol", "")
@@ -1400,53 +1610,90 @@ def _fill_deferred_pcts(
         pct_value = (float(exit_open) - float(entry_open)) / float(entry_open)
         closed_trade["raw_pct"] = round(pct_value, 6)
         # The simulator's delayed_rolling_update path queues pcts in
-        # pending_rolling keyed by close_date so a same-day entry on
+        # pending ADAPTIVE TP/SL virtual returns keyed by close_date so a
+        # same-day entry on
         # close_date does not see this pct. Mirror that here using the
         # exit signal date as the close_date.
         delayed_pending.append({
             "closed_date": exit_date_string,
             "pct": float(pct_value),
         })
-        # Also feed legacy raw_trade_profits so compute_adaptive_tp_sl can
-        # produce a global tp_pct/sl_pct top-level value for System B
-        # (place_tp_sl.py).  compute_adaptive_tp_sl skips closed_trades
-        # whose raw_pct is already filled, so without this dual-write the
-        # legacy rolling pool stays empty under the live multi-bucket cron.
-        state.setdefault("raw_trade_profits", []).append(round(pct_value, 6))
+        # Feed the same resolved observation to the raw-return view used by
+        # the global ADAPTIVE TP/SL calculation for System B (place_tp_sl.py).
+        # This is a second view inside the same statistical history, not an
+        # execution or portfolio record.
+        adaptive_tp_sl_virtual_trade_history_state.setdefault(
+            adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_RAW_RETURNS_KEY,
+            [],
+        ).append(round(pct_value, 6))
         log_messages.append(
             f"  Filled raw_pct for {symbol} (bucket {closed_trade.get('bucket', '?')}): {pct_value:+.2%}"
         )
     return log_messages
 
 
-def compute_today_signals(
+def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
     *,
     config: MultiBucketRunConfig,
     eval_date: pandas.Timestamp,
-    held_positions: Dict[str, List[Dict[str, str]]],
-    state: Dict[str, Any],
+    adaptive_tp_sl_virtual_open_trades_by_strategy: Dict[
+        str, List[Dict[str, str]]
+    ],
+    state_document: Dict[str, Any],
     data_directory: Path,
     allowed_symbols: set[str] | None,
     symbol_first_eligible_trade_dates: Dict[str, datetime.date] | None = None,
 ) -> TodaySignalsResult:
-    """Reproduce the simulator's single-day decision in production.
+    """Advance raw-signal history and publish one day's tradable signals.
 
-    `held_positions` matches `signal_trades.json` shape:
+    ``adaptive_tp_sl_virtual_open_trades_by_strategy`` contains only open
+    counterfactual reference trades grouped by strategy::
+
         {strategy_id: [{symbol, entry_date}, ...]}
-    `state` matches the new schema_version=2 adaptive_state.json:
-        {schema_version, winners, losers, pending_rolling, closed_trades}
-    Both are mutated in place; caller is responsible for atomic writes.
 
-    Returns a `TodaySignalsResult` with the post-day virtual signal ledger,
-    accepted/rejected entry records, and log lines that the caller writes
-    to the cron log.  The log is the dashboard contract: it must contain all
-    strategy entry/exit signals plus the frozen TP/SL data needed for order
-    previews.  Broker/Futu position reconciliation happens outside cron.
+    ``state_document`` contains the namespaced ADAPTIVE TP/SL virtual trade
+    history plus separate sensor state. Both are mutated in place; the caller
+    is responsible for atomic writes.
+
+    Returns a `TodaySignalsResult` with retained open statistical reference
+    trades, every tradable entry record, signal-filter rejections, and log
+    lines that the caller writes to the cron log.  The log is the dashboard
+    contract: it contains every tradable candidate plus the frozen TP/SL data
+    needed for one broker-aware allocation pass.  Broker/Futu reconciliation,
+    bucket caps, the global cap, and same-symbol competition happen outside
+    cron.
     """
     if config.adaptive_tp_sl is None:
         raise ValueError("adaptive_tp_sl is required for today-slice signal generation")
+    adaptive_tp_sl_virtual_trade_history_state = (
+        adaptive_tp_sl_virtual_trade_history.get_adaptive_tp_sl_virtual_trade_history(
+            state_document
+        )
+    )
+    # TODO: review
+    # The persisted statistical history is authoritative. The grouped argument
+    # remains in the API for compatibility with existing callers, but it must
+    # never be allowed to omit and thereby delete a persisted virtual trade.
+    persisted_virtual_open_trades = (
+        adaptive_tp_sl_virtual_trade_history_state.get(
+            adaptive_tp_sl_virtual_trade_history.
+            ADAPTIVE_TP_SL_VIRTUAL_OPEN_TRADES_KEY,
+            [],
+        )
+    )
+    if persisted_virtual_open_trades:
+        adaptive_tp_sl_virtual_open_trades_by_strategy = {}
+        for persisted_virtual_open_trade in persisted_virtual_open_trades:
+            strategy_identifier = str(
+                persisted_virtual_open_trade.get("strategy_id", "")
+            )
+            if not strategy_identifier:
+                continue
+            adaptive_tp_sl_virtual_open_trades_by_strategy.setdefault(
+                strategy_identifier,
+                [],
+            ).append(dict(persisted_virtual_open_trade))
     adaptive = config.adaptive_tp_sl
-    delayed_rolling = adaptive.delayed_rolling_update
     rolling_window = adaptive.window
     eval_date_string = eval_date.date().isoformat()
     seasoning_enabled = (
@@ -1461,7 +1708,6 @@ def compute_today_signals(
     log_lines: List[str] = []
     log_lines.append(
         f"[multi_bucket_daily_signal] eval_date={eval_date_string} "
-        f"max_position_count={config.maximum_position_count} "
         f"buckets={list(config.bucket_definitions.keys())}"
     )
 
@@ -1469,7 +1715,10 @@ def compute_today_signals(
     # Step A. Try to fill pcts deferred from prior runs. This is the
     # equivalent of the existing `compute_adaptive_tp_sl` first-pass.
     # ------------------------------------------------------------------
-    fill_messages = _fill_deferred_pcts(state, data_directory)
+    fill_messages = resolve_deferred_adaptive_tp_sl_virtual_trade_returns(
+        adaptive_tp_sl_virtual_trade_history_state,
+        data_directory,
+    )
     log_lines.extend(fill_messages)
 
     # ------------------------------------------------------------------
@@ -1481,13 +1730,19 @@ def compute_today_signals(
     # --export-state-on-date. Runs after Step A so signal closes carry
     # their filled raw_pct.
     # ------------------------------------------------------------------
-    sensor_messages = advance_wr_gate_sensor(
-        state, config.wr_gate, eval_date_string, data_directory
+    sensor_messages = (
+        advance_wr_gate_sensor_from_adaptive_tp_sl_virtual_trade_history(
+            state_document,
+            adaptive_tp_sl_virtual_trade_history_state,
+            config.wr_gate,
+            eval_date_string,
+            data_directory,
+        )
     )
     log_lines.extend(sensor_messages)
     fed_this_run = sum(1 for message in sensor_messages if "fed" in message)
     sensor_summary = build_wr_gate_sensor_summary(
-        state, config.wr_gate, fed_this_run
+        state_document, config.wr_gate, fed_this_run
     )
     if sensor_summary is not None:
         log_lines.append(sensor_summary)
@@ -1512,11 +1767,12 @@ def compute_today_signals(
             allowed_symbols=allowed_symbols,
             skipped_fama_french_groups=bucket_def.skipped_fama_french_groups,
             # Live cron uses signal-day convention (entry_date == the
-            # bar the strategy fired on). _fill_deferred_pcts later
+            # bar the strategy fired on).
+            # resolve_deferred_adaptive_tp_sl_virtual_trade_returns later
             # adds BDay(1) to fetch the actual T+1 open as the fill
             # price, so the rolling pool gets the right raw_pct. Sim's
             # shifted (fill-day) convention applies inside
-            # run_complex_simulation; compute_today_signals is the
+            # run_complex_simulation; this live signal emitter is the
             # live emitter and matches Cal's "today the signal fired"
             # mental model + the legacy find_history_signal output.
             use_unshifted_signals=True,
@@ -1547,15 +1803,24 @@ def compute_today_signals(
 
     # ------------------------------------------------------------------
     # Step C. Process held-position exits per bucket. Today's signal
-    # exits become closed_trades records with raw_pct=None; the price
-    # lookup is deferred to the next daily run via _fill_deferred_pcts.
+    # exits become ADAPTIVE TP/SL virtual closed-trade records with
+    # raw_pct=None; the price
+    # lookup is deferred to the next daily run via
+    # resolve_deferred_adaptive_tp_sl_virtual_trade_returns.
     # ------------------------------------------------------------------
-    new_held_per_strategy: Dict[str, List[Dict[str, str]]] = {}
-    same_day_close_count_global = 0
+    retained_adaptive_tp_sl_virtual_trades_by_strategy: Dict[
+        str, List[Dict[str, str]]
+    ] = {}
+    adaptive_tp_sl_virtual_trades_closed_today_count = 0
     virtual_closed_symbols_global: List[str] = []
     for bucket_label, bucket_def in config.bucket_definitions.items():
         strategy_identifier = bucket_def.strategy_identifier
-        held_for_strategy = held_positions.get(strategy_identifier, [])
+        adaptive_tp_sl_virtual_trades_for_strategy = (
+            adaptive_tp_sl_virtual_open_trades_by_strategy.get(
+                strategy_identifier,
+                [],
+            )
+        )
         # Buckets may share a strategy_id (fish_tail_squeeze reuses
         # fish_tail_blow_off_top's detection). Each held entry belongs
         # to exactly ONE bucket: its recorded "bucket" field, or the
@@ -1570,7 +1835,7 @@ def compute_today_signals(
         )
         held_for_bucket = [
             held_entry
-            for held_entry in held_for_strategy
+            for held_entry in adaptive_tp_sl_virtual_trades_for_strategy
             if held_entry.get("bucket", default_bucket_for_strategy)
             == bucket_label
         ]
@@ -1596,7 +1861,10 @@ def compute_today_signals(
                 has_exit = bool(debug_values.get("exit", False))
             bars_held = _bars_held(entry_date_string, eval_date_string)
             if has_exit and bars_held >= config.minimum_holding_bars:
-                state.setdefault("closed_trades", []).append({
+                adaptive_tp_sl_virtual_trade_history_state.setdefault(
+                    adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_CLOSED_TRADES_KEY,
+                    [],
+                ).append({
                     "symbol": held_symbol,
                     "bucket": bucket_label,
                     "strategy_id": strategy_identifier,
@@ -1608,14 +1876,15 @@ def compute_today_signals(
                     "exit_reason": "signal",
                 })
                 bucket_exit_messages.append(held_symbol)
-                same_day_close_count_global += 1
+                adaptive_tp_sl_virtual_trades_closed_today_count += 1
             else:
                 retained.append(held_entry)
         # Merge (not overwrite): buckets sharing a strategy_id each
         # contribute their own retained slice.
-        new_held_per_strategy.setdefault(strategy_identifier, []).extend(
-            retained
-        )
+        retained_adaptive_tp_sl_virtual_trades_by_strategy.setdefault(
+            strategy_identifier,
+            [],
+        ).extend(retained)
         if bucket_exit_messages:
             log_lines.append(
                 f"[exit] bucket={bucket_label} symbols={bucket_exit_messages}"
@@ -1623,9 +1892,14 @@ def compute_today_signals(
             virtual_closed_symbols_global.extend(bucket_exit_messages)
 
     # ------------------------------------------------------------------
-    # Step D. Flush pending_rolling for entries strictly older than today.
+    # Step D. Flush pending ADAPTIVE TP/SL virtual-trade returns for entries
+    # strictly older than today.
     # ------------------------------------------------------------------
-    flush_pending_rolling_into_deques(state, eval_date, rolling_window)
+    flush_pending_adaptive_tp_sl_virtual_trade_returns(
+        adaptive_tp_sl_virtual_trade_history_state,
+        eval_date,
+        rolling_window,
+    )
 
     # ------------------------------------------------------------------
     # Step E. Per-bucket frozen TP/SL + entry candidate collection.
@@ -1633,17 +1907,13 @@ def compute_today_signals(
     # commit 1240118d). Across-bucket order: bucket_priority asc, then
     # dollar_volume rank asc (lower-priority value wins; lower rank wins).
     # ------------------------------------------------------------------
-    rejected_records: List[Tuple[AcceptedEntry, str]] = []
-    candidates: List[Tuple[int, int, str, str, AcceptedEntry]] = []
+    filtered_out_records: List[Tuple[TradableEntrySignal, str]] = []
+    candidates: List[Tuple[int, int, str, str, TradableEntrySignal]] = []
     for bucket_label, bucket_def in config.bucket_definitions.items():
         strategy_identifier = bucket_def.strategy_identifier
         signals = per_bucket_signals[bucket_label]
         entry_signal_set = set(signals.get("entry_signals", []))
         filtered_symbols = signals.get("filtered_symbols", [])
-        held_symbols_in_strategy = {
-            entry["symbol"]
-            for entry in new_held_per_strategy.get(strategy_identifier, [])
-        }
         for dollar_volume_rank, filtered_entry in enumerate(filtered_symbols):
             symbol_name = (
                 filtered_entry[0]
@@ -1663,8 +1933,6 @@ def compute_today_signals(
             # (dashboard's api_preview_orders already filters by Futu
             # positions when building order preview).
             #
-            # `held_symbols_in_strategy` above is retained for Step C
-            # exit detection / bucket mapping only.
             # Per-bucket pre-cross lookback shifts the A-layer read back
             # one trading bar (mirrors strategy.py:_resolve_trade_decision_dates).
             # Required by fish_head_vacuum_turn so slope_60 / near_delta
@@ -1703,6 +1971,16 @@ def compute_today_signals(
                 if bucket_def.fuel_drawdown_max is not None
                 else None
             )
+            cohort_entry_detail = (
+                compute_cohort_co_movement_for_today(
+                    data_directory,
+                    symbol_name,
+                    signal_lookup_date_string,
+                    bucket_def.cohort_co_movement_gate,
+                )
+                if bucket_def.cohort_co_movement_gate is not None
+                else None
+            )
             if not passes_per_bucket_entry_filters(
                 bucket_def,
                 slope_60_value,
@@ -1710,6 +1988,7 @@ def compute_today_signals(
                 above_pv=above_pv_value,
                 above_pv_previous=above_pv_previous_value,
                 fuel_drawdown=fuel_drawdown_value,
+                cohort_entry_detail=cohort_entry_detail,
             ):
                 continue
             (
@@ -1720,11 +1999,23 @@ def compute_today_signals(
             ) = strategy.compute_frozen_tp_sl_for_bucket(
                 bucket_def=bucket_def,
                 adaptive_tp_sl=adaptive,
-                closed_winners=state.get("winners", []),
-                closed_losers=state.get("losers", []),
+                closed_winners=(
+                    adaptive_tp_sl_virtual_trade_history_state.get(
+                        adaptive_tp_sl_virtual_trade_history.
+                        ADAPTIVE_TP_SL_VIRTUAL_WINNER_RETURNS_KEY,
+                        [],
+                    )
+                ),
+                closed_losers=(
+                    adaptive_tp_sl_virtual_trade_history_state.get(
+                        adaptive_tp_sl_virtual_trade_history.
+                        ADAPTIVE_TP_SL_VIRTUAL_LOSER_RETURNS_KEY,
+                        [],
+                    )
+                ),
                 entry_slope_60=slope_60_value,
             )
-            candidate_record = AcceptedEntry(
+            candidate_record = TradableEntrySignal(
                 bucket_label=bucket_label,
                 strategy_id=strategy_identifier,
                 symbol=symbol_name,
@@ -1745,7 +2036,9 @@ def compute_today_signals(
                 eval_date,
                 symbol_first_eligible_trade_dates or {},
             ):
-                rejected_records.append((candidate_record, "symbol_seasoning"))
+                filtered_out_records.append(
+                    (candidate_record, "symbol_seasoning")
+                )
                 continue
             candidates.append((
                 bucket_def.entry_priority,
@@ -1755,103 +2048,46 @@ def compute_today_signals(
                 candidate_record,
             ))
 
-    candidates.sort(key=lambda candidate: (candidate[0], candidate[1], candidate[2], candidate[3]))
+    candidates.sort(
+        key=lambda candidate: (
+            candidate[0],
+            candidate[1],
+            candidate[2],
+            candidate[3],
+        )
+    )
 
     # ------------------------------------------------------------------
-    # Step F. Cross-bucket slot competition. Same-day closes count as
-    # still-occupying slots (simulator strategy.py:1657-1660 lookahead
-    # prevention). Same-symbol cap uses post-close counts because the
-    # simulator decrements open_symbol_counts at close events.
+    # Step F. Publish every tradable candidate.  This layer must not consume
+    # global slots, bucket slots, or same-symbol capacity: doing that without
+    # Futu state creates a first allocation pass that can discard the lower
+    # candidate needed when the dashboard rejects a higher one.  Candidate
+    # ordering is still deterministic so the dashboard can apply the exact
+    # configured greedy competition after loading live state.
     # ------------------------------------------------------------------
-    held_total_before_today = sum(len(positions) for positions in held_positions.values())
-    held_total_after_today = sum(len(positions) for positions in new_held_per_strategy.values())
-    bucket_held_before: Dict[str, int] = {}
-    for bucket_label, bucket_def in config.bucket_definitions.items():
-        default_bucket_for_strategy = (
-            futu_trade_metadata.STRATEGY_ID_TO_DEFAULT_BUCKET.get(
-                bucket_def.strategy_identifier, bucket_label
-            )
+    adaptive_tp_sl_virtual_open_trades_before_today_count = sum(
+        len(virtual_trades)
+        for virtual_trades in (
+            adaptive_tp_sl_virtual_open_trades_by_strategy.values()
         )
-        bucket_held_before[bucket_label] = len([
-            held_entry
-            for held_entry in held_positions.get(
-                bucket_def.strategy_identifier, []
-            )
-            if held_entry.get("bucket", default_bucket_for_strategy)
-            == bucket_label
-        ])
-    held_symbol_counts_after: Dict[str, int] = {}
-    for retained_entries in new_held_per_strategy.values():
-        for retained_entry in retained_entries:
-            symbol_name = retained_entry["symbol"]
-            held_symbol_counts_after[symbol_name] = (
-                held_symbol_counts_after.get(symbol_name, 0) + 1
-            )
-
-    # Slot cap intentionally does NOT subtract signal_trades-tracked
-    # held positions. signal_trades is a signal-emission log, not a
-    # fill ledger; subtracting it would let yesterday's emissions
-    # silently steal today's slots even when the broker order never
-    # filled. Cron emits up to max_position_count candidates per day;
-    # the order layer (dashboard) reconciles against the real broker
-    # portfolio when building actual orders.
-    global_remaining = config.maximum_position_count
-    bucket_remaining: Dict[str, int] = {}
-    for bucket_label, bucket_def in config.bucket_definitions.items():
-        cap = (
-            bucket_def.maximum_positions
-            if bucket_def.maximum_positions is not None
-            else config.maximum_position_count
-        )
-        bucket_remaining[bucket_label] = cap
-
-    accepted_records: List[AcceptedEntry] = []
-    for _, _, bucket_label, symbol_name, candidate_record in candidates:
-        if global_remaining <= 0:
-            rejected_records.append((candidate_record, "slot_full"))
-            continue
-        if bucket_remaining.get(bucket_label, 0) <= 0:
-            rejected_records.append((candidate_record, "bucket_cap"))
-            continue
-        if (
-            config.max_same_symbol < 999
-            and held_symbol_counts_after.get(symbol_name, 0)
-            >= config.max_same_symbol
-        ):
-            rejected_records.append((candidate_record, "same_symbol"))
-            continue
-        accepted_records.append(candidate_record)
-        global_remaining -= 1
-        bucket_remaining[bucket_label] -= 1
-        held_symbol_counts_after[symbol_name] = (
-            held_symbol_counts_after.get(symbol_name, 0) + 1
-        )
-        # Track sensor-bucket entries so the WR-gate sensor is fed when
-        # they adaptively close on a future run. Self-filters to
-        # sensor_bucket; no-op when the gate is unconfigured. entry_date
-        # is the signal date here (the cron evaluates on the signal day;
-        # the fill lands T+1), which is exactly what the sensor expects.
-        register_wr_gate_pending_entry(
-            state,
-            config.wr_gate,
-            bucket_label,
-            symbol_name,
-            candidate_record.entry_date,
-            candidate_record.tp_pct,
-            adaptive.min_hold_tp,
-            candidate_record.max_hold,
-        )
+    )
+    tradable_records = [candidate[-1] for candidate in candidates]
 
     # ------------------------------------------------------------------
-    # Step G. Build new signal_trades dict (retained held + new accepted).
+    # Step G. Carry forward the ADAPTIVE TP/SL virtual reference trades that
+    # were already open and did not close in Step C. Today's tradable signals
+    # are added in Step I as new statistical observations. No portfolio slot,
+    # dashboard decision, Futu position, or order outcome participates here.
     # ------------------------------------------------------------------
-    accepted_per_strategy: Dict[str, List[Dict[str, str]]] = {
+    retained_adaptive_tp_sl_virtual_trades_per_strategy: Dict[
+        str, List[Dict[str, str]]
+    ] = {
         strategy_identifier: [
             {
                 "symbol": entry["symbol"],
                 "entry_date": entry.get("entry_date", ""),
                 # Preserve bucket attribution so buckets sharing a
-                # strategy_id keep their held positions separable.
+                # strategy_id keep their reference trades separable.
                 **(
                     {"bucket": entry["bucket"]}
                     if entry.get("bucket")
@@ -1860,30 +2096,33 @@ def compute_today_signals(
             }
             for entry in retained
         ]
-        for strategy_identifier, retained in new_held_per_strategy.items()
+        for strategy_identifier, retained in (
+            retained_adaptive_tp_sl_virtual_trades_by_strategy.items()
+        )
     }
-    for record in accepted_records:
-        accepted_per_strategy.setdefault(record.strategy_id, []).append({
-            "symbol": record.symbol,
-            "entry_date": record.entry_date,
-            "bucket": record.bucket_label,
-        })
 
     # ------------------------------------------------------------------
-    # Step H. Slot allocation summary + per-position FROZEN_TP_SL log
-    # lines for System B parsing.
+    # Step H. Tradable-candidate summary + per-candidate FROZEN_TP_SL log
+    # lines for the dashboard/order layer.
     # ------------------------------------------------------------------
-    log_lines.append("--- multi-bucket slot allocation ---")
+    log_lines.append("--- multi-bucket tradable candidates ---")
     log_lines.append(
-        f"max_position_count={config.maximum_position_count} "
-        f"held_before_today={held_total_before_today} "
-        f"same_day_closes={same_day_close_count_global}"
+        "adaptive_tp_sl_virtual_open_trades_before_today="
+        f"{adaptive_tp_sl_virtual_open_trades_before_today_count} "
+        "adaptive_tp_sl_virtual_trades_closed_today="
+        f"{adaptive_tp_sl_virtual_trades_closed_today_count}"
     )
     log_lines.append(
-        f"accepted: {[(record.symbol, record.bucket_label) for record in accepted_records]}"
+        "tradable_candidates: "
+        f"{[(record.symbol, record.bucket_label) for record in tradable_records]}"
     )
+    filtered_out_summary = [
+        (record.symbol, record.bucket_label, reason)
+        for record, reason in filtered_out_records
+    ]
     log_lines.append(
-        f"rejected: {[(record.symbol, record.bucket_label, reason) for record, reason in rejected_records]}"
+        "filtered_out: "
+        f"{filtered_out_summary}"
     )
 
     # Machine-readable signal lines for dashboard.  These are pure strategy
@@ -1904,14 +2143,32 @@ def compute_today_signals(
 
     if virtual_closed_symbols_global:
         log_lines.append(
-            f"[VIRTUAL_CLOSED_FOR_ROLLING] symbols={virtual_closed_symbols_global}"
+            "[ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_CLOSED] "
+            f"symbols={virtual_closed_symbols_global}"
         )
 
+    winner_returns = adaptive_tp_sl_virtual_trade_history_state.get(
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_WINNER_RETURNS_KEY,
+        [],
+    )
+    loser_returns = adaptive_tp_sl_virtual_trade_history_state.get(
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_LOSER_RETURNS_KEY,
+        [],
+    )
+    pending_returns = adaptive_tp_sl_virtual_trade_history_state.get(
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_PENDING_RETURNS_KEY,
+        [],
+    )
+    closed_virtual_trades = adaptive_tp_sl_virtual_trade_history_state.get(
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_CLOSED_TRADES_KEY,
+        [],
+    )
     log_lines.append(
-        f"[ROLLING_TP_SL_STATE] winners={len(state.get('winners', []))} "
-        f"losers={len(state.get('losers', []))} "
-        f"pending_rolling={len(state.get('pending_rolling', []))} "
-        f"closed_trades={len(state.get('closed_trades', []))}"
+        "[ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_STATE] "
+        f"winner_returns={len(winner_returns)} "
+        f"loser_returns={len(loser_returns)} "
+        f"pending_returns={len(pending_returns)} "
+        f"closed_trades={len(closed_virtual_trades)}"
     )
 
     for bucket_label, bucket_def in config.bucket_definitions.items():
@@ -1923,8 +2180,8 @@ def compute_today_signals(
         ) = strategy.compute_frozen_tp_sl_for_bucket(
             bucket_def=bucket_def,
             adaptive_tp_sl=adaptive,
-            closed_winners=state.get("winners", []),
-            closed_losers=state.get("losers", []),
+            closed_winners=winner_returns,
+            closed_losers=loser_returns,
             entry_slope_60=None,
         )
         max_hold_text = (
@@ -1952,12 +2209,12 @@ def compute_today_signals(
     # buckets — non-gated entries always read wr_degrading=False.
     wr_gate_degrading = False
     if config.wr_gate is not None:
-        sensor_state = state.get("wr_gate_sensor")
+        sensor_state = state_document.get("wr_gate_sensor")
         if sensor_state is not None:
             wr_gate_degrading = strategy.evaluate_wr_gate_phantom(
                 sensor_state, config.wr_gate
             )
-    for record in accepted_records:
+    for record in tradable_records:
         slope_text = (
             f"{record.slope_60:.4f}" if record.slope_60 is not None else "None"
         )
@@ -1985,16 +2242,16 @@ def compute_today_signals(
         )
 
     # ------------------------------------------------------------------
-    # Step I. Persist accepted_entries to state so place_tp_sl.py can
-    # look up per-position frozen TP/SL. Carryover preserves prior frozen
-    # values for held positions (never re-frozen mid-trade).
+    # Step I. Persist retained reference trades and start one new ADAPTIVE
+    # TP/SL virtual trade for every tradable signal. These observations follow
+    # the raw strategy through its eventual signal exit even when dashboard
+    # allocation rejects the signal or a real order never fills.
     # ------------------------------------------------------------------
     def _resolve_min_hold_sl_for_bucket(bucket_label: str) -> int:
         """Resolve effective min_hold_sl mirroring strategy.py:1999-2014.
 
-        Captured at entry-time so place_tp_sl uses the value that was in
-        force when the trade was opened, not the current (possibly later)
-        config. This keeps live SL gating in lockstep with the simulator.
+        Captured at signal-time so the virtual reference trade retains the
+        value that was in force when its statistical observation began.
         """
         bucket_def_local = config.bucket_definitions.get(bucket_label)
         if bucket_def_local is None:
@@ -2012,86 +2269,157 @@ def compute_today_signals(
             )
         return int(config.minimum_holding_bars)
 
-    prior_entries_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {
-        (e.get("strategy_id", ""), e.get("symbol", "")): e
-        for e in state.get("accepted_entries", [])
+    prior_virtual_trades_by_key: Dict[
+        Tuple[str, str, str, str], Dict[str, Any]
+    ] = {
+        (
+            adaptive_tp_sl_virtual_open_trade.get("strategy_id", ""),
+            adaptive_tp_sl_virtual_open_trade.get("bucket", ""),
+            adaptive_tp_sl_virtual_open_trade.get("symbol", ""),
+            adaptive_tp_sl_virtual_open_trade.get("entry_date", ""),
+        ): adaptive_tp_sl_virtual_open_trade
+        for adaptive_tp_sl_virtual_open_trade in (
+            adaptive_tp_sl_virtual_trade_history_state.get(
+                adaptive_tp_sl_virtual_trade_history.
+                ADAPTIVE_TP_SL_VIRTUAL_OPEN_TRADES_KEY,
+                [],
+            )
+        )
     }
-    new_records_by_key: Dict[Tuple[str, str], AcceptedEntry] = {
-        (rec.strategy_id, rec.symbol): rec for rec in accepted_records
-    }
-    persisted_entries: List[Dict[str, Any]] = []
-    for strategy_identifier, position_list in accepted_per_strategy.items():
-        for position_record in position_list:
-            symbol_value = position_record.get("symbol", "")
-            key = (strategy_identifier, symbol_value)
-            new_record = new_records_by_key.get(key)
-            if new_record is not None:
-                persisted_entries.append({
-                    "entry_date": new_record.entry_date,
-                    "bucket": new_record.bucket_label,
-                    "strategy_id": new_record.strategy_id,
-                    "symbol": new_record.symbol,
-                    "dollar_volume_rank": int(new_record.dollar_volume_rank),
-                    "tp_pct": round(new_record.tp_pct, 6),
-                    "sl_pct": round(new_record.sl_pct, 6),
-                    "rolling_mp": round(new_record.rolling_mp, 6),
+    persisted_adaptive_tp_sl_virtual_open_trades: List[Dict[str, Any]] = []
+    persisted_virtual_trade_keys: set[Tuple[str, str, str, str]] = set()
+    for strategy_identifier, adaptive_tp_sl_virtual_trade_list in (
+        retained_adaptive_tp_sl_virtual_trades_per_strategy.items()
+    ):
+        for adaptive_tp_sl_virtual_trade_record in (
+            adaptive_tp_sl_virtual_trade_list
+        ):
+            symbol_value = adaptive_tp_sl_virtual_trade_record.get(
+                "symbol", ""
+            )
+            bucket_label = adaptive_tp_sl_virtual_trade_record.get(
+                "bucket", ""
+            )
+            entry_date_string = adaptive_tp_sl_virtual_trade_record.get(
+                "entry_date", ""
+            )
+            key = (
+                strategy_identifier,
+                bucket_label,
+                symbol_value,
+                entry_date_string,
+            )
+            if key in persisted_virtual_trade_keys:
+                continue
+            prior = prior_virtual_trades_by_key.get(key)
+            if prior is None:
+                continue
+            # Backfill fields on legacy virtual-history records only.
+            if "min_hold_sl" not in prior:
+                prior = {
+                    **prior,
                     "min_hold_sl": _resolve_min_hold_sl_for_bucket(
-                        new_record.bucket_label
+                        bucket_label
                     ),
-                    "max_hold": new_record.max_hold,
-                    "reset_hold_on_reentry_signal": (
-                        new_record.reset_hold_on_reentry_signal
+                }
+            if "disable_sl_trigger" not in prior:
+                prior = {
+                    **prior,
+                    "disable_sl_trigger": bool(
+                        adaptive.disable_sl_trigger
                     ),
-                    "disable_sl_trigger": bool(adaptive.disable_sl_trigger),
-                    "slope_60": (
-                        round(new_record.slope_60, 6)
-                        if new_record.slope_60 is not None else None
-                    ),
-                    "near_delta": (
-                        round(new_record.near_delta, 6)
-                        if new_record.near_delta is not None else None
-                    ),
-                })
-            else:
-                # Carryover: held position retains its original frozen
-                # tp_pct/sl_pct from when it was first accepted. If no
-                # prior record exists, the position is an orphan from
-                # the live side (will surface as [ORPHAN_POSITION] in
-                # place_tp_sl); we do not synthesize a record here.
-                prior = prior_entries_by_key.get(key)
-                if prior is not None:
-                    # Backfill min_hold_sl on records persisted before
-                    # this field existed. Backfill uses CURRENT config —
-                    # not strictly "frozen-at-entry" semantics for those
-                    # legacy records, but the alternative is None which
-                    # would force place_tp_sl to use its hard-coded
-                    # default. Acceptable transition cost.
-                    if "min_hold_sl" not in prior:
-                        bucket_label_for_prior = prior.get(
-                            "bucket", ""
-                        )
-                        prior = {
-                            **prior,
-                            "min_hold_sl": (
-                                _resolve_min_hold_sl_for_bucket(
-                                    bucket_label_for_prior
-                                )
-                            ),
-                        }
-                    if "disable_sl_trigger" not in prior:
-                        prior = {
-                            **prior,
-                            "disable_sl_trigger": bool(
-                                adaptive.disable_sl_trigger
-                            ),
-                        }
-                    persisted_entries.append(prior)
-    state["accepted_entries"] = persisted_entries
+                }
+            persisted_adaptive_tp_sl_virtual_open_trades.append(prior)
+            persisted_virtual_trade_keys.add(key)
+
+    # TODO: review
+    newly_started_virtual_trade_count = 0
+    for tradable_record in tradable_records:
+        virtual_trade_key = (
+            tradable_record.strategy_id,
+            tradable_record.bucket_label,
+            tradable_record.symbol,
+            tradable_record.entry_date,
+        )
+        if virtual_trade_key in persisted_virtual_trade_keys:
+            continue
+
+        persisted_adaptive_tp_sl_virtual_open_trades.append({
+            "entry_date": tradable_record.entry_date,
+            "bucket": tradable_record.bucket_label,
+            "strategy_id": tradable_record.strategy_id,
+            "symbol": tradable_record.symbol,
+            "dollar_volume_rank": tradable_record.dollar_volume_rank,
+            "tp_pct": tradable_record.tp_pct,
+            "sl_pct": tradable_record.sl_pct,
+            "rolling_mp": tradable_record.rolling_mp,
+            "min_hold_sl": _resolve_min_hold_sl_for_bucket(
+                tradable_record.bucket_label
+            ),
+            "max_hold": tradable_record.max_hold,
+            "reset_hold_on_reentry_signal": (
+                tradable_record.reset_hold_on_reentry_signal
+            ),
+            "disable_sl_trigger": bool(adaptive.disable_sl_trigger),
+            "slope_60": tradable_record.slope_60,
+            "near_delta": tradable_record.near_delta,
+        })
+        persisted_virtual_trade_keys.add(virtual_trade_key)
+        newly_started_virtual_trade_count += 1
+        register_wr_gate_pending_adaptive_tp_sl_virtual_trade(
+            state_document,
+            config.wr_gate,
+            tradable_record.bucket_label,
+            tradable_record.symbol,
+            tradable_record.entry_date,
+            tradable_record.tp_pct,
+            adaptive.min_hold_tp,
+            tradable_record.max_hold,
+        )
+
+    adaptive_tp_sl_virtual_trade_history_state[
+        adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_OPEN_TRADES_KEY
+    ] = persisted_adaptive_tp_sl_virtual_open_trades
+
+    log_lines.append(
+        "[ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_ADMISSION] "
+        f"tradable_signals={len(tradable_records)} "
+        f"new_open_trades={newly_started_virtual_trade_count} "
+        "source=cron_tradable_signals"
+    )
+
+    adaptive_tp_sl_virtual_open_trades_after_today: Dict[
+        str, List[Dict[str, str]]
+    ] = {}
+    for persisted_virtual_trade in (
+        persisted_adaptive_tp_sl_virtual_open_trades
+    ):
+        strategy_identifier = str(
+            persisted_virtual_trade.get("strategy_id", "")
+        )
+        if not strategy_identifier:
+            continue
+        adaptive_tp_sl_virtual_open_trades_after_today.setdefault(
+            strategy_identifier,
+            [],
+        ).append({
+            "symbol": str(persisted_virtual_trade.get("symbol", "")),
+            "entry_date": str(
+                persisted_virtual_trade.get("entry_date", "")
+            ),
+            **(
+                {"bucket": str(persisted_virtual_trade["bucket"])}
+                if persisted_virtual_trade.get("bucket")
+                else {}
+            ),
+        })
 
     return TodaySignalsResult(
         eval_date_string=eval_date_string,
-        accepted_per_strategy=accepted_per_strategy,
-        accepted_records=accepted_records,
-        rejected_records=rejected_records,
+        retained_adaptive_tp_sl_virtual_trades_per_strategy=(
+            adaptive_tp_sl_virtual_open_trades_after_today
+        ),
+        tradable_records=tradable_records,
+        filtered_out_records=filtered_out_records,
         log_lines=log_lines,
     )

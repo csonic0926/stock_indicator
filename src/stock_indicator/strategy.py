@@ -21,6 +21,7 @@ import re
 import numpy
 import pandas
 
+from . import adaptive_tp_sl_virtual_trade_history
 from .indicators import bsv, ema, ftd, kalman_filter, rsi, sma
 from .chip_filter import calculate_chip_concentration_metrics
 from .simulator import (
@@ -634,6 +635,18 @@ class TradeDetail:
     # Adaptive TP/SL percentages applied to this trade (exit detail only).
     adaptive_tp_pct: float | None = None
     adaptive_sl_pct: float | None = None
+    # Cohort co-movement token at the entry decision bar. The symbol return,
+    # cohort median return, and market return are all measured over the same
+    # trailing trading-bar window ending at the signal date, so the token reads
+    # only information available before the entry fill. The idiosyncratic gap
+    # is symbol_return - cohort_median_return; large negative values mean the
+    # candidate fell much harder than its FF12 cohort.
+    cohort_symbol_lookback_return: float | None = None
+    cohort_median_lookback_return: float | None = None
+    cohort_market_lookback_return: float | None = None
+    cohort_idiosyncratic_gap: float | None = None
+    cohort_negative_peer_share: float | None = None
+    cohort_peer_count: int = 0
 
 
 @dataclass
@@ -842,6 +855,112 @@ class ComplexStrategySetDefinition:
     # groups are removed before dollar-volume ranking, so freed TopN/PickN
     # slots can be taken by surviving groups instead of becoming dead slots.
     skipped_fama_french_groups: set[int] = field(default_factory=set)
+    # TODO: review
+    # Cohort co-movement gate: reject an entry when the symbol shows a deep
+    # trailing drawdown but its current FF12 cohort did not sell off with it.
+    # The gate is intentionally per-bucket because it is an entry-premise
+    # filter for fish-head/vacuum-turn style buckets, not a global rule.
+    cohort_co_movement_gate: "CohortCoMovementGateConfig | None" = None
+
+
+# TODO: review
+@dataclass
+class CohortCoMovementGateConfig:
+    """Reject isolated deep drawdowns that lack FF12 cohort confirmation.
+
+    The predicate is deliberately one-sided:
+
+    * symbol_return <= deep_symbol_drawdown_threshold
+    * cohort_median_return > cohort_selloff_threshold
+    * idiosyncratic_gap <= idiosyncratic_gap_threshold
+
+    When all three hold, the drawdown is treated as stock-specific instead of
+    basket/mechanical selling. Missing data never rejects a candidate; the gate
+    needs positive evidence that the cohort failed to participate.
+    """
+
+    lookback_bars: int = 20
+    deep_symbol_drawdown_threshold: float = -0.10
+    cohort_selloff_threshold: float = -0.02
+    idiosyncratic_gap_threshold: float = -0.10
+    minimum_peer_count: int = 5
+
+
+# TODO: review
+def parse_cohort_co_movement_gate_config(
+    raw_config: Any,
+    *,
+    bucket_label: str,
+) -> CohortCoMovementGateConfig | None:
+    """Parse the optional per-bucket cohort co-movement gate config."""
+
+    if raw_config in (None, False, ""):
+        return None
+    if raw_config is True:
+        gate_config = CohortCoMovementGateConfig()
+    elif isinstance(raw_config, dict):
+        try:
+            gate_config = CohortCoMovementGateConfig(
+                lookback_bars=int(raw_config.get("lookback_bars", 20)),
+                deep_symbol_drawdown_threshold=float(
+                    raw_config.get("deep_symbol_drawdown_threshold", -0.10)
+                ),
+                cohort_selloff_threshold=float(
+                    raw_config.get("cohort_selloff_threshold", -0.02)
+                ),
+                idiosyncratic_gap_threshold=float(
+                    raw_config.get("idiosyncratic_gap_threshold", -0.10)
+                ),
+                minimum_peer_count=int(raw_config.get("minimum_peer_count", 5)),
+            )
+        except (TypeError, ValueError) as parse_error:
+            raise ValueError(
+                f"bucket {bucket_label}: cohort_co_movement_gate values "
+                "must be numeric"
+            ) from parse_error
+    else:
+        raise ValueError(
+            f"bucket {bucket_label}: cohort_co_movement_gate must be a JSON "
+            "object, true, false, or null"
+        )
+    if gate_config.lookback_bars <= 0:
+        raise ValueError(
+            f"bucket {bucket_label}: cohort_co_movement_gate.lookback_bars "
+            "must be positive"
+        )
+    if gate_config.minimum_peer_count < 1:
+        raise ValueError(
+            f"bucket {bucket_label}: cohort_co_movement_gate.minimum_peer_count "
+            "must be positive"
+        )
+    return gate_config
+
+
+# TODO: review
+def should_skip_for_cohort_co_movement_gate(
+    entry_detail: TradeDetail,
+    gate_config: CohortCoMovementGateConfig | None,
+) -> bool:
+    """Return True when the entry looks like an isolated deep drawdown."""
+
+    if gate_config is None:
+        return False
+    if entry_detail.cohort_peer_count < gate_config.minimum_peer_count:
+        return False
+    symbol_return = entry_detail.cohort_symbol_lookback_return
+    cohort_median_return = entry_detail.cohort_median_lookback_return
+    idiosyncratic_gap = entry_detail.cohort_idiosyncratic_gap
+    if (
+        symbol_return is None
+        or cohort_median_return is None
+        or idiosyncratic_gap is None
+    ):
+        return False
+    return (
+        symbol_return <= gate_config.deep_symbol_drawdown_threshold
+        and cohort_median_return > gate_config.cohort_selloff_threshold
+        and idiosyncratic_gap <= gate_config.idiosyncratic_gap_threshold
+    )
 
 
 @dataclass
@@ -851,7 +970,8 @@ class AdaptiveTPSLConfig:
     TP = rolling_MP + sigma_multiplier * rolling_σ_profit.
     SL sensor = median rolling raw signal loss, capped by fixed_sl when set.
 
-    TP/SL rolling uses accepted signal history only.  Sector-specific rolling
+    TP/SL rolling uses raw signal-trade outcomes rather than adaptive or
+    broker exits. Sector-specific rolling
     was removed because repeated tests showed signal-based rolling is the
     useful mechanism.
     """
@@ -2057,6 +2177,11 @@ def run_complex_simulation(
                 adaptive_tp_sl.evict_oldest if adaptive_tp_sl is not None else False
             ),
             pre_cross_signal_lookback=definition.pre_cross_signal_lookback,
+            cohort_lookback_bars=(
+                definition.cohort_co_movement_gate.lookback_bars
+                if definition.cohort_co_movement_gate is not None
+                else None
+            ),
             additional_above_ranges=definition.additional_above_ranges,
             reset_hold_on_reentry_signal=definition.reset_hold_on_reentry_signal,
             risk_score_stop_months=(
@@ -2189,8 +2314,8 @@ def run_complex_simulation(
     # Adaptive TP/SL state: rolling window of recently closed trades, split
     # by outcome so TP and SL each draw from their own last-N sample.
     # Each deque holds signed pct values: winners > 0 only, losers < 0 only.
-    adaptive_closed_winners: deque[float] = deque()
-    adaptive_closed_losers: deque[float] = deque()
+    adaptive_tp_sl_virtual_trade_winner_returns: deque[float] = deque()
+    adaptive_tp_sl_virtual_trade_loser_returns: deque[float] = deque()
     # Map from original trade id -> adjusted trade for adaptive mode.
     adaptive_trade_map: Dict[int, Trade] = {}
     # Reverse map: adjusted trade -> original trade (for detail pair lookups).
@@ -2210,9 +2335,12 @@ def run_complex_simulation(
     adaptive_close_heap: list[tuple[pandas.Timestamp, int, str, int]] = []
     adaptive_close_counter = 0
     # When delayed_rolling_update is True, closed trade pcts are buffered
-    # here and only flushed into adaptive_closed_winners / adaptive_closed_losers
+    # here and only flushed into the ADAPTIVE TP/SL virtual-trade winner and
+    # loser return samples
     # when an entry event on a LATER date is processed.
-    pending_rolling_updates: list[tuple[pandas.Timestamp, float]] = []
+    pending_adaptive_tp_sl_virtual_trade_return_updates: list[
+        tuple[pandas.Timestamp, float]
+    ] = []
     # Phantom-gate sensor stream: (close_date, win, exit_reason) of the
     # sensor bucket's adaptive closes, in close order. Consulted at each
     # gated entry with strictly-earlier closes only (no lookahead).
@@ -2478,9 +2606,9 @@ def run_complex_simulation(
             next_close = adaptive_close_heap[0] if adaptive_close_heap else None
 
             # Cold-start snapshot for production multi_bucket_today: capture
-            # rolling state at the boundary into export_state_at_date so
-            # production resumes with the same winners/losers/pending the
-            # simulator would have seen on that day's first event.
+            # the ADAPTIVE TP/SL virtual trade return history at the boundary
+            # so production resumes with the same statistical reference
+            # sample the simulator would have seen on that day's first event.
             if (
                 export_state_at_date is not None
                 and exported_state is not None
@@ -2503,14 +2631,31 @@ def run_complex_simulation(
                     exported_state["captured_at_date"] = (
                         export_state_at_date.strftime("%Y-%m-%d")
                     )
-                    exported_state["winners"] = list(adaptive_closed_winners)
-                    exported_state["losers"] = list(adaptive_closed_losers)
-                    exported_state["pending_rolling"] = [
+                    exported_adaptive_tp_sl_virtual_trade_history = (
+                        adaptive_tp_sl_virtual_trade_history.
+                        get_adaptive_tp_sl_virtual_trade_history(
+                            exported_state
+                        )
+                    )
+                    exported_adaptive_tp_sl_virtual_trade_history[
+                        adaptive_tp_sl_virtual_trade_history.
+                        ADAPTIVE_TP_SL_VIRTUAL_WINNER_RETURNS_KEY
+                    ] = list(adaptive_tp_sl_virtual_trade_winner_returns)
+                    exported_adaptive_tp_sl_virtual_trade_history[
+                        adaptive_tp_sl_virtual_trade_history.
+                        ADAPTIVE_TP_SL_VIRTUAL_LOSER_RETURNS_KEY
+                    ] = list(adaptive_tp_sl_virtual_trade_loser_returns)
+                    exported_adaptive_tp_sl_virtual_trade_history[
+                        adaptive_tp_sl_virtual_trade_history.
+                        ADAPTIVE_TP_SL_VIRTUAL_PENDING_RETURNS_KEY
+                    ] = [
                         {
                             "closed_date": closed_date.strftime("%Y-%m-%d"),
                             "pct": float(closed_pct),
                         }
-                        for closed_date, closed_pct in pending_rolling_updates
+                        for closed_date, closed_pct in (
+                            pending_adaptive_tp_sl_virtual_trade_return_updates
+                        )
                     ]
                     if wr_gate is not None:
                         exported_state["wr_gate_sensor"] = (
@@ -2712,18 +2857,32 @@ def run_complex_simulation(
                             adaptive_tp_sl.delayed_rolling_update
                             or rolling_update_date > close_date
                         ):
-                            pending_rolling_updates.append(
+                            pending_adaptive_tp_sl_virtual_trade_return_updates.append(
                                 (rolling_update_date, pct)
                             )
                         else:
                             if pct > 0:
-                                adaptive_closed_winners.append(pct)
-                                if len(adaptive_closed_winners) > adaptive_tp_sl.window:
-                                    adaptive_closed_winners.popleft()
+                                adaptive_tp_sl_virtual_trade_winner_returns.append(
+                                    pct
+                                )
+                                if (
+                                    len(
+                                        adaptive_tp_sl_virtual_trade_winner_returns
+                                    )
+                                    > adaptive_tp_sl.window
+                                ):
+                                    adaptive_tp_sl_virtual_trade_winner_returns.popleft()
                             elif pct < 0:
-                                adaptive_closed_losers.append(pct)
-                                if len(adaptive_closed_losers) > adaptive_tp_sl.window:
-                                    adaptive_closed_losers.popleft()
+                                adaptive_tp_sl_virtual_trade_loser_returns.append(
+                                    pct
+                                )
+                                if (
+                                    len(
+                                        adaptive_tp_sl_virtual_trade_loser_returns
+                                    )
+                                    > adaptive_tp_sl.window
+                                ):
+                                    adaptive_tp_sl_virtual_trade_loser_returns.popleft()
             else:
                 (
                     event_date,
@@ -2736,21 +2895,39 @@ def run_complex_simulation(
                 ) = entry_events.popleft()
                 # Flush pending rolling updates from trades that closed
                 # strictly before this entry date (delayed_rolling_update).
-                if pending_rolling_updates:
+                if pending_adaptive_tp_sl_virtual_trade_return_updates:
                     remaining: list[tuple[pandas.Timestamp, float]] = []
-                    for closed_date, closed_pct in pending_rolling_updates:
+                    for closed_date, closed_pct in (
+                        pending_adaptive_tp_sl_virtual_trade_return_updates
+                    ):
                         if closed_date < event_date:
                             if closed_pct > 0:
-                                adaptive_closed_winners.append(closed_pct)
-                                if len(adaptive_closed_winners) > adaptive_tp_sl.window:
-                                    adaptive_closed_winners.popleft()
+                                adaptive_tp_sl_virtual_trade_winner_returns.append(
+                                    closed_pct
+                                )
+                                if (
+                                    len(
+                                        adaptive_tp_sl_virtual_trade_winner_returns
+                                    )
+                                    > adaptive_tp_sl.window
+                                ):
+                                    adaptive_tp_sl_virtual_trade_winner_returns.popleft()
                             elif closed_pct < 0:
-                                adaptive_closed_losers.append(closed_pct)
-                                if len(adaptive_closed_losers) > adaptive_tp_sl.window:
-                                    adaptive_closed_losers.popleft()
+                                adaptive_tp_sl_virtual_trade_loser_returns.append(
+                                    closed_pct
+                                )
+                                if (
+                                    len(
+                                        adaptive_tp_sl_virtual_trade_loser_returns
+                                    )
+                                    > adaptive_tp_sl.window
+                                ):
+                                    adaptive_tp_sl_virtual_trade_loser_returns.popleft()
                         else:
                             remaining.append((closed_date, closed_pct))
-                    pending_rolling_updates[:] = remaining
+                    pending_adaptive_tp_sl_virtual_trade_return_updates[:] = (
+                        remaining
+                    )
                 # Reset same-day close counter when we move to a new date.
                 if last_close_date is not None and event_date > last_close_date:
                     same_day_close_count = 0
@@ -2777,6 +2954,7 @@ def run_complex_simulation(
                     )
                     or _bucket_def_slope.v_filter_threshold is not None
                     or _bucket_def_slope.fuel_drawdown_max is not None
+                    or _bucket_def_slope.cohort_co_movement_gate is not None
                 )
                 if _need_detail:
                     _detail_pair = artifacts_by_set[label].trade_detail_pairs.get(
@@ -2843,6 +3021,11 @@ def run_complex_simulation(
                                 > _bucket_def_slope.fuel_drawdown_max
                             ):
                                 continue
+                        if should_skip_for_cohort_co_movement_gate(
+                            _detail_pair[0],
+                            _bucket_def_slope.cohort_co_movement_gate,
+                        ):
+                            continue
                 if use_evict_oldest and trade_sym:
                     refreshed_trade_identifier: int | None = None
                     for open_identifier, open_symbol in open_trade_symbols.items():
@@ -2964,16 +3147,30 @@ def run_complex_simulation(
                         if evicted_adjusted.entry_price > 0 else 0.0
                     )
                     if adaptive_tp_sl.delayed_rolling_update:
-                        pending_rolling_updates.append((event_date, evict_pct))
+                        pending_adaptive_tp_sl_virtual_trade_return_updates.append(
+                            (event_date, evict_pct)
+                        )
                     else:
                         if evict_pct > 0:
-                            adaptive_closed_winners.append(evict_pct)
-                            if len(adaptive_closed_winners) > adaptive_tp_sl.window:
-                                adaptive_closed_winners.popleft()
+                            adaptive_tp_sl_virtual_trade_winner_returns.append(
+                                evict_pct
+                            )
+                            if (
+                                len(
+                                    adaptive_tp_sl_virtual_trade_winner_returns
+                                )
+                                > adaptive_tp_sl.window
+                            ):
+                                adaptive_tp_sl_virtual_trade_winner_returns.popleft()
                         elif evict_pct < 0:
-                            adaptive_closed_losers.append(evict_pct)
-                            if len(adaptive_closed_losers) > adaptive_tp_sl.window:
-                                adaptive_closed_losers.popleft()
+                            adaptive_tp_sl_virtual_trade_loser_returns.append(
+                                evict_pct
+                            )
+                            if (
+                                len(adaptive_tp_sl_virtual_trade_loser_returns)
+                                > adaptive_tp_sl.window
+                            ):
+                                adaptive_tp_sl_virtual_trade_loser_returns.popleft()
                     # Eviction is deliberate (not subject to lookahead like
                     # TP/SL closes), so do NOT increment same_day_close_count.
                     current_open_total = len(open_trade_keys) + same_day_close_count
@@ -3011,8 +3208,12 @@ def run_complex_simulation(
                 ) = compute_frozen_tp_sl_for_bucket(
                     bucket_def=bucket_def,
                     adaptive_tp_sl=adaptive_tp_sl,
-                    closed_winners=adaptive_closed_winners,
-                    closed_losers=adaptive_closed_losers,
+                    closed_winners=(
+                        adaptive_tp_sl_virtual_trade_winner_returns
+                    ),
+                    closed_losers=(
+                        adaptive_tp_sl_virtual_trade_loser_returns
+                    ),
                     entry_slope_60=_entry_slope_60_for_amplify,
                 )
                 _tp_pct_late: float | None = None
@@ -3245,14 +3446,31 @@ def run_complex_simulation(
             exported_state["captured_at_date"] = (
                 export_state_at_date.strftime("%Y-%m-%d")
             )
-            exported_state["winners"] = list(adaptive_closed_winners)
-            exported_state["losers"] = list(adaptive_closed_losers)
-            exported_state["pending_rolling"] = [
+            exported_adaptive_tp_sl_virtual_trade_history = (
+                adaptive_tp_sl_virtual_trade_history.
+                get_adaptive_tp_sl_virtual_trade_history(
+                    exported_state
+                )
+            )
+            exported_adaptive_tp_sl_virtual_trade_history[
+                adaptive_tp_sl_virtual_trade_history.
+                ADAPTIVE_TP_SL_VIRTUAL_WINNER_RETURNS_KEY
+            ] = list(adaptive_tp_sl_virtual_trade_winner_returns)
+            exported_adaptive_tp_sl_virtual_trade_history[
+                adaptive_tp_sl_virtual_trade_history.
+                ADAPTIVE_TP_SL_VIRTUAL_LOSER_RETURNS_KEY
+            ] = list(adaptive_tp_sl_virtual_trade_loser_returns)
+            exported_adaptive_tp_sl_virtual_trade_history[
+                adaptive_tp_sl_virtual_trade_history.
+                ADAPTIVE_TP_SL_VIRTUAL_PENDING_RETURNS_KEY
+            ] = [
                 {
                     "closed_date": closed_date.strftime("%Y-%m-%d"),
                     "pct": float(closed_pct),
                 }
-                for closed_date, closed_pct in pending_rolling_updates
+                for closed_date, closed_pct in (
+                    pending_adaptive_tp_sl_virtual_trade_return_updates
+                )
             ]
             if wr_gate is not None:
                 exported_state["wr_gate_sensor"] = (
@@ -3303,6 +3521,17 @@ def run_complex_simulation(
                     trade,
                     "",
                 )
+                entry_detail_pair = artifacts_by_set[label].trade_detail_pairs.get(
+                    trade
+                )
+                if (
+                    entry_detail_pair is not None
+                    and should_skip_for_cohort_co_movement_gate(
+                        entry_detail_pair[0],
+                        set_definitions[label].cohort_co_movement_gate,
+                    )
+                ):
+                    continue
                 if not _is_symbol_trade_date_eligible(
                     symbol_first_eligible_trade_dates,
                     trade_symbol_name,
@@ -5684,6 +5913,7 @@ def _generate_strategy_evaluation_artifacts(
     shape_bsv_lookback: int | None = None,
     reentry_on_signal: bool = False,
     pre_cross_signal_lookback: bool = False,
+    cohort_lookback_bars: int | None = None,
     additional_above_ranges: list[tuple[float, float]] | None = None,
     reset_hold_on_reentry_signal: bool = False,
     risk_score_stop_months: set[str] | None = None,
@@ -5826,6 +6056,153 @@ def _generate_strategy_evaluation_artifacts(
             group_total_dollar_volume_by_group_and_date[group_identifier] = (
                 group_totals.to_dict()
             )
+
+    cohort_lookback_return_frame = pandas.DataFrame()
+    cohort_peer_symbols_by_group: dict[int, list[str]] = {}
+    market_lookback_return_series: pandas.Series | None = None
+    if cohort_lookback_bars is not None:
+        if cohort_lookback_bars <= 0:
+            raise ValueError("cohort_lookback_bars must be positive")
+        cohort_lookback_return_by_symbol: dict[str, pandas.Series] = {}
+        for csv_file_path, price_data_frame in symbol_frames:
+            if "close" not in price_data_frame.columns:
+                continue
+            close_series = price_data_frame["close"].sort_index()
+            cohort_lookback_return_by_symbol[csv_file_path.stem] = (
+                close_series / close_series.shift(cohort_lookback_bars) - 1.0
+            )
+        if cohort_lookback_return_by_symbol:
+            cohort_lookback_return_frame = pandas.concat(
+                cohort_lookback_return_by_symbol,
+                axis=1,
+            )
+        for symbol_name in cohort_lookback_return_by_symbol:
+            group_identifier = symbol_to_fama_french_group_id_for_details.get(
+                symbol_name.upper()
+            )
+            if group_identifier is not None:
+                cohort_peer_symbols_by_group.setdefault(
+                    group_identifier,
+                    [],
+                ).append(symbol_name)
+        market_price_path = data_directory / f"{SP500_SYMBOL}.csv"
+        if market_price_path.exists():
+            market_price_frame = load_price_data(market_price_path)
+            if not market_price_frame.empty and "close" in market_price_frame.columns:
+                market_close_series = market_price_frame["close"].sort_index()
+                market_lookback_return_series = (
+                    market_close_series
+                    / market_close_series.shift(cohort_lookback_bars)
+                    - 1.0
+                )
+
+    def _lookup_lookback_return_on_or_before(
+        lookback_return_series: pandas.Series | None,
+        decision_date: pandas.Timestamp,
+    ) -> float | None:
+        """Return the latest lookback return known on or before a date."""
+
+        if lookback_return_series is None or lookback_return_series.empty:
+            return None
+        known_return_series = lookback_return_series.loc[
+            lookback_return_series.index <= decision_date
+        ].dropna()
+        if known_return_series.empty:
+            return None
+        return float(known_return_series.iloc[-1])
+
+    def _compute_cohort_co_movement_values(
+        symbol_name: str,
+        signal_date: pandas.Timestamp,
+    ) -> dict[str, float | int | None]:
+        """Compute FF12 cohort co-movement values for one entry signal."""
+
+        empty_values: dict[str, float | int | None] = {
+            "symbol_return": None,
+            "cohort_median_return": None,
+            "market_return": None,
+            "idiosyncratic_gap": None,
+            "negative_peer_share": None,
+            "peer_count": 0,
+        }
+        if cohort_lookback_return_frame.empty:
+            return empty_values
+        if symbol_name not in cohort_lookback_return_frame.columns:
+            return empty_values
+        symbol_return = _lookup_lookback_return_on_or_before(
+            cohort_lookback_return_frame[symbol_name],
+            signal_date,
+        )
+        group_identifier = symbol_to_fama_french_group_id_for_details.get(
+            symbol_name.upper()
+        )
+        if group_identifier is None:
+            return {
+                **empty_values,
+                "symbol_return": symbol_return,
+                "market_return": _lookup_lookback_return_on_or_before(
+                    market_lookback_return_series,
+                    signal_date,
+                ),
+            }
+        peer_symbols = [
+            peer_symbol
+            for peer_symbol in cohort_peer_symbols_by_group.get(
+                group_identifier,
+                [],
+            )
+            if peer_symbol != symbol_name
+        ]
+        if not peer_symbols:
+            return {
+                **empty_values,
+                "symbol_return": symbol_return,
+                "market_return": _lookup_lookback_return_on_or_before(
+                    market_lookback_return_series,
+                    signal_date,
+                ),
+            }
+        available_dates = cohort_lookback_return_frame.index[
+            cohort_lookback_return_frame.index <= signal_date
+        ]
+        if len(available_dates) == 0:
+            return {
+                **empty_values,
+                "symbol_return": symbol_return,
+                "market_return": _lookup_lookback_return_on_or_before(
+                    market_lookback_return_series,
+                    signal_date,
+                ),
+            }
+        return_row = cohort_lookback_return_frame.loc[available_dates[-1]]
+        peer_return_series = return_row.reindex(peer_symbols).dropna()
+        if peer_return_series.empty:
+            return {
+                **empty_values,
+                "symbol_return": symbol_return,
+                "market_return": _lookup_lookback_return_on_or_before(
+                    market_lookback_return_series,
+                    signal_date,
+                ),
+            }
+        cohort_median_return = float(peer_return_series.median())
+        idiosyncratic_gap = (
+            symbol_return - cohort_median_return
+            if symbol_return is not None
+            else None
+        )
+        negative_peer_share = float((peer_return_series < 0.0).mean())
+        return {
+            "symbol_return": symbol_return,
+            "cohort_median_return": cohort_median_return,
+            "market_return": _lookup_lookback_return_on_or_before(
+                market_lookback_return_series,
+                signal_date,
+            ),
+            "idiosyncratic_gap": idiosyncratic_gap,
+            "negative_peer_share": negative_peer_share,
+            "peer_count": int(len(peer_return_series)),
+        }
 
     selected_symbol_data: List[tuple[Path, pandas.DataFrame, pandas.Series]] = []
     first_eligible_dates: List[pandas.Timestamp] = []
@@ -6252,6 +6629,10 @@ def _generate_strategy_evaluation_artifacts(
                 return float((window_closes / running_maximum - 1.0).min())
 
             fuel_drawdown_for_signal = _compute_fuel_drawdown_for_signal()
+            cohort_co_movement_values = _compute_cohort_co_movement_values(
+                symbol_name,
+                signal_date,
+            )
             sma_angle_confirmation_value = _lookup_confirmation_value("sma_angle")
             entry_detail = TradeDetail(
                 date=completed_trade.entry_date,
@@ -6282,6 +6663,49 @@ def _generate_strategy_evaluation_artifacts(
                 above_price_volume_ratio_previous=above_pv_previous_for_signal,
                 sma_angle_confirmation=sma_angle_confirmation_value,
                 signal_bar_open=completed_trade.signal_bar_open,
+                cohort_symbol_lookback_return=(
+                    cohort_co_movement_values["symbol_return"]
+                    if isinstance(
+                        cohort_co_movement_values["symbol_return"],
+                        float,
+                    )
+                    else None
+                ),
+                cohort_median_lookback_return=(
+                    cohort_co_movement_values["cohort_median_return"]
+                    if isinstance(
+                        cohort_co_movement_values["cohort_median_return"],
+                        float,
+                    )
+                    else None
+                ),
+                cohort_market_lookback_return=(
+                    cohort_co_movement_values["market_return"]
+                    if isinstance(
+                        cohort_co_movement_values["market_return"],
+                        float,
+                    )
+                    else None
+                ),
+                cohort_idiosyncratic_gap=(
+                    cohort_co_movement_values["idiosyncratic_gap"]
+                    if isinstance(
+                        cohort_co_movement_values["idiosyncratic_gap"],
+                        float,
+                    )
+                    else None
+                ),
+                cohort_negative_peer_share=(
+                    cohort_co_movement_values["negative_peer_share"]
+                    if isinstance(
+                        cohort_co_movement_values["negative_peer_share"],
+                        float,
+                    )
+                    else None
+                ),
+                cohort_peer_count=int(
+                    cohort_co_movement_values["peer_count"] or 0
+                ),
             )
             trade_result = "win" if completed_trade.profit > 0 else "lose"
             group_exit_total = 0.0

@@ -20,9 +20,12 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+
+import fcntl
 
 import pandas
 
@@ -38,8 +41,34 @@ PRODUCTION_CONFIG_PATH = DATA_DIRECTORY / "multi_bucket_production.json"
 TRADING_ENV = "REAL"
 DEFAULT_HISTORY_LOOKBACK_DAYS = 180
 DEFAULT_SL_MIN_HOLD_BARS = 1
-TERMINAL_ORDER_STATUSES = {"CANCELLED_ALL", "FILLED_ALL", "FAILED", "DELETED"}
+TERMINAL_ORDER_STATUSES = {
+    "CANCELLED_PART",
+    "CANCELLED_ALL",
+    "DISABLED",
+    "FILLED_ALL",
+    "FAILED",
+    "DELETED",
+}
 BUCKET_TP_SL_WALK_BACK_DAYS = 14
+
+
+@contextmanager
+def _exclusive_order_placement_lock() -> Iterator[None]:
+    """Serialize TP/SL placement across launchd and dashboard requests.
+
+    # TODO: review
+    The scheduler and the dashboard can otherwise query the same missing TP
+    and both submit it before either request observes the other's order.
+    """
+    live_state_directory = DATA_DIRECTORY / "live_state"
+    live_state_directory.mkdir(parents=True, exist_ok=True)
+    lock_path = live_state_directory / "place_tp_sl.lock"
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _log_order(order_data: dict[str, Any]) -> None:
@@ -272,12 +301,20 @@ def _load_futu_positions(position_data: Any) -> dict[str, dict[str, Any]]:
     return positions
 
 
-def _load_existing_sell_order_codes(order_data: Any) -> tuple[set[str], set[str]]:
-    """Return current symbols with live TP and SL orders already open."""
-    existing_take_profit_codes: set[str] = set()
+def _load_existing_sell_order_coverage(
+    order_data: Any,
+) -> tuple[dict[str, int], set[str]]:
+    """Return active TP quantities and symbols with active SL orders.
+
+    # TODO: review
+    A market BUY can fill in pieces.  Tracking only the presence of a TP would
+    leave later fills uncovered, so active NORMAL sells are summed by their
+    remaining quantity.
+    """
+    take_profit_quantity_by_code: dict[str, int] = {}
     existing_stop_loss_codes: set[str] = set()
     if order_data is None or len(order_data) == 0:
-        return existing_take_profit_codes, existing_stop_loss_codes
+        return take_profit_quantity_by_code, existing_stop_loss_codes
 
     for _, row in order_data.iterrows():
         if "SELL" not in str(row.get("trd_side", "")).upper():
@@ -290,8 +327,20 @@ def _load_existing_sell_order_codes(order_data: Any) -> tuple[set[str], set[str]
         if "STOP" in order_type_value:
             existing_stop_loss_codes.add(code)
         elif "NORMAL" in order_type_value:
-            existing_take_profit_codes.add(code)
-    return existing_take_profit_codes, existing_stop_loss_codes
+            try:
+                order_quantity = float(_row_value(row, ["qty"]) or 0)
+                dealt_quantity = float(_row_value(row, ["dealt_qty"]) or 0)
+                remaining_quantity = max(
+                    0,
+                    int(round(order_quantity - dealt_quantity)),
+                )
+            except (TypeError, ValueError, OverflowError):
+                continue
+            take_profit_quantity_by_code[code] = (
+                take_profit_quantity_by_code.get(code, 0)
+                + remaining_quantity
+            )
+    return take_profit_quantity_by_code, existing_stop_loss_codes
 
 
 def _entry_supports_take_profit_stop_loss(entry: dict[str, Any]) -> bool:
@@ -318,13 +367,18 @@ def _parse_signal_log_tokens(token_text: str) -> dict[str, Any]:
     return parsed_values
 
 
-def _load_production_signal_entries() -> dict[tuple[str, str], dict[str, Any]]:
-    """Load production [FROZEN_TP_SL] entries keyed by symbol and entry date.
+def _load_production_signal_entries(
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """Load frozen entries keyed by symbol, signal date, and bucket.
 
     Futu confirms that a live lot exists and when it opened. The production log
     maps that confirmed lot back to the bucket/config that generated the signal.
+    Bucket is part of the key because cron now publishes every tradable signal;
+    one symbol/date can therefore have both squeeze and ordinary-tail records.
     """
-    entries_by_symbol_and_date: dict[tuple[str, str], dict[str, Any]] = {}
+    entries_by_symbol_date_and_bucket: dict[
+        tuple[str, str, str], dict[str, Any]
+    ] = {}
     for log_path in sorted(LOGS_DIRECTORY.glob("*.log")):
         try:
             log_text = log_path.read_text(encoding="utf-8")
@@ -336,9 +390,12 @@ def _load_production_signal_entries() -> dict[tuple[str, str], dict[str, Any]]:
             entry = _parse_signal_log_tokens(log_line[len("[FROZEN_TP_SL]"):])
             symbol = str(entry.get("symbol") or "").upper()
             entry_date_text = str(entry.get("entry_date") or "")
-            if symbol and entry_date_text:
-                entries_by_symbol_and_date[(symbol, entry_date_text)] = entry
-    return entries_by_symbol_and_date
+            bucket_label = str(entry.get("bucket") or "")
+            if symbol and entry_date_text and bucket_label:
+                entries_by_symbol_date_and_bucket[
+                    (symbol, entry_date_text, bucket_label)
+                ] = entry
+    return entries_by_symbol_date_and_bucket
 
 
 def _load_production_bucket_tp_sl_entries() -> dict[tuple[str, str], dict[str, Any]]:
@@ -445,11 +502,68 @@ def _walk_back_bucket_tp_sl_entry(
     return best_entry, best_date_text
 
 
+def _walk_back_symbol_signal_entry(
+    *,
+    symbol: str,
+    anchor_date_text: str,
+    bucket_label: str,
+    signal_entries_by_symbol_date_and_bucket: dict[
+        tuple[str, str, str], dict[str, Any]
+    ],
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Find the closest recent per-symbol frozen TP/SL signal.
+
+    # TODO: review
+    A Friday signal can become a Sunday-created, Monday-filled broker order.
+    Matching only the broker order/fill date would discard the position's
+    frozen symbol-level TP and incorrectly fall back to the bucket default.
+    """
+    if not symbol or not anchor_date_text:
+        return None, None
+    try:
+        anchor_date = date.fromisoformat(anchor_date_text)
+    except ValueError:
+        return None, None
+
+    best_entry: dict[str, Any] | None = None
+    best_date_text: str | None = None
+    best_distance = BUCKET_TP_SL_WALK_BACK_DAYS + 1
+    for (
+        candidate_symbol,
+        candidate_date_text,
+        candidate_bucket,
+    ), candidate_entry in (
+        signal_entries_by_symbol_date_and_bucket.items()
+    ):
+        if candidate_symbol != symbol:
+            continue
+        if bucket_label and candidate_bucket != bucket_label:
+            continue
+        try:
+            candidate_date = date.fromisoformat(candidate_date_text)
+        except ValueError:
+            continue
+        if candidate_date > anchor_date:
+            continue
+        distance_days = (anchor_date - candidate_date).days
+        if distance_days > BUCKET_TP_SL_WALK_BACK_DAYS:
+            continue
+        if distance_days < best_distance:
+            best_entry = candidate_entry
+            best_date_text = candidate_date_text
+            best_distance = distance_days
+            if distance_days == 0:
+                break
+    return best_entry, best_date_text
+
+
 def _merge_production_signal_metadata(
     *,
     symbol: str,
     entry: dict[str, Any] | None,
-    signal_entries_by_symbol_and_date: dict[tuple[str, str], dict[str, Any]],
+    signal_entries_by_symbol_date_and_bucket: dict[
+        tuple[str, str, str], dict[str, Any]
+    ],
     bucket_tp_sl_entries_by_key_and_date: dict[tuple[str, str], dict[str, Any]],
     production_exit_rules: dict[str, dict[str, Any]],
 ) -> dict[str, Any] | None:
@@ -460,15 +574,36 @@ def _merge_production_signal_metadata(
         str(entry_record.get("futu_buy_order_date") or ""),
         entry_date_text,
     ]
+    entry_bucket = str(entry_record.get("bucket") or "")
     signal_entry = None
     for signal_date_text in signal_date_candidates:
         if not signal_date_text:
             continue
-        signal_entry = signal_entries_by_symbol_and_date.get(
-            (symbol, signal_date_text)
+        signal_entry = signal_entries_by_symbol_date_and_bucket.get(
+            (symbol, signal_date_text, entry_bucket)
         )
         if signal_entry is not None:
             break
+    if signal_entry is None:
+        for signal_date_text in signal_date_candidates:
+            if not signal_date_text:
+                continue
+            signal_entry, matched_date_text = _walk_back_symbol_signal_entry(
+                symbol=symbol,
+                anchor_date_text=signal_date_text,
+                bucket_label=entry_bucket,
+                signal_entries_by_symbol_date_and_bucket=(
+                    signal_entries_by_symbol_date_and_bucket
+                ),
+            )
+            if signal_entry is not None:
+                LOGGER.info(
+                    "[SIGNAL_TP_SL_WALK_BACK] symbol=%s anchor=%s matched=%s",
+                    symbol,
+                    signal_date_text,
+                    matched_date_text,
+                )
+                break
     if signal_entry is None:
         bucket_candidates = [
             str(entry_record.get("bucket") or ""),
@@ -527,7 +662,10 @@ def _merge_production_signal_metadata(
     return merged_entry
 
 
-def main() -> None:
+def _place_missing_take_profit_stop_loss_orders(
+    *,
+    require_complete_take_profit_coverage: bool,
+) -> None:
     """Place missing TP/SL orders for live Futu positions."""
     from futu import (
         OpenSecTradeContext,
@@ -557,6 +695,8 @@ def main() -> None:
         )
         if return_code != 0:
             LOGGER.error("Failed to query positions: %s", position_data)
+            if require_complete_take_profit_coverage:
+                raise RuntimeError("Failed to query live positions")
             return
 
         positions = _load_futu_positions(position_data)
@@ -578,9 +718,11 @@ def main() -> None:
         )
         if return_code != 0:
             LOGGER.error("Failed to query open orders: %s", order_data)
+            if require_complete_take_profit_coverage:
+                raise RuntimeError("Failed to query live broker orders")
             return
-        existing_take_profit_codes, existing_stop_loss_codes = (
-            _load_existing_sell_order_codes(order_data)
+        take_profit_quantity_by_code, existing_stop_loss_codes = (
+            _load_existing_sell_order_coverage(order_data)
         )
 
         today_text = date.today().isoformat()
@@ -589,18 +731,41 @@ def main() -> None:
             trading_environment,
             as_of_date_text=today_text,
         )
-        signal_entries_by_symbol_and_date = _load_production_signal_entries()
+        signal_entries_by_symbol_date_and_bucket = (
+            _load_production_signal_entries()
+        )
         bucket_tp_sl_entries_by_key_and_date = _load_production_bucket_tp_sl_entries()
         production_exit_rules = _load_production_exit_rules()
+        incomplete_take_profit_reasons: list[str] = []
 
         LOGGER.info("--- TP check ---")
         for code, position in positions.items():
             symbol = code.replace("US.", "")
+            covered_take_profit_quantity = take_profit_quantity_by_code.get(
+                code,
+                0,
+            )
+            uncovered_take_profit_quantity = max(
+                0,
+                position["qty"] - covered_take_profit_quantity,
+            )
+            if uncovered_take_profit_quantity <= 0:
+                LOGGER.info(
+                    "%s: TP already covers qty=%d, skip",
+                    symbol,
+                    position["qty"],
+                )
+                continue
+
             entry = _merge_production_signal_metadata(
                 symbol=symbol,
                 entry=open_entries_by_symbol.get(symbol),
-                signal_entries_by_symbol_and_date=signal_entries_by_symbol_and_date,
-                bucket_tp_sl_entries_by_key_and_date=bucket_tp_sl_entries_by_key_and_date,
+                signal_entries_by_symbol_date_and_bucket=(
+                    signal_entries_by_symbol_date_and_bucket
+                ),
+                bucket_tp_sl_entries_by_key_and_date=(
+                    bucket_tp_sl_entries_by_key_and_date
+                ),
                 production_exit_rules=production_exit_rules,
             )
             if entry is None or not _entry_supports_take_profit_stop_loss(entry):
@@ -616,25 +781,33 @@ def main() -> None:
                         "futu_buy_order_id",
                     ),
                 )
-                continue
-
-            if code in existing_take_profit_codes:
-                LOGGER.info("%s: TP already exists, skip", symbol)
+                incomplete_take_profit_reasons.append(
+                    f"{code}: production TP metadata missing"
+                )
                 continue
 
             take_profit_pct = float(entry.get("tp_pct", 0))
             if take_profit_pct <= 0:
-                LOGGER.info("%s: tp_pct <= 0 (entry=%s), skip TP", symbol, take_profit_pct)
+                LOGGER.info(
+                    "%s: tp_pct <= 0 (entry=%s), skip TP",
+                    symbol,
+                    take_profit_pct,
+                )
+                incomplete_take_profit_reasons.append(
+                    f"{code}: production TP percentage is not positive"
+                )
                 continue
 
             take_profit_price = round(position["cost_price"] * (1 + take_profit_pct), 2)
             bucket = entry.get("bucket", "?")
             LOGGER.info(
-                "%s [%s]: cost=$%.2f qty=%d -> TP=$%.2f (+%.2f%%) [GTC limit sell]",
+                "%s [%s]: cost=$%.2f qty=%d uncovered=%d -> "
+                "TP=$%.2f (+%.2f%%) [GTC limit sell]",
                 symbol,
                 bucket,
                 position["cost_price"],
                 position["qty"],
+                uncovered_take_profit_quantity,
                 take_profit_price,
                 take_profit_pct * 100,
             )
@@ -645,7 +818,7 @@ def main() -> None:
 
             return_code, take_profit_data = trade_context.place_order(
                 price=take_profit_price,
-                qty=position["qty"],
+                qty=uncovered_take_profit_quantity,
                 code=code,
                 trd_side=TrdSide.SELL,
                 order_type=OrderType.NORMAL,
@@ -656,7 +829,7 @@ def main() -> None:
                 "symbol": symbol,
                 "bucket": bucket,
                 "side": "TP_SELL",
-                "qty": position["qty"],
+                "qty": uncovered_take_profit_quantity,
                 "entry_price": position["cost_price"],
                 "price": take_profit_price,
                 "tp_pct": round(take_profit_pct * 100, 4),
@@ -671,6 +844,10 @@ def main() -> None:
             }
             LOGGER.info("  TP: %s", take_profit_result["status"])
             _log_order(take_profit_result)
+            if return_code != 0:
+                incomplete_take_profit_reasons.append(
+                    f"{code}: TP order submission failed"
+                )
 
         LOGGER.info("--- SL check ---")
         for code, position in positions.items():
@@ -678,8 +855,12 @@ def main() -> None:
             entry = _merge_production_signal_metadata(
                 symbol=symbol,
                 entry=open_entries_by_symbol.get(symbol),
-                signal_entries_by_symbol_and_date=signal_entries_by_symbol_and_date,
-                bucket_tp_sl_entries_by_key_and_date=bucket_tp_sl_entries_by_key_and_date,
+                signal_entries_by_symbol_date_and_bucket=(
+                    signal_entries_by_symbol_date_and_bucket
+                ),
+                bucket_tp_sl_entries_by_key_and_date=(
+                    bucket_tp_sl_entries_by_key_and_date
+                ),
                 production_exit_rules=production_exit_rules,
             )
             if entry is None or not _entry_supports_take_profit_stop_loss(entry):
@@ -695,7 +876,11 @@ def main() -> None:
 
             stop_loss_pct = float(entry.get("sl_pct", 0))
             if stop_loss_pct <= 0:
-                LOGGER.info("%s: sl_pct <= 0 (entry=%s), skip SL", symbol, stop_loss_pct)
+                LOGGER.info(
+                    "%s: sl_pct <= 0 (entry=%s), skip SL",
+                    symbol,
+                    stop_loss_pct,
+                )
                 continue
 
             try:
@@ -769,10 +954,26 @@ def main() -> None:
             }
             LOGGER.info("  SL: %s", stop_loss_result["status"])
             _log_order(stop_loss_result)
+
+        if (
+            require_complete_take_profit_coverage
+            and incomplete_take_profit_reasons
+        ):
+            raise RuntimeError("; ".join(incomplete_take_profit_reasons))
     finally:
         trade_context.close()
 
     LOGGER.info("Done")
+
+
+def main(*, require_complete_take_profit_coverage: bool = False) -> None:
+    """Place missing orders while preventing concurrent duplicate submits."""
+    with _exclusive_order_placement_lock():
+        _place_missing_take_profit_stop_loss_orders(
+            require_complete_take_profit_coverage=(
+                require_complete_take_profit_coverage
+            ),
+        )
 
 
 if __name__ == "__main__":

@@ -23,7 +23,14 @@ import pandas
 import yfinance  # TODO: review
 from pandas import DataFrame
 
-from . import data_loader, symbols, strategy, daily_job, multi_bucket_today
+from . import (
+    adaptive_tp_sl_virtual_trade_history,
+    daily_job,
+    data_loader,
+    multi_bucket_today,
+    strategy,
+    symbols,
+)
 from . import data_revision_audit
 from . import production_ff12_promotion
 from . import symbol_seasoning
@@ -40,7 +47,8 @@ from stock_indicator.sector_pipeline import pipeline
 LOGGER = logging.getLogger(__name__)
 
 DATA_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "data"
-# Live trading state (cron rolling pool + dashboard signal_trades mirror) is
+# Runtime state (cron ADAPTIVE TP/SL virtual trade history + dashboard's
+# separate signal_trades diagnostic mirror) is
 # kept under data/live_state/ so simulation cleanups inside data/ cannot
 # accidentally wipe production runtime files.
 LIVE_STATE_DIRECTORY = DATA_DIRECTORY / "live_state"
@@ -290,7 +298,11 @@ def load_multi_bucket_daily_context(
     state_path = LIVE_STATE_DIRECTORY / f"adaptive_state{suffix}.json"
     if ensure_state_directory:
         state_path.parent.mkdir(parents=True, exist_ok=True)
-    state = multi_bucket_today.load_state(state_path)
+    state = (
+        multi_bucket_today.load_adaptive_tp_sl_virtual_trade_history_state(
+            state_path
+        )
+    )
 
     return MultiBucketDailyContext(
         config=config,
@@ -864,6 +876,55 @@ class StockShell(cmd.Cmd):
             "Parameters:\n"
             "  START: Start date in YYYY-MM-DD format.\n"
             "  END: End date in YYYY-MM-DD format (inclusive).\n"
+        )
+
+    def do_retry_missing_date_from_yf(self, argument_line: str) -> None:  # noqa: D401
+        """retry_missing_date_from_yf DATE
+        Retry Yahoo Finance for symbols missing one target date in cache."""
+        argument_parts: List[str] = argument_line.split()
+        if len(argument_parts) != 1:
+            self.stdout.write("usage: retry_missing_date_from_yf DATE\n")
+            return
+        target_date = argument_parts[0]
+        try:
+            datetime.date.fromisoformat(target_date)
+        except ValueError:
+            self.stdout.write(
+                f"invalid date: {target_date} (expected YYYY-MM-DD)\n"
+            )
+            return
+
+        retry_result = daily_job.retry_missing_date_from_yf(
+            target_date,
+            STOCK_DATA_DIRECTORY,
+        )
+        self.stdout.write(
+            "Yahoo missing-date retry completed: "
+            f"date={retry_result.target_date} "
+            f"attempted={retry_result.attempted_symbols} "
+            f"recovered={len(retry_result.recovered_symbols)} "
+            f"remaining={len(retry_result.remaining_missing_symbols)}\n"
+        )
+        if retry_result.recovered_symbols:
+            recovered_text = ",".join(retry_result.recovered_symbols[:80])
+            self.stdout.write(f"Recovered symbols: {recovered_text}\n")
+        if retry_result.remaining_missing_symbols:
+            remaining_text = ",".join(
+                retry_result.remaining_missing_symbols[:80]
+            )
+            self.stdout.write(
+                "Remaining missing-date symbols: "
+                f"{remaining_text}\n"
+            )
+
+    def help_retry_missing_date_from_yf(self) -> None:
+        """Display help for the retry_missing_date_from_yf command."""
+        self.stdout.write(
+            "retry_missing_date_from_yf DATE\n"
+            "Inspect data/stock_data and batch-retry Yahoo Finance only for "
+            "runtime symbols missing DATE.\n"
+            "Parameters:\n"
+            "  DATE: Target cache date in YYYY-MM-DD format.\n"
         )
 
     def do_update_universe_pipeline(self, argument_line: str) -> None:  # noqa: D401
@@ -1543,6 +1604,12 @@ class StockShell(cmd.Cmd):
                             "d_ema_angle": entry_detail.d_ema_angle,
                             "slope_60": entry_detail.slope_60,
                             "fuel_drawdown": entry_detail.fuel_drawdown,
+                            "cohort_symbol_lookback_return": entry_detail.cohort_symbol_lookback_return,
+                            "cohort_median_lookback_return": entry_detail.cohort_median_lookback_return,
+                            "cohort_market_lookback_return": entry_detail.cohort_market_lookback_return,
+                            "cohort_idiosyncratic_gap": entry_detail.cohort_idiosyncratic_gap,
+                            "cohort_negative_peer_share": entry_detail.cohort_negative_peer_share,
+                            "cohort_peer_count": entry_detail.cohort_peer_count,
                             "phantom": entry_detail.phantom,
                             "signal_bar_open": entry_detail.signal_bar_open,
                             "entry_price": entry_detail.price,
@@ -1598,6 +1665,12 @@ class StockShell(cmd.Cmd):
                     "d_ema_angle",
                     "slope_60",
                     "fuel_drawdown",
+                    "cohort_symbol_lookback_return",
+                    "cohort_median_lookback_return",
+                    "cohort_market_lookback_return",
+                    "cohort_idiosyncratic_gap",
+                    "cohort_negative_peer_share",
+                    "cohort_peer_count",
                     "phantom",
                     "signal_bar_open",
                     "entry_price",
@@ -1641,9 +1714,10 @@ class StockShell(cmd.Cmd):
         Run a simulation over N parallel strategy buckets defined in a JSON file.
 
         --export-state-on-date / --export-state-out: cold-start helper for
-        the production multi_bucket_today command. Snapshots the rolling
-        winners/losers/pending state at the boundary of the given date and
-        writes it to PATH (default: data/adaptive_state_export.json)."""
+        the production multi_bucket_today command. Snapshots the namespaced
+        ADAPTIVE TP/SL virtual trade return history at the boundary of the
+        given date and writes it to PATH (default:
+        data/adaptive_state_export.json)."""
 
         try:
             tokens = shlex.split(argument_line.strip())
@@ -1977,6 +2051,17 @@ class StockShell(cmd.Cmd):
                     )
                     return
 
+            try:
+                cohort_co_movement_gate_config = (
+                    strategy.parse_cohort_co_movement_gate_config(
+                        raw_bucket.get("cohort_co_movement_gate"),
+                        bucket_label=label,
+                    )
+                )
+            except ValueError as error:
+                self.stdout.write(f"{error}\n")
+                return
+
             bucket_definitions[label] = strategy.ComplexStrategySetDefinition(
                 label=label,
                 buy_strategy_name=buy_strategy_name,
@@ -2142,6 +2227,7 @@ class StockShell(cmd.Cmd):
                     and raw_bucket["min_hold_sl"] is not None
                     else None
                 ),
+                cohort_co_movement_gate=cohort_co_movement_gate_config,
             )
 
         if start_date_string is None:
@@ -2538,7 +2624,8 @@ class StockShell(cmd.Cmd):
                 with export_state_out_path.open("w", encoding="utf-8") as export_fp:
                     json.dump(exported_state_holder, export_fp, indent=2)
                 self.stdout.write(
-                    f"Exported rolling state at {export_state_on_date_str} "
+                    "Exported ADAPTIVE TP/SL virtual trade history at "
+                    f"{export_state_on_date_str} "
                     f"to {export_state_out_path}\n"
                 )
             except OSError as write_error:
@@ -2655,6 +2742,12 @@ class StockShell(cmd.Cmd):
                             "d_ema_angle": entry_detail.d_ema_angle,
                             "slope_60": entry_detail.slope_60,
                             "fuel_drawdown": entry_detail.fuel_drawdown,
+                            "cohort_symbol_lookback_return": entry_detail.cohort_symbol_lookback_return,
+                            "cohort_median_lookback_return": entry_detail.cohort_median_lookback_return,
+                            "cohort_market_lookback_return": entry_detail.cohort_market_lookback_return,
+                            "cohort_idiosyncratic_gap": entry_detail.cohort_idiosyncratic_gap,
+                            "cohort_negative_peer_share": entry_detail.cohort_negative_peer_share,
+                            "cohort_peer_count": entry_detail.cohort_peer_count,
                             "phantom": entry_detail.phantom,
                             "signal_bar_open": entry_detail.signal_bar_open,
                             "entry_price": entry_detail.price,
@@ -2715,6 +2808,12 @@ class StockShell(cmd.Cmd):
                     "d_ema_angle",
                     "slope_60",
                     "fuel_drawdown",
+                    "cohort_symbol_lookback_return",
+                    "cohort_median_lookback_return",
+                    "cohort_market_lookback_return",
+                    "cohort_idiosyncratic_gap",
+                    "cohort_negative_peer_share",
+                    "cohort_peer_count",
                     "phantom",
                     "signal_bar_open",
                     "entry_price",
@@ -4279,22 +4378,36 @@ class StockShell(cmd.Cmd):
         self.stdout.write(f"entry signals: {entry_signal_list}\n")
         self.stdout.write(f"exit signals: {all_exit_signals}\n")
 
-        # Update adaptive_state.json with closed positions' raw P/L.
+        # Update the namespaced ADAPTIVE TP/SL virtual trade history with
+        # completed reference trades' raw returns.
         # The user must manually fill in exit_price after closing;
         # alternatively, compute_adaptive_tp_sl can be called with
         # the actual exit price.
         if held_exit_signals:
             state_path = LIVE_STATE_DIRECTORY / "adaptive_state.json"
             state_path.parent.mkdir(parents=True, exist_ok=True)
-            adaptive_state: dict = {"raw_trade_profits": [], "closed_trades": []}
+            adaptive_state_document: dict = {
+                "schema_version": multi_bucket_today.SCHEMA_VERSION
+            }
             if state_path.exists():
                 try:
                     with state_path.open("r", encoding="utf-8") as fp:
-                        adaptive_state = json.load(fp)
+                        adaptive_state_document = json.load(fp)
                 except (json.JSONDecodeError, OSError):
                     pass
-            raw_profits = adaptive_state.get("raw_trade_profits", [])
-            closed_list = adaptive_state.get("closed_trades", [])
+            adaptive_tp_sl_history = (
+                adaptive_tp_sl_virtual_trade_history.get_adaptive_tp_sl_virtual_trade_history(
+                    adaptive_state_document
+                )
+            )
+            adaptive_tp_sl_virtual_raw_returns = adaptive_tp_sl_history.get(
+                adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_RAW_RETURNS_KEY,
+                [],
+            )
+            adaptive_tp_sl_virtual_closed_trades = adaptive_tp_sl_history.get(
+                adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_CLOSED_TRADES_KEY,
+                [],
+            )
             for exit_sym in held_exit_signals:
                 entry_rec = next(
                     (e for e in held_entries if e["symbol"] == exit_sym), None
@@ -4303,7 +4416,7 @@ class StockShell(cmd.Cmd):
                     # Record closed trade. entry_price may be None if
                     # compute_adaptive_tp_sl hasn't run yet; it will be
                     # auto-filled on the next compute_adaptive_tp_sl call.
-                    closed_list.append({
+                    adaptive_tp_sl_virtual_closed_trades.append({
                         "symbol": exit_sym,
                         "entry_date": entry_rec.get("entry_date", ""),
                         "exit_date": effective_date_for_exit,
@@ -4311,11 +4424,17 @@ class StockShell(cmd.Cmd):
                         "exit_price": None,
                         "raw_pct": None,
                     })
-            adaptive_state["raw_trade_profits"] = raw_profits[-20:]
-            adaptive_state["closed_trades"] = closed_list
+            adaptive_tp_sl_history[
+                adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_RAW_RETURNS_KEY
+            ] = adaptive_tp_sl_virtual_raw_returns[-20:]
+            adaptive_tp_sl_history[
+                adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_CLOSED_TRADES_KEY
+            ] = adaptive_tp_sl_virtual_closed_trades
             try:
-                with state_path.open("w", encoding="utf-8") as fp:
-                    json.dump(adaptive_state, fp, indent=2)
+                multi_bucket_today.save_adaptive_tp_sl_virtual_trade_history_state_atomically(
+                    state_path,
+                    adaptive_state_document,
+                )
             except OSError:
                 pass
 
@@ -4387,9 +4506,8 @@ class StockShell(cmd.Cmd):
 
     def do_multi_bucket_daily_signal(self, argument_line: str) -> None:  # noqa: D401
         """multi_bucket_daily_signal CONFIG_PATH [DATE] [--shadow]
-        Production today-slice signal generator that reproduces the
-        simulator's multi-bucket decision in one cron run. See
-        help multi_bucket_daily_signal for details."""
+        Publish tradable signals and advance the independent ADAPTIVE TP/SL
+        raw-signal history in one cron run. See help for details."""
         try:
             tokens = shlex.split(argument_line.strip())
         except ValueError as parse_error:
@@ -4480,53 +4598,77 @@ class StockShell(cmd.Cmd):
                     f"{priority_text}\n"
                 )
 
-        # Held positions come from cron's own virtual ledger
-        # (state.accepted_entries), NOT from signal_trades.json.
-        # signal_trades.json belongs to the order layer (dashboard) and
-        # tracks real Futu fills — a separate concern from the rolling
-        # pool's virtual-trade simulation. Coupling them caused two
-        # bugs:
-        #   1. Recorded-but-unfilled signals suppressed re-emission.
-        #   2. Real positions Cal manually opens would never appear in
-        #      the virtual ledger, and vice versa, leaking into either
-        #      side.
-        # After this split, cron only reads/writes adaptive_state.
-        held_positions: Dict[str, List[Dict[str, str]]] = {}
-        for accepted_entry in state.get("accepted_entries", []):
-            strategy_identifier = accepted_entry.get("strategy_id", "")
+        # These are counterfactual reference trades used only by ADAPTIVE
+        # TP/SL statistics. They are not Futu positions, dashboard
+        # allocations, portfolio slots, or the diagnostic signal_trades.json
+        # mirror.
+        adaptive_tp_sl_history = (
+            adaptive_tp_sl_virtual_trade_history.get_adaptive_tp_sl_virtual_trade_history(
+                state
+            )
+        )
+        adaptive_tp_sl_virtual_open_trades_by_strategy: Dict[
+            str, List[Dict[str, str]]
+        ] = {}
+        for adaptive_tp_sl_virtual_open_trade in adaptive_tp_sl_history.get(
+            adaptive_tp_sl_virtual_trade_history.
+            ADAPTIVE_TP_SL_VIRTUAL_OPEN_TRADES_KEY,
+            [],
+        ):
+            strategy_identifier = adaptive_tp_sl_virtual_open_trade.get(
+                "strategy_id", ""
+            )
             if not strategy_identifier:
                 continue
-            held_position_record = {
-                "symbol": accepted_entry.get("symbol", ""),
-                "entry_date": accepted_entry.get("entry_date", ""),
+            adaptive_tp_sl_virtual_trade_record = {
+                "symbol": adaptive_tp_sl_virtual_open_trade.get("symbol", ""),
+                "entry_date": adaptive_tp_sl_virtual_open_trade.get(
+                    "entry_date", ""
+                ),
             }
             # Bucket attribution keeps buckets that share a strategy_id
             # (fish_tail_squeeze / fish_tail_production) separable in
-            # compute_today_signals' held-position handling.
-            if accepted_entry.get("bucket"):
-                held_position_record["bucket"] = accepted_entry["bucket"]
-            held_positions.setdefault(strategy_identifier, []).append(
-                held_position_record
+            # the ADAPTIVE TP/SL virtual-history exit handling.
+            if adaptive_tp_sl_virtual_open_trade.get("bucket"):
+                adaptive_tp_sl_virtual_trade_record["bucket"] = (
+                    adaptive_tp_sl_virtual_open_trade["bucket"]
+                )
+            adaptive_tp_sl_virtual_open_trades_by_strategy.setdefault(
+                strategy_identifier,
+                [],
+            ).append(
+                adaptive_tp_sl_virtual_trade_record
             )
 
         try:
             with strategy.override_ff12_group_source_path(ff12_data_path):
-                result = multi_bucket_today.compute_today_signals(
-                    config=config,
-                    eval_date=eval_date_timestamp,
-                    held_positions=held_positions,
-                    state=state,
-                    data_directory=data_directory,
-                    allowed_symbols=allowed_symbols,
-                    symbol_first_eligible_trade_dates=(
-                        symbol_first_eligible_trade_dates
-                    ),
+                result = (
+                    multi_bucket_today.
+                    compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
+                        config=config,
+                        eval_date=eval_date_timestamp,
+                        adaptive_tp_sl_virtual_open_trades_by_strategy=(
+                            adaptive_tp_sl_virtual_open_trades_by_strategy
+                        ),
+                        state_document=state,
+                        data_directory=data_directory,
+                        allowed_symbols=allowed_symbols,
+                        symbol_first_eligible_trade_dates=(
+                            symbol_first_eligible_trade_dates
+                        ),
+                    )
                 )
         except ValueError as run_error:
-            self.stdout.write(f"compute_today_signals failed: {run_error}\n")
+            self.stdout.write(
+                "signal/history computation failed: "
+                f"{run_error}\n"
+            )
             return
 
-        multi_bucket_today.save_state_atomically(state_path, state)
+        multi_bucket_today.save_adaptive_tp_sl_virtual_trade_history_state_atomically(
+            state_path,
+            state,
+        )
 
         self.stdout.write(
             f"[multi_bucket_daily_signal mode="
@@ -4541,16 +4683,18 @@ class StockShell(cmd.Cmd):
         self.stdout.write(
             "multi_bucket_daily_signal CONFIG_PATH [DATE] [--shadow]\n"
             "Today-slice multi-bucket signal generator. Reproduces the\n"
-            "simulator's single-day decision in production:\n"
+            "simulator's single-day signal mathematics in production:\n"
             "  - per-bucket signal generation via compute_signals_for_date\n"
             "  - shared frozen TP/SL via compute_frozen_tp_sl_for_bucket\n"
-            "  - cross-bucket slot competition (priority + dollar_volume)\n"
+            "  - every tradable candidate, without portfolio allocation\n"
             "Reads/writes data/adaptive_state.json (schema_version=2);\n"
-            "signal_trades.json is owned by the order layer (dashboard)\n"
-            "and is no longer touched by cron. With --shadow, all I/O\n"
+            "its namespaced ADAPTIVE TP/SL virtual trade history is a\n"
+            "statistical reference stream, never a portfolio or Futu mirror.\n"
+            "The dashboard separately owns settings + Futu slot competition.\n"
+            "With --shadow, all I/O\n"
             "is suffixed _shadow so the live cron path is untouched. Emits\n"
             "[ENTRY_SIGNAL], [EXIT_SIGNAL], [FROZEN_TP_SL], and\n"
-            "[ROLLING_TP_SL_STATE] log lines for the dashboard/order layer.\n"
+            "[ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_STATE] log lines.\n"
             "Honors optional ff12_data_path from the JSON config so live "
             "selection uses the same sector map as the matching simulation.\n"
             "Honors optional risk_score_priority_overrides for the evaluated "
@@ -4559,7 +4703,7 @@ class StockShell(cmd.Cmd):
 
     def do_data_revision_audit(self, argument_line: str) -> None:  # noqa: D401
         """data_revision_audit CONFIG_PATH
-        Re-evaluate accepted live entries against the refreshed data cache."""
+        Re-evaluate open ADAPTIVE TP/SL virtual trade history entries."""
 
         try:
             tokens = shlex.split(argument_line.strip())
@@ -4580,25 +4724,40 @@ class StockShell(cmd.Cmd):
             self.stdout.write(f"{load_error}\n")
             return
 
-        accepted_entries = runtime_context.state.get("accepted_entries", [])
-        if not isinstance(accepted_entries, list):
-            self.stdout.write("accepted_entries must be a list\n")
-            return
+        adaptive_tp_sl_history = (
+            adaptive_tp_sl_virtual_trade_history.get_adaptive_tp_sl_virtual_trade_history(
+                runtime_context.state
+            )
+        )
+        adaptive_tp_sl_virtual_open_trades = adaptive_tp_sl_history.get(
+            adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_OPEN_TRADES_KEY,
+            [],
+        )
         self.stdout.write(
             "symbol | bucket | entry_date | "
-            "orig_rank(accepted_entries.dollar_volume_rank) | "
+            "orig_rank(adaptive_tp_sl_virtual_open_trade.dollar_volume_rank) | "
             "new_rank | reason | verdict\n"
         )
-        if not accepted_entries:
+        if not adaptive_tp_sl_virtual_open_trades:
             return
 
-        for accepted_entry in accepted_entries:
-            if not isinstance(accepted_entry, dict):
+        for adaptive_tp_sl_virtual_open_trade in (
+            adaptive_tp_sl_virtual_open_trades
+        ):
+            if not isinstance(adaptive_tp_sl_virtual_open_trade, dict):
                 continue
-            symbol_name = str(accepted_entry.get("symbol", "")).upper()
-            bucket_label = str(accepted_entry.get("bucket", ""))
-            entry_date = str(accepted_entry.get("entry_date", ""))
-            original_rank = accepted_entry.get("dollar_volume_rank", "")
+            symbol_name = str(
+                adaptive_tp_sl_virtual_open_trade.get("symbol", "")
+            ).upper()
+            bucket_label = str(
+                adaptive_tp_sl_virtual_open_trade.get("bucket", "")
+            )
+            entry_date = str(
+                adaptive_tp_sl_virtual_open_trade.get("entry_date", "")
+            )
+            original_rank = adaptive_tp_sl_virtual_open_trade.get(
+                "dollar_volume_rank", ""
+            )
             if not symbol_name or not bucket_label or not entry_date:
                 self.stdout.write(
                     f"{symbol_name} | {bucket_label} | {entry_date} | "
@@ -4647,7 +4806,8 @@ class StockShell(cmd.Cmd):
 
         self.stdout.write(
             "data_revision_audit CONFIG_PATH\n"
-            "Recompute each accepted live entry against the current data cache.\n"
+            "Recompute each ADAPTIVE TP/SL virtual open reference trade "
+            "against the current data cache.\n"
             "Detection only: prints candidates and does not write files.\n"
         )
 
@@ -4675,21 +4835,33 @@ class StockShell(cmd.Cmd):
             self.stdout.write(f"{load_error}\n")
             return
 
-        accepted_entry = self._find_accepted_entry_for_symbol(
+        adaptive_tp_sl_virtual_open_trade = (
+            self._find_adaptive_tp_sl_virtual_open_trade_for_symbol(
             runtime_context.state,
             symbol_name,
         )
-        if accepted_entry is None:
-            self.stdout.write(f"accepted entry not found for {symbol_name}\n")
+        )
+        if adaptive_tp_sl_virtual_open_trade is None:
+            self.stdout.write(
+                "ADAPTIVE TP/SL virtual open trade not found for "
+                f"{symbol_name}\n"
+            )
             return
 
-        bucket_label = str(accepted_entry.get("bucket", ""))
-        entry_date = str(accepted_entry.get("entry_date", ""))
-        strategy_identifier = str(accepted_entry.get("strategy_id", ""))
-        original_rank = accepted_entry.get("dollar_volume_rank", "")
+        bucket_label = str(adaptive_tp_sl_virtual_open_trade.get("bucket", ""))
+        entry_date = str(
+            adaptive_tp_sl_virtual_open_trade.get("entry_date", "")
+        )
+        strategy_identifier = str(
+            adaptive_tp_sl_virtual_open_trade.get("strategy_id", "")
+        )
+        original_rank = adaptive_tp_sl_virtual_open_trade.get(
+            "dollar_volume_rank", ""
+        )
         if not bucket_label or not entry_date or not strategy_identifier:
             self.stdout.write(
-                "accepted entry is missing bucket, entry_date, or strategy_id\n"
+                "ADAPTIVE TP/SL virtual open trade is missing bucket, "
+                "entry_date, or strategy_id\n"
             )
             return
 
@@ -4894,25 +5066,30 @@ class StockShell(cmd.Cmd):
             return None
         return parsed_arguments
 
-    def _find_accepted_entry_for_symbol(
+    def _find_adaptive_tp_sl_virtual_open_trade_for_symbol(
         self,
-        state: Dict[str, Any],
+        state_document: Dict[str, Any],
         symbol: str,
     ) -> Dict[str, Any] | None:
-        """Return the first accepted entry matching ``symbol``."""
+        """Return the first matching ADAPTIVE TP/SL reference trade."""
 
         normalized_symbol = data_revision_audit.normalize_symbol_for_state(symbol)
-        accepted_entries = state.get("accepted_entries", [])
-        if not isinstance(accepted_entries, list):
-            return None
-        for accepted_entry in accepted_entries:
-            if not isinstance(accepted_entry, dict):
-                continue
-            accepted_symbol = data_revision_audit.normalize_symbol_for_state(
-                str(accepted_entry.get("symbol", ""))
+        adaptive_tp_sl_history = (
+            adaptive_tp_sl_virtual_trade_history.get_adaptive_tp_sl_virtual_trade_history(
+                state_document
             )
-            if accepted_symbol == normalized_symbol:
-                return accepted_entry
+        )
+        for adaptive_tp_sl_virtual_open_trade in adaptive_tp_sl_history.get(
+            adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_OPEN_TRADES_KEY,
+            [],
+        ):
+            if not isinstance(adaptive_tp_sl_virtual_open_trade, dict):
+                continue
+            virtual_trade_symbol = data_revision_audit.normalize_symbol_for_state(
+                str(adaptive_tp_sl_virtual_open_trade.get("symbol", ""))
+            )
+            if virtual_trade_symbol == normalized_symbol:
+                return adaptive_tp_sl_virtual_open_trade
         return None
 
     def help_data_revision_cancel(self) -> None:
@@ -4922,7 +5099,8 @@ class StockShell(cmd.Cmd):
             "data_revision_cancel CONFIG_PATH SYMBOL --close-price X "
             "[--close-date D] [--entry-price X] [--force]\n"
             "Append a read-only cancellation ledger row after a manual close.\n"
-            "The command does not place Futu orders or mutate accepted_entries.\n"
+            "The command does not place Futu orders or mutate the ADAPTIVE "
+            "TP/SL virtual trade history.\n"
         )
 
     def do_merge_wr_gate_bootstrap(self, argument_line: str) -> None:  # noqa: D401
@@ -4931,9 +5109,9 @@ class StockShell(cmd.Cmd):
         Cold-start install helper for the WR-gate. Non-destructively merges
         ONLY ``wr_gate_sensor`` + ``wr_gate_pending_ft`` from a simulator
         ``--export-state-on-date`` file into the live adaptive_state.json,
-        preserving the existing rolling pool, closed_trades, accepted_entries
-        and every other key untouched. Idempotent: re-running re-installs the
-        same two keys. STATE_PATH defaults to data/live_state/adaptive_state.json.
+        preserving the ADAPTIVE TP/SL virtual trade history and every other key
+        untouched. Idempotent: re-running re-installs the same two keys.
+        STATE_PATH defaults to data/live_state/adaptive_state.json.
         """
         tokens = shlex.split(argument_line)
         if not tokens:
@@ -4978,7 +5156,8 @@ class StockShell(cmd.Cmd):
             )
             return
 
-        # Load the LIVE state via raw json (NOT load_state, which would
+        # Load the state via raw JSON (not the normal ADAPTIVE TP/SL virtual
+        # trade-history loader, which would
         # cold-start on any schema hiccup) so the merge is provably
         # non-destructive — every existing key is carried through verbatim.
         if not state_path.exists():
@@ -4997,6 +5176,11 @@ class StockShell(cmd.Cmd):
         if not isinstance(state_document, dict):
             self.stdout.write("live state is not a JSON object. Aborting.\n")
             return
+        adaptive_tp_sl_history = (
+            adaptive_tp_sl_virtual_trade_history.get_adaptive_tp_sl_virtual_trade_history(
+                state_document
+            )
+        )
 
         def _preserved_fingerprint(document: Dict[str, Any]) -> Dict[str, Any]:
             """Snapshot every key EXCEPT the two bootstrap keys, for a
@@ -5013,23 +5197,29 @@ class StockShell(cmd.Cmd):
         # Sensor is UNIVERSAL (deterministic from the sim) — copy verbatim.
         state_document["wr_gate_sensor"] = export_document["wr_gate_sensor"]
 
-        # Pending is PER-MACHINE: the export's pending reflects the sim's
-        # open positions on the sim dataset, which do NOT match this
-        # machine's live open positions. Derive it from THIS state's own
-        # accepted_entries so the cron feeds the sensor when the real
-        # currently-open sensor-bucket positions close. Entries pre-dating
-        # the gate were never register_wr_gate_pending_entry'd, so this
-        # bootstrap is the one place they get picked up.
+        # Pending is derived from the local ADAPTIVE TP/SL virtual reference
+        # trades, never from Futu or dashboard positions. The export's pending
+        # reflects a different simulated signal stream. Reference trades that
+        # pre-date the gate were never registered, so this bootstrap is the one
+        # place they are picked up.
         derived_pending: List[Dict[str, Any]] = []
-        for entry in state_document.get("accepted_entries", []):
-            if entry.get("bucket") != sensor_bucket:
+        for adaptive_tp_sl_virtual_open_trade in adaptive_tp_sl_history.get(
+            adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_OPEN_TRADES_KEY,
+            [],
+        ):
+            if (
+                adaptive_tp_sl_virtual_open_trade.get("bucket")
+                != sensor_bucket
+            ):
                 continue
             derived_pending.append({
-                "symbol": entry.get("symbol"),
-                "signal_date": entry.get("entry_date"),
-                "tp_pct": entry.get("tp_pct"),
+                "symbol": adaptive_tp_sl_virtual_open_trade.get("symbol"),
+                "signal_date": adaptive_tp_sl_virtual_open_trade.get(
+                    "entry_date"
+                ),
+                "tp_pct": adaptive_tp_sl_virtual_open_trade.get("tp_pct"),
                 "min_hold_tp": min_hold_tp,
-                "max_hold": entry.get("max_hold"),
+                "max_hold": adaptive_tp_sl_virtual_open_trade.get("max_hold"),
             })
         state_document["wr_gate_pending_ft"] = derived_pending
 
@@ -5041,7 +5231,10 @@ class StockShell(cmd.Cmd):
             )
             return
 
-        multi_bucket_today.save_state_atomically(state_path, state_document)
+        multi_bucket_today.save_adaptive_tp_sl_virtual_trade_history_state_atomically(
+            state_path,
+            state_document,
+        )
 
         # Verify summary.
         sensor = state_document.get("wr_gate_sensor", {})
@@ -5054,15 +5247,17 @@ class StockShell(cmd.Cmd):
             f"  state file:    {state_path}\n"
             f"  export from:   {export_path} (captured_at={captured_at})\n"
             f"  preserved keys ({len(before_keys)}): {before_keys}\n"
-            f"    winners={len(state_document.get('winners', []))} "
-            f"losers={len(state_document.get('losers', []))} "
-            f"closed_trades={len(state_document.get('closed_trades', []))} "
-            f"accepted_entries={len(state_document.get('accepted_entries', []))}\n"
+            "    adaptive_tp_sl_virtual_trade_history: "
+            f"winner_returns={len(adaptive_tp_sl_history.get('winner_returns', []))} "
+            f"loser_returns={len(adaptive_tp_sl_history.get('loser_returns', []))} "
+            f"closed_trades={len(adaptive_tp_sl_history.get('closed_trades', []))} "
+            f"open_trades={len(adaptive_tp_sl_history.get('open_trades', []))}\n"
             f"  installed wr_gate_sensor: cross_ema={sensor.get('cross_ema')} "
             f"cross_window={len(cross_window)} "
             f"winner_pcts={len(sensor.get('winner_pcts', []))} "
             f"loser_pcts={len(sensor.get('loser_pcts', []))}\n"
-            f"  derived wr_gate_pending_ft from accepted_entries "
+            "  derived wr_gate_pending_ft from ADAPTIVE TP/SL virtual "
+            "open reference trades "
             f"(bucket={sensor_bucket}): {len(pending)} open {pending_symbols}\n"
         )
 
@@ -5076,10 +5271,9 @@ class StockShell(cmd.Cmd):
             "    --export-state-on-date YYYY-MM-DD --export-state-out PATH\n"
             "Step 2: merge it into the live state (this command). The\n"
             "sensor is copied verbatim (universal/deterministic); pending is\n"
-            "DERIVED from this machine's accepted_entries (per-machine open\n"
-            "positions), since the sim's pending won't match live holdings.\n"
-            "The rolling pool, closed_trades, and accepted_entries are\n"
-            "preserved verbatim (aborts if any preserved key would change).\n"
+            "DERIVED from the local ADAPTIVE TP/SL virtual open reference\n"
+            "trades, not Futu positions. The namespaced statistical history\n"
+            "is preserved (aborts if any preserved key would change).\n"
             "Idempotent. --sensor-bucket / --min-hold-tp override defaults\n"
             "(fish_tail_production / 1).\n"
         )
@@ -5109,24 +5303,38 @@ class StockShell(cmd.Cmd):
         min_sl = 0.01
         min_samples = 5
 
-        # Load rolling state
-        raw_profits: list[float] = []
-        closed_trades: list[dict] = []
+        # Load the namespaced ADAPTIVE TP/SL virtual trade history.
+        adaptive_tp_sl_virtual_raw_returns: list[float] = []
+        adaptive_tp_sl_virtual_closed_trades: list[dict] = []
         if state_path.exists():
             try:
                 with state_path.open("r", encoding="utf-8") as fp:
-                    state = json.load(fp)
-                raw_profits = state.get("raw_trade_profits", [])
-                closed_trades = state.get("closed_trades", [])
+                    state_document = json.load(fp)
+                adaptive_tp_sl_history = (
+                    adaptive_tp_sl_virtual_trade_history.get_adaptive_tp_sl_virtual_trade_history(
+                        state_document
+                    )
+                )
+                adaptive_tp_sl_virtual_raw_returns = adaptive_tp_sl_history.get(
+                    adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_RAW_RETURNS_KEY,
+                    [],
+                )
+                adaptive_tp_sl_virtual_closed_trades = (
+                    adaptive_tp_sl_history.get(
+                        adaptive_tp_sl_virtual_trade_history.
+                        ADAPTIVE_TP_SL_VIRTUAL_CLOSED_TRADES_KEY,
+                        [],
+                    )
+                )
             except (json.JSONDecodeError, OSError):
                 pass
 
         # Process closed trades: auto-fill entry/exit prices from stock
         # data (open price on T+1 for entry, open price on exit_date for
         # exit — matching simulation's open-to-open convention), compute
-        # raw_pct and move into raw_trade_profits.
+        # raw_pct and move into the ADAPTIVE TP/SL virtual raw-return sample.
         stock_data_dir = DATA_DIRECTORY / "stock_data"
-        updated_closed: list[dict] = []
+        updated_adaptive_tp_sl_virtual_closed_trades: list[dict] = []
         state_changed = False
 
         def _read_open_price(symbol: str, date_str: str) -> float | None:
@@ -5151,50 +5359,69 @@ class StockShell(cmd.Cmd):
             except Exception:  # noqa: BLE001
                 return None
 
-        for ct in closed_trades:
-            if ct.get("raw_pct") is not None:
-                updated_closed.append(ct)
+        for virtual_closed_trade in adaptive_tp_sl_virtual_closed_trades:
+            if virtual_closed_trade.get("raw_pct") is not None:
+                updated_adaptive_tp_sl_virtual_closed_trades.append(
+                    virtual_closed_trade
+                )
                 continue
-            symbol = ct.get("symbol", "")
+            symbol = virtual_closed_trade.get("symbol", "")
             # Auto-fill entry_price: open on T+1 (one bday after entry_date).
-            if ct.get("entry_price") is None and ct.get("entry_date"):
+            if (
+                virtual_closed_trade.get("entry_price") is None
+                and virtual_closed_trade.get("entry_date")
+            ):
                 t1 = (
-                    pandas.Timestamp(ct["entry_date"]) + pandas.offsets.BDay(1)
+                    pandas.Timestamp(virtual_closed_trade["entry_date"])
+                    + pandas.offsets.BDay(1)
                 ).date().isoformat()
                 entry_p = _read_open_price(symbol, t1)
                 if entry_p is not None:
-                    ct["entry_price"] = round(entry_p, 4)
+                    virtual_closed_trade["entry_price"] = round(entry_p, 4)
             # Auto-fill exit_price: open on exit_date.
-            if ct.get("exit_price") is None and ct.get("exit_date"):
-                exit_p = _read_open_price(symbol, ct["exit_date"])
+            if (
+                virtual_closed_trade.get("exit_price") is None
+                and virtual_closed_trade.get("exit_date")
+            ):
+                exit_p = _read_open_price(
+                    symbol,
+                    virtual_closed_trade["exit_date"],
+                )
                 if exit_p is not None:
-                    ct["exit_price"] = round(exit_p, 4)
+                    virtual_closed_trade["exit_price"] = round(exit_p, 4)
             # Compute raw_pct if both prices available.
-            if ct.get("exit_price") is not None and ct.get("entry_price"):
-                entry_p = float(ct["entry_price"])
-                exit_p = float(ct["exit_price"])
+            if (
+                virtual_closed_trade.get("exit_price") is not None
+                and virtual_closed_trade.get("entry_price")
+            ):
+                entry_p = float(virtual_closed_trade["entry_price"])
+                exit_p = float(virtual_closed_trade["exit_price"])
                 if entry_p > 0:
                     pct = (exit_p - entry_p) / entry_p
-                    ct["raw_pct"] = round(pct, 6)
-                    raw_profits.append(pct)
+                    virtual_closed_trade["raw_pct"] = round(pct, 6)
+                    adaptive_tp_sl_virtual_raw_returns.append(pct)
                     state_changed = True
                     self.stdout.write(
                         f"  Processed closed trade: {symbol} "
                         f"pct={pct:+.2%}\n"
                     )
-            updated_closed.append(ct)
+            updated_adaptive_tp_sl_virtual_closed_trades.append(
+                virtual_closed_trade
+            )
         # Trim rolling window
-        raw_profits = raw_profits[-window:]
+        adaptive_tp_sl_virtual_raw_returns = (
+            adaptive_tp_sl_virtual_raw_returns[-window:]
+        )
         # Compute current TP/SL
         tp_pct = min_tp
         sl_pct = min_sl
-        if len(raw_profits) >= min_samples:
+        if len(adaptive_tp_sl_virtual_raw_returns) >= min_samples:
             from statistics import median as _median
             from statistics import stdev as _stdev
 
             wins = [
                 profit_percentage
-                for profit_percentage in raw_profits
+                for profit_percentage in adaptive_tp_sl_virtual_raw_returns
                 if profit_percentage > 0
             ]
             if len(wins) >= 3:
@@ -5210,17 +5437,16 @@ class StockShell(cmd.Cmd):
 
             losses = [
                 abs(loss_percentage)
-                for loss_percentage in raw_profits
+                for loss_percentage in adaptive_tp_sl_virtual_raw_returns
                 if loss_percentage < 0
             ]
             if len(losses) >= 3:
                 sl_pct = max(min_sl, _median(losses))
                 sl_pct = min(sl_pct, fixed_sl_cap)
 
-        # Always write back: rolling history, closed trades, and TP/SL %.
-        # Merge into existing state rather than overwriting so multi_bucket
-        # schema_version=2 fields (winners/losers/pending_rolling) survive
-        # this call when multi_bucket_daily_signal runs in the same cron.
+        # Always write back the namespaced virtual history and TP/SL values.
+        # Merge rather than overwrite so the rest of adaptive_state survives
+        # when multi_bucket_daily_signal runs in the same cron.
         merged_state: dict = {}
         if state_path.exists():
             try:
@@ -5230,25 +5456,44 @@ class StockShell(cmd.Cmd):
                     merged_state = {}
             except (json.JSONDecodeError, OSError):
                 merged_state = {}
-        merged_state["raw_trade_profits"] = [round(p, 8) for p in raw_profits]
-        merged_state["closed_trades"] = updated_closed
+        merged_adaptive_tp_sl_history = (
+            adaptive_tp_sl_virtual_trade_history.get_adaptive_tp_sl_virtual_trade_history(
+                merged_state
+            )
+        )
+        merged_adaptive_tp_sl_history[
+            adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_RAW_RETURNS_KEY
+        ] = [round(return_value, 8) for return_value in adaptive_tp_sl_virtual_raw_returns]
+        merged_adaptive_tp_sl_history[
+            adaptive_tp_sl_virtual_trade_history.ADAPTIVE_TP_SL_VIRTUAL_CLOSED_TRADES_KEY
+        ] = updated_adaptive_tp_sl_virtual_closed_trades
         merged_state["tp_pct"] = round(tp_pct, 6)
         merged_state["sl_pct"] = round(sl_pct, 6)
         try:
-            with state_path.open("w", encoding="utf-8") as fp:
-                json.dump(merged_state, fp, indent=2)
+            multi_bucket_today.save_adaptive_tp_sl_virtual_trade_history_state_atomically(
+                state_path,
+                merged_state,
+            )
         except OSError:
             pass
 
         self.stdout.write(
             f"\n--- Adaptive TP/SL (window={window}, "
-            f"samples={len(raw_profits)}) ---\n"
+            f"samples={len(adaptive_tp_sl_virtual_raw_returns)}) ---\n"
         )
         self.stdout.write(f"  TP: {tp_pct:.2%}\n")
         self.stdout.write(f"  SL: {sl_pct:.2%}\n")
-        if len(raw_profits) >= min_samples:
-            wins = [p for p in raw_profits if p > 0]
-            losses = [p for p in raw_profits if p <= 0]
+        if len(adaptive_tp_sl_virtual_raw_returns) >= min_samples:
+            wins = [
+                return_value
+                for return_value in adaptive_tp_sl_virtual_raw_returns
+                if return_value > 0
+            ]
+            losses = [
+                return_value
+                for return_value in adaptive_tp_sl_virtual_raw_returns
+                if return_value <= 0
+            ]
             if wins:
                 self.stdout.write(
                     f"  Rolling MP: {sum(wins)/len(wins):.2%} "
@@ -5261,7 +5506,8 @@ class StockShell(cmd.Cmd):
                 )
         else:
             self.stdout.write(
-                f"  (insufficient data: {len(raw_profits)}/{min_samples} "
+                "  (insufficient data: "
+                f"{len(adaptive_tp_sl_virtual_raw_returns)}/{min_samples} "
                 f"samples, using defaults)\n"
             )
 

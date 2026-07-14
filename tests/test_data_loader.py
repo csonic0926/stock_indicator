@@ -351,3 +351,142 @@ def test_download_history_refreshes_recent_cached_rows(
     assert list(combined_frame["close"]) == [1.0, 2.0, 30.0, 40.0]
     saved_frame = pandas.read_csv(cache_file_path, index_col=0, parse_dates=True)
     pandas.testing.assert_frame_equal(combined_frame, saved_frame)
+
+
+def test_download_history_full_refreshes_when_overlap_scale_changes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    """A split-scale overlap should trigger a full cache refresh."""
+    symbol_name = "TEST"
+    cache_file_path = tmp_path / "TEST.csv"
+    cached_frame = pandas.DataFrame(
+        {
+            "close": [100.0, 110.0, 120.0],
+            "volume": [1000, 900, 800],
+        },
+        index=pandas.to_datetime(["2023-01-01", "2023-01-02", "2023-01-03"]),
+    )
+    cached_frame.to_csv(cache_file_path)
+
+    partial_refresh_frame = pandas.DataFrame(
+        {
+            "Close": [24.0, 25.0],
+            "Volume": [4000, 4200],
+        },
+        index=pandas.to_datetime(["2023-01-03", "2023-01-04"]),
+    )
+    full_refresh_frame = pandas.DataFrame(
+        {
+            "Close": [20.0, 22.0, 24.0, 25.0],
+            "Volume": [5000, 4500, 4000, 4200],
+        },
+        index=pandas.to_datetime(
+            ["2023-01-01", "2023-01-02", "2023-01-03", "2023-01-04"]
+        ),
+    )
+    download_arguments: list[dict[str, str]] = []
+
+    def stubbed_download(
+        symbol: str,
+        start: str,
+        end: str,
+        progress: bool = False,
+        auto_adjust: bool = True,
+    ) -> pandas.DataFrame:
+        download_arguments.append({"start": start, "end": end})
+        if len(download_arguments) == 1:
+            return partial_refresh_frame
+        return full_refresh_frame
+
+    monkeypatch.setattr(
+        "stock_indicator.data_loader.yfinance.download",
+        stubbed_download,
+    )
+    monkeypatch.setattr("stock_indicator.symbols.load_symbols", lambda: [symbol_name])
+
+    combined_frame = download_history(
+        symbol_name,
+        "2023-01-01",
+        "2023-01-05",
+        cache_path=cache_file_path,
+        refresh_lookback_days=2,
+    )
+
+    assert download_arguments == [
+        {"start": "2023-01-03", "end": "2023-01-05"},
+        {"start": "2023-01-01", "end": "2023-01-05"},
+    ]
+    expected_frame = full_refresh_frame.rename(
+        columns=lambda column_name: column_name.lower().replace(" ", "_")
+    )
+    pandas.testing.assert_frame_equal(combined_frame, expected_frame)
+    saved_frame = pandas.read_csv(cache_file_path, index_col=0, parse_dates=True)
+    pandas.testing.assert_frame_equal(combined_frame, saved_frame)
+
+
+def test_download_history_full_refreshes_split_like_append_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+) -> None:
+    """A split-like append boundary should not splice incompatible rows."""
+    symbol_name = "TEST"
+    cache_file_path = tmp_path / "TEST.csv"
+    cached_frame = pandas.DataFrame(
+        {
+            "close": [100.0],
+            "volume": [1000],
+        },
+        index=pandas.to_datetime(["2023-01-01"]),
+    )
+    cached_frame.to_csv(cache_file_path)
+
+    appended_frame = pandas.DataFrame(
+        {
+            "Close": [20.0],
+            "Volume": [5000],
+        },
+        index=pandas.to_datetime(["2023-01-02"]),
+    )
+    full_refresh_frame = pandas.DataFrame(
+        {
+            "Close": [20.0, 21.0],
+            "Volume": [5000, 5200],
+        },
+        index=pandas.to_datetime(["2023-01-01", "2023-01-02"]),
+    )
+    download_arguments: list[dict[str, str]] = []
+
+    def stubbed_download(
+        symbol: str,
+        start: str,
+        end: str,
+        progress: bool = False,
+        auto_adjust: bool = True,
+    ) -> pandas.DataFrame:
+        download_arguments.append({"start": start, "end": end})
+        if len(download_arguments) == 1:
+            return appended_frame
+        return full_refresh_frame
+
+    monkeypatch.setattr(
+        "stock_indicator.data_loader.yfinance.download",
+        stubbed_download,
+    )
+    monkeypatch.setattr("stock_indicator.symbols.load_symbols", lambda: [symbol_name])
+
+    combined_frame = download_history(
+        symbol_name,
+        "2023-01-01",
+        "2023-01-03",
+        cache_path=cache_file_path,
+    )
+
+    assert download_arguments == [
+        {"start": "2023-01-02", "end": "2023-01-03"},
+        {"start": "2023-01-01", "end": "2023-01-03"},
+    ]
+    expected_frame = full_refresh_frame.rename(
+        columns=lambda column_name: column_name.lower().replace(" ", "_")
+    )
+    pandas.testing.assert_frame_equal(combined_frame, expected_frame)

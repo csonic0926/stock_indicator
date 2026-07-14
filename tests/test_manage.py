@@ -303,6 +303,49 @@ def test_update_all_data_from_yf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert set(recorded_end_dates) == {"2023-01-02"}
 
 
+def test_retry_missing_date_from_yf_command(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The command should invoke the targeted Yahoo retry helper."""
+    import stock_indicator.manage as manage_module
+
+    recorded_arguments: dict[str, object] = {}
+
+    def fake_retry_missing_date_from_yf(
+        target_date: str,
+        data_directory: Path,
+    ) -> manage_module.daily_job.YahooMissingDateRetryResult:
+        recorded_arguments["target_date"] = target_date
+        recorded_arguments["data_directory"] = data_directory
+        return manage_module.daily_job.YahooMissingDateRetryResult(
+            target_date=target_date,
+            attempted_symbols=3,
+            recovered_symbols=("AAA",),
+            remaining_missing_symbols=("BBB", "CCC"),
+        )
+
+    monkeypatch.setattr(
+        manage_module.daily_job,
+        "retry_missing_date_from_yf",
+        fake_retry_missing_date_from_yf,
+    )
+    monkeypatch.setattr(manage_module, "STOCK_DATA_DIRECTORY", tmp_path)
+
+    output_buffer = io.StringIO()
+    shell = manage_module.StockShell(stdout=output_buffer)
+    shell.onecmd("retry_missing_date_from_yf 2024-01-02")
+
+    assert recorded_arguments == {
+        "target_date": "2024-01-02",
+        "data_directory": tmp_path,
+    }
+    output_text = output_buffer.getvalue()
+    assert "attempted=3 recovered=1 remaining=2" in output_text
+    assert "Recovered symbols: AAA" in output_text
+    assert "Remaining missing-date symbols: BBB,CCC" in output_text
+
+
 # TODO: review
 def test_find_history_signal_prints_recalculated_signals(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -438,7 +481,7 @@ def test_find_history_signal_without_date_prints_recalculated_signals(
     output_lines = output_buffer.getvalue().splitlines()
     assert "entry signals: ['AAA']" in output_lines
     assert "exit signals: ['BBB']" in output_lines
-    assert "budget suggestions: {'AAA': 500.0}" in output_lines
+    assert "  BUY  'AAA'" in output_lines
 
 
 # TODO: review
@@ -644,7 +687,8 @@ def test_find_history_signal_prints_filtered_symbols(monkeypatch: pytest.MonkeyP
     )
 
     assert captured["filter"] == "dollar_volume>0.05%,Top30,Pick10"
-    assert output_buffer.getvalue().splitlines()[:3] == [
+    # Lines 0-1 are the "--- signal ---" header and the echoed arguments.
+    assert output_buffer.getvalue().splitlines()[2:5] == [
         "filtered symbols: [('AAA', 1), ('BBB', 2)]",
         "entry signals: ['AAA']",
         "exit signals: ['BBB']",
@@ -684,7 +728,8 @@ def test_find_history_signal_prints_empty_filtered_symbols(
         "find_history_signal 2024-01-10 dollar_volume>1 ema_sma_cross ema_sma_cross 1.0",
     )
 
-    assert output_buffer.getvalue().splitlines() == [
+    # Lines 0-1 are the "--- signal ---" header and the echoed arguments.
+    assert output_buffer.getvalue().splitlines()[2:5] == [
         "filtered symbols: []",
         "entry signals: []",
         "exit signals: []",
@@ -917,6 +962,7 @@ def test_start_simulate(monkeypatch: pytest.MonkeyPatch) -> None:
             take_profit_percentage: float = 0.0,
             start_date: pandas.Timestamp | None = None,
             allowed_fama_french_groups: set[int] | None = None,
+            **keyword_arguments: object,
         ) -> StrategyMetrics:
         call_record["strategies"] = (buy_strategy_name, sell_strategy_name)
         volume_record["threshold"] = minimum_average_dollar_volume
@@ -926,10 +972,7 @@ def test_start_simulate(monkeypatch: pytest.MonkeyPatch) -> None:
         take_profit_record["value"] = take_profit_percentage
         assert starting_cash == 3000.0
         assert withdraw_amount == 0.0
-        assert data_directory in (
-            manage_module.DATA_DIRECTORY,
-            manage_module.STOCK_DATA_DIRECTORY,
-        )
+        assert data_directory == manage_module.resolve_data_source(None)
         trade_details_by_year = {
             2023: [
                 TradeDetail(
@@ -1028,7 +1071,7 @@ def test_start_simulate(monkeypatch: pytest.MonkeyPatch) -> None:
     assert volume_record["threshold"] == 500.0
     assert stop_loss_record["value"] == 1.0
     assert take_profit_record["value"] == 0.0
-    assert "Simulation start date: 2019-01-01" in output_buffer.getvalue()
+    assert "Simulation start date: 1994-01-01" in output_buffer.getvalue()
     summary_fragments = [
         "Trades: 3, Win rate: 66.67%",
         "Mean profit %: 7.50%",
@@ -1155,6 +1198,7 @@ def test_start_simulate_filters_early_googl_trades(
         take_profit_percentage: float = 0.0,
         start_date: pandas.Timestamp | None = None,
         allowed_fama_french_groups: set[int] | None = None,
+        **keyword_arguments: object,
     ) -> StrategyMetrics:
         trade_details_by_year = {
             2013: [
@@ -1259,6 +1303,7 @@ def test_start_simulate_different_strategies(monkeypatch: pytest.MonkeyPatch) ->
         take_profit_percentage: float = 0.0,
         start_date: pandas.Timestamp | None = None,
         allowed_fama_french_groups: set[int] | None = None,
+        **keyword_arguments: object,
     ) -> StrategyMetrics:
         call_arguments["strategies"] = (buy_strategy_name, sell_strategy_name)
         threshold_record["threshold"] = minimum_average_dollar_volume
@@ -1321,6 +1366,7 @@ def test_start_simulate_accepts_start_date(monkeypatch: pytest.MonkeyPatch) -> N
         take_profit_percentage: float = 0.0,
         start_date: pandas.Timestamp | None = None,
         allowed_fama_french_groups: set[int] | None = None,
+        **keyword_arguments: object,
     ) -> StrategyMetrics:
         recorded_arguments["start_date"] = start_date
         return StrategyMetrics(
@@ -1841,6 +1887,9 @@ def test_start_simulate_passes_distinct_window_sizes_and_columns(
     )
     monkeypatch.setattr(manage_module, "DATA_DIRECTORY", tmp_path)
     monkeypatch.setattr(manage_module, "STOCK_DATA_DIRECTORY", tmp_path)
+    monkeypatch.setattr(
+        manage_module, "resolve_data_source", lambda source_name: tmp_path
+    )
 
     shell = manage_module.StockShell(stdout=io.StringIO())
     shell.onecmd(
@@ -1914,6 +1963,9 @@ def test_start_simulate_keeps_buy_and_sell_window_sizes_separate(
 
     monkeypatch.setattr(manage_module, "DATA_DIRECTORY", tmp_path)
     monkeypatch.setattr(manage_module, "STOCK_DATA_DIRECTORY", tmp_path)
+    monkeypatch.setattr(
+        manage_module, "resolve_data_source", lambda source_name: tmp_path
+    )
 
     shell = manage_module.StockShell(stdout=io.StringIO())
     shell.onecmd(
@@ -2490,12 +2542,28 @@ def test_start_simulate_creates_csv(
         "price_concentration_score",
         "near_price_volume_ratio",
         "above_price_volume_ratio",
+        "below_price_volume_ratio",
+        "near_delta",
+        "price_tightness",
         "histogram_node_count",
         "sma_angle",
+        "d_sma_angle",
+        "ema_angle",
+        "d_ema_angle",
+        "slope_60",
+        "fuel_drawdown",
+        "phantom",
+        "signal_bar_open",
         "exit_date",
         "result",
         "percentage_change",
+        "max_favorable_excursion_pct",
+        "max_adverse_excursion_pct",
+        "max_favorable_excursion_date",
+        "max_adverse_excursion_date",
         "exit_reason",
+        "holding_bars",
+        "profit_per_bar",
     ]
 
 
@@ -2568,7 +2636,9 @@ def test_start_simulate_writes_trade_detail_log(
     log_files = list(log_directory.glob("trade_details_*.log"))
     assert len(log_files) == 1
     assert log_files[0].read_text(encoding="utf-8").splitlines() == [
-        "  2024-01-02 (1) AAA open 10.00 0.0000 0.00M 0.00M price_score=1.00 near_pct=0.50 above_pct=0.30 node_count=2",
+        "  2024-01-02 (1) AAA open 10.00 0.0000 0.00M 0.00M signal_open=N/A "
+        "price_score=1.00 near_pct=0.50 above_pct=0.30 node_count=2 "
+        "sma_angle=N/A d_sma_angle=N/A ema_angle=N/A d_ema_angle=N/A",
         "  2024-01-05 (0) AAA close 12.00 0.0000 0.00M 0.00M win 20.00% signal",
     ]
 
@@ -3297,8 +3367,10 @@ def test_multi_bucket_daily_signal_forwards_ff12_data_path(
     )
     monkeypatch.setattr(
         manage_module.multi_bucket_today,
-        "load_state",
-        lambda _: {"accepted_entries": []},
+        "load_adaptive_tp_sl_virtual_trade_history_state",
+        lambda _: (
+            multi_bucket_today.empty_adaptive_tp_sl_virtual_trade_history_state_document()
+        ),
     )
     def fake_save_state_atomically(
         state_path: Path,
@@ -3308,7 +3380,7 @@ def test_multi_bucket_daily_signal_forwards_ff12_data_path(
 
     monkeypatch.setattr(
         manage_module.multi_bucket_today,
-        "save_state_atomically",
+        "save_adaptive_tp_sl_virtual_trade_history_state_atomically",
         fake_save_state_atomically,
     )
 
@@ -3327,9 +3399,9 @@ def test_multi_bucket_daily_signal_forwards_ff12_data_path(
         del unused_keyword_arguments
         return multi_bucket_today.TodaySignalsResult(
             eval_date_string="2026-01-02",
-            accepted_per_strategy={},
-            accepted_records=[],
-            rejected_records=[],
+            retained_adaptive_tp_sl_virtual_trades_per_strategy={},
+            tradable_records=[],
+            filtered_out_records=[],
             log_lines=["ok"],
         )
 
@@ -3340,7 +3412,7 @@ def test_multi_bucket_daily_signal_forwards_ff12_data_path(
     )
     monkeypatch.setattr(
         manage_module.multi_bucket_today,
-        "compute_today_signals",
+        "compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history",
         fake_compute_today_signals,
     )
 
@@ -3416,12 +3488,14 @@ def test_multi_bucket_daily_signal_forwards_symbol_seasoning_dates(
     )
     monkeypatch.setattr(
         manage_module.multi_bucket_today,
-        "load_state",
-        lambda _: {"accepted_entries": []},
+        "load_adaptive_tp_sl_virtual_trade_history_state",
+        lambda _: (
+            multi_bucket_today.empty_adaptive_tp_sl_virtual_trade_history_state_document()
+        ),
     )
     monkeypatch.setattr(
         manage_module.multi_bucket_today,
-        "save_state_atomically",
+        "save_adaptive_tp_sl_virtual_trade_history_state_atomically",
         lambda state_path, state: None,
     )
 
@@ -3436,15 +3510,15 @@ def test_multi_bucket_daily_signal_forwards_symbol_seasoning_dates(
         ]
         return multi_bucket_today.TodaySignalsResult(
             eval_date_string="2026-01-02",
-            accepted_per_strategy={},
-            accepted_records=[],
-            rejected_records=[],
+            retained_adaptive_tp_sl_virtual_trades_per_strategy={},
+            tradable_records=[],
+            filtered_out_records=[],
             log_lines=["ok"],
         )
 
     monkeypatch.setattr(
         manage_module.multi_bucket_today,
-        "compute_today_signals",
+        "compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history",
         fake_compute_today_signals,
     )
 
@@ -3596,12 +3670,14 @@ def test_multi_bucket_daily_signal_applies_risk_score_priority_override(
     )
     monkeypatch.setattr(
         manage_module.multi_bucket_today,
-        "load_state",
-        lambda _: {"accepted_entries": []},
+        "load_adaptive_tp_sl_virtual_trade_history_state",
+        lambda _: (
+            multi_bucket_today.empty_adaptive_tp_sl_virtual_trade_history_state_document()
+        ),
     )
     monkeypatch.setattr(
         manage_module.multi_bucket_today,
-        "save_state_atomically",
+        "save_adaptive_tp_sl_virtual_trade_history_state_atomically",
         lambda state_path, state: None,
     )
 
@@ -3621,15 +3697,15 @@ def test_multi_bucket_daily_signal_applies_risk_score_priority_override(
         )
         return multi_bucket_today.TodaySignalsResult(
             eval_date_string="2024-01-02",
-            accepted_per_strategy={},
-            accepted_records=[],
-            rejected_records=[],
+            retained_adaptive_tp_sl_virtual_trades_per_strategy={},
+            tradable_records=[],
+            filtered_out_records=[],
             log_lines=["ok"],
         )
 
     monkeypatch.setattr(
         manage_module.multi_bucket_today,
-        "compute_today_signals",
+        "compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history",
         fake_compute_today_signals,
     )
 
