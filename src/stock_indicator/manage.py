@@ -921,8 +921,8 @@ class StockShell(cmd.Cmd):
         """Display help for the retry_missing_date_from_yf command."""
         self.stdout.write(
             "retry_missing_date_from_yf DATE\n"
-            "Inspect data/stock_data and batch-retry Yahoo Finance only for "
-            "runtime symbols missing DATE.\n"
+            "Inspect data/stock_data after the first pass and retry Yahoo "
+            "Finance once per runtime symbol missing DATE.\n"
             "Parameters:\n"
             "  DATE: Target cache date in YYYY-MM-DD format.\n"
         )

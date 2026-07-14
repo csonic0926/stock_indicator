@@ -17,6 +17,12 @@ def test_run_daily_job_uses_production_universe_without_refresh() -> None:
     assert "update_universe_pipeline" not in script_text
     assert yahoo_update_position < daily_signal_position
     assert yahoo_update_position < yahoo_retry_position < daily_signal_position
+    assert "FIRST_DOWNLOAD_END_EPOCH" in script_text
+    assert "first_download_end_epoch" in script_text
+    assert "first_download=${FIRST_DOWNLOAD_SECONDS}s" in script_text
+    assert "retry_download=${RETRY_DOWNLOAD_SECONDS}s" in script_text
+    assert "total_download=${UPDATE_SECONDS}s" in script_text
+    assert "process=${SIGNAL_SECONDS}s" in script_text
     assert "YAHOO_CACHE_REFRESH_LOOKBACK_DAYS" in script_text
     assert "determine_latest_cached_market_date" in script_text
     assert "timedelta(days=183)" not in script_text

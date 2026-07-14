@@ -27,6 +27,7 @@ def test_record_cron_runtime_appends_row(tmp_path: Path) -> None:
         cron_runtime_path,
         signal_date="2026-06-22",
         start_epoch=100.0,
+        first_download_end_epoch=124.0,
         update_end_epoch=130.0,
         end_epoch=145.0,
     )
@@ -34,6 +35,7 @@ def test_record_cron_runtime_appends_row(tmp_path: Path) -> None:
         cron_runtime_path,
         signal_date="2026-06-23",
         start_epoch=200.0,
+        first_download_end_epoch=236.0,
         update_end_epoch=245.0,
         end_epoch=260.0,
     )
@@ -54,7 +56,51 @@ def test_record_cron_runtime_appends_row(tmp_path: Path) -> None:
         total_seconds = int(runtime_row["total_seconds"])
         update_seconds = int(runtime_row["update_seconds"])
         signal_seconds = int(runtime_row["signal_seconds"])
+        first_download_seconds = int(runtime_row["first_download_seconds"])
+        retry_download_seconds = int(runtime_row["retry_download_seconds"])
+        total_download_seconds = int(runtime_row["total_download_seconds"])
+        process_seconds = int(runtime_row["process_seconds"])
         assert total_seconds == update_seconds + signal_seconds
+        assert total_download_seconds == (
+            first_download_seconds + retry_download_seconds
+        )
+        assert total_download_seconds == update_seconds
+        assert process_seconds == signal_seconds
+
+
+# TODO: review
+def test_record_cron_runtime_upgrades_existing_timing_schema(
+    tmp_path: Path,
+) -> None:
+    """New phase columns should be added without losing historical rows."""
+
+    cron_runtime_path = tmp_path / "cron_runtime.csv"
+    cron_runtime_path.write_text(
+        "signal_date,start_iso,end_iso,total_seconds,update_seconds,"
+        "signal_seconds\n"
+        "2026-06-21,start,end,40,30,10\n",
+        encoding="utf-8",
+    )
+
+    daily_job.record_cron_runtime(
+        cron_runtime_path,
+        signal_date="2026-06-22",
+        start_epoch=100.0,
+        first_download_end_epoch=120.0,
+        update_end_epoch=130.0,
+        end_epoch=145.0,
+    )
+
+    with cron_runtime_path.open("r", newline="", encoding="utf-8") as csv_file:
+        runtime_rows = list(csv.DictReader(csv_file))
+
+    assert len(runtime_rows) == 2
+    assert runtime_rows[0]["signal_date"] == "2026-06-21"
+    assert runtime_rows[0]["first_download_seconds"] == ""
+    assert runtime_rows[1]["first_download_seconds"] == "20"
+    assert runtime_rows[1]["retry_download_seconds"] == "10"
+    assert runtime_rows[1]["total_download_seconds"] == "30"
+    assert runtime_rows[1]["process_seconds"] == "15"
 
 
 def test_determine_latest_cached_market_date_uses_sp500_anchor(
@@ -288,7 +334,8 @@ def test_update_all_data_from_yf_logs_warning_on_error(
     assert any("BBB" in record.message for record in caplog.records)
 
 
-def test_retry_missing_date_from_yf_merges_recovered_rows(
+# TODO: review
+def test_retry_missing_date_from_yf_retries_each_missing_symbol_separately(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -307,73 +354,69 @@ def test_retry_missing_date_from_yf_merges_recovered_rows(
         "Date,close\n2024-01-01,1.0\n",
         encoding="utf-8",
     )
+    (tmp_path / "DDD.csv").write_text(
+        "Date,close\n2024-01-01,1.0\n",
+        encoding="utf-8",
+    )
 
     recorded_retry_arguments: list[dict[str, object]] = []
 
-    def fake_yahoo_retry_download(
-        tickers: list[str],
-        start: str,
-        end: str,
-        progress: bool = False,
-        auto_adjust: bool = True,
-        threads: bool = True,
-        group_by: str = "ticker",
-        timeout: int = daily_job.YAHOO_MISSING_DATE_RETRY_TIMEOUT_SECONDS,
-    ) -> pandas.DataFrame:
-        recorded_retry_arguments.append(
-            {
-                "tickers": tickers,
-                "start": start,
-                "end": end,
-                "progress": progress,
-                "auto_adjust": auto_adjust,
-                "threads": threads,
-                "group_by": group_by,
-                "timeout": timeout,
-            }
-        )
-        retry_columns = pandas.MultiIndex.from_tuples(
-            [
-                ("BBB", "Open"),
-                ("BBB", "High"),
-                ("BBB", "Low"),
-                ("BBB", "Close"),
-                ("BBB", "Volume"),
-            ]
-        )
-        return pandas.DataFrame(
-            [[1.0, 2.0, 0.5, 1.5, 1000]],
-            index=pandas.to_datetime([target_date]),
-            columns=retry_columns,
-        )
+    class FakeTicker:
+        """Return recovered, empty, and raised Yahoo outcomes."""
 
-    monkeypatch.setattr(
-        daily_job.yfinance,
-        "download",
-        fake_yahoo_retry_download,
-    )
+        def __init__(self, symbol_name: str) -> None:
+            self.symbol_name = symbol_name
+
+        def history(self, **download_arguments: object) -> pandas.DataFrame:
+            recorded_retry_arguments.append(
+                {
+                    "symbol_name": self.symbol_name,
+                    **download_arguments,
+                }
+            )
+            if self.symbol_name == "CCC":
+                return pandas.DataFrame()
+            if self.symbol_name == "DDD":
+                raise yfinance_exceptions.YFException("temporary failure")
+            return pandas.DataFrame(
+                {
+                    "Open": [1.0],
+                    "High": [2.0],
+                    "Low": [0.5],
+                    "Close": [1.5],
+                    "Volume": [1000],
+                },
+                index=pandas.to_datetime([target_date]),
+            )
+
+    def fake_ticker_factory(symbol_name: str) -> FakeTicker:
+        """Build a deterministic fake Yahoo ticker."""
+
+        return FakeTicker(symbol_name)
+
+    monkeypatch.setattr(daily_job.yfinance, "Ticker", fake_ticker_factory)
 
     retry_result = daily_job.retry_missing_date_from_yf(
         target_date,
         tmp_path,
-        symbol_names=["AAA", "BBB", "CCC"],
-        batch_size=10,
+        symbol_names=["AAA", "BBB", "CCC", "DDD"],
     )
 
-    assert retry_result.attempted_symbols == 2
+    assert retry_result.attempted_symbols == 3
     assert retry_result.recovered_symbols == ("BBB",)
-    assert retry_result.remaining_missing_symbols == ("CCC",)
+    assert retry_result.remaining_missing_symbols == ("CCC", "DDD")
     assert recorded_retry_arguments == [
         {
-            "tickers": ["BBB", "CCC"],
-            "start": "2024-01-02",
+            "symbol_name": symbol_name,
+            "start": target_date,
             "end": "2024-01-03",
-            "progress": False,
+            "interval": "1d",
             "auto_adjust": True,
-            "threads": True,
-            "group_by": "ticker",
+            "actions": False,
             "timeout": daily_job.YAHOO_MISSING_DATE_RETRY_TIMEOUT_SECONDS,
+            "raise_errors": True,
         }
+        for symbol_name in ("BBB", "CCC", "DDD")
     ]
 
     recovered_frame = pandas.read_csv(

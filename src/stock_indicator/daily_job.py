@@ -34,7 +34,6 @@ MINIMUM_HISTORY_DATE = "2014-01-01"
 # indicator windows safely when recomputing signals for a single date.
 SIGNAL_HISTORY_LOOKBACK_DAYS = 756
 YAHOO_CACHE_REFRESH_LOOKBACK_DAYS = 365
-YAHOO_MISSING_DATE_RETRY_BATCH_SIZE = 50
 YAHOO_MISSING_DATE_RETRY_TIMEOUT_SECONDS = 20
 DATA_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "data"
 STOCK_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
@@ -61,6 +60,10 @@ CRON_RUNTIME_FIELD_NAMES = [
     "total_seconds",
     "update_seconds",
     "signal_seconds",
+    "first_download_seconds",
+    "retry_download_seconds",
+    "total_download_seconds",
+    "process_seconds",
 ]
 
 
@@ -81,30 +84,53 @@ def record_cron_runtime(
     start_epoch: float,
     update_end_epoch: float,
     end_epoch: float,
+    first_download_end_epoch: float | None = None,
 ) -> None:
-    """Append one wall-clock runtime record for the daily cron wrapper.
+    """Append phase-level wall-clock timing for the daily cron wrapper.
 
     The helper intentionally uses append mode and only writes the header when
-    the target CSV does not exist. This keeps the cron integration simple and
-    avoids rewriting the timing ledger during a production run.
+    the target CSV does not exist. Older ledgers are upgraded in place when
+    new timing columns are introduced so historical rows remain readable.
     """
+
+    # TODO: review
 
     def _round_duration_seconds(duration_seconds: float) -> int:
         """Round a non-negative duration to the nearest whole second."""
 
         return int(math.floor(duration_seconds + 0.5))
 
-    csv_exists = csv_path.exists()
+    resolved_first_download_end_epoch = (
+        first_download_end_epoch
+        if first_download_end_epoch is not None
+        else update_end_epoch
+    )
+    if not (
+        start_epoch
+        <= resolved_first_download_end_epoch
+        <= update_end_epoch
+        <= end_epoch
+    ):
+        raise ValueError("cron runtime timestamps must be chronological")
+
+    csv_field_names = _prepare_cron_runtime_csv_schema(csv_path)
+    csv_exists = csv_path.exists() and csv_path.stat().st_size > 0
     start_datetime = datetime.datetime.fromtimestamp(start_epoch).astimezone()
     end_datetime = datetime.datetime.fromtimestamp(end_epoch).astimezone()
     update_seconds = _round_duration_seconds(update_end_epoch - start_epoch)
     signal_seconds = _round_duration_seconds(end_epoch - update_end_epoch)
     total_seconds = _round_duration_seconds(end_epoch - start_epoch)
+    first_download_seconds = _round_duration_seconds(
+        resolved_first_download_end_epoch - start_epoch
+    )
+    retry_download_seconds = _round_duration_seconds(
+        update_end_epoch - resolved_first_download_end_epoch
+    )
 
     with csv_path.open("a", newline="", encoding="utf-8") as cron_runtime_file:
         writer = csv.DictWriter(
             cron_runtime_file,
-            fieldnames=CRON_RUNTIME_FIELD_NAMES,
+            fieldnames=csv_field_names,
         )
         if not csv_exists:
             writer.writeheader()
@@ -116,8 +142,40 @@ def record_cron_runtime(
                 "total_seconds": total_seconds,
                 "update_seconds": update_seconds,
                 "signal_seconds": signal_seconds,
+                "first_download_seconds": first_download_seconds,
+                "retry_download_seconds": retry_download_seconds,
+                "total_download_seconds": update_seconds,
+                "process_seconds": signal_seconds,
             }
         )
+
+
+def _prepare_cron_runtime_csv_schema(csv_path: Path) -> list[str]:
+    """Add newly required timing columns while preserving existing rows."""
+
+    # TODO: review
+    if not csv_path.exists() or csv_path.stat().st_size == 0:
+        return list(CRON_RUNTIME_FIELD_NAMES)
+
+    with csv_path.open("r", newline="", encoding="utf-8") as runtime_file:
+        reader = csv.DictReader(runtime_file)
+        existing_field_names = list(reader.fieldnames or [])
+        existing_rows = list(reader)
+
+    resolved_field_names = list(existing_field_names)
+    for field_name in CRON_RUNTIME_FIELD_NAMES:
+        if field_name not in resolved_field_names:
+            resolved_field_names.append(field_name)
+    if resolved_field_names == existing_field_names:
+        return resolved_field_names
+
+    temporary_path = csv_path.with_suffix(f"{csv_path.suffix}.tmp")
+    with temporary_path.open("w", newline="", encoding="utf-8") as runtime_file:
+        writer = csv.DictWriter(runtime_file, fieldnames=resolved_field_names)
+        writer.writeheader()
+        writer.writerows(existing_rows)
+    temporary_path.replace(csv_path)
+    return resolved_field_names
 
 
 def determine_latest_trading_date(
@@ -474,32 +532,17 @@ def _normalize_retry_download_columns(frame: pandas.DataFrame) -> pandas.DataFra
     return normalized_frame
 
 
-def _extract_symbol_frame_from_retry_download(
+def _extract_target_date_rows_from_symbol_download(
     downloaded_frame: pandas.DataFrame,
-    symbol_name: str,
-    batch_symbol_names: list[str],
     target_timestamp: pandas.Timestamp,
 ) -> pandas.DataFrame:
-    """Extract one symbol's target-date rows from a Yahoo batch response."""
+    """Extract target-date rows from one symbol's isolated Yahoo response."""
 
+    # TODO: review
     if downloaded_frame.empty:
         return pandas.DataFrame()
 
-    if isinstance(downloaded_frame.columns, pandas.MultiIndex):
-        first_level_values = downloaded_frame.columns.get_level_values(0)
-        second_level_values = downloaded_frame.columns.get_level_values(1)
-        if symbol_name in first_level_values:
-            symbol_frame = downloaded_frame[symbol_name]
-        elif symbol_name in second_level_values:
-            symbol_frame = downloaded_frame.xs(symbol_name, level=1, axis=1)
-        else:
-            return pandas.DataFrame()
-    elif len(batch_symbol_names) == 1:
-        symbol_frame = downloaded_frame
-    else:
-        return pandas.DataFrame()
-
-    symbol_frame = symbol_frame.dropna(how="all")
+    symbol_frame = downloaded_frame.dropna(how="all")
     if symbol_frame.empty:
         return pandas.DataFrame()
 
@@ -545,19 +588,18 @@ def retry_missing_date_from_yf(
     data_directory: Path,
     *,
     symbol_names: list[str] | None = None,
-    batch_size: int = YAHOO_MISSING_DATE_RETRY_BATCH_SIZE,
 ) -> YahooMissingDateRetryResult:
-    """Retry Yahoo only for symbols missing ``target_date`` in local cache.
+    """Run a second per-symbol pass for caches missing ``target_date``.
 
-    The main cron refresh already tries every runtime symbol individually.
-    This post-pass is intentionally narrow: it inspects the final target
-    trading date and performs batched one-day retries only for caches that
-    still lack that date. A slow or temporarily incomplete Yahoo response can
-    then self-heal without re-running the full 5k-symbol annual refresh.
+    The main cron refresh completes its first pass over the full universe
+    before this function runs. This pass audits the resulting caches rather
+    than relying on exceptions because ``yfinance.download`` can report an
+    individual failure by returning an empty frame. Each missing symbol then
+    receives one isolated one-day request so another symbol cannot affect its
+    retry result.
     """
 
-    if batch_size <= 0:
-        raise ValueError("batch_size must be positive")
+    # TODO: review
 
     target_timestamp = pandas.Timestamp(datetime.date.fromisoformat(target_date))
     exclusive_end_date = (
@@ -593,40 +635,33 @@ def retry_missing_date_from_yf(
     )
 
     recovered_symbol_names: list[str] = []
-    for batch_start_index in range(0, len(missing_symbol_names), batch_size):
-        batch_symbol_names = missing_symbol_names[
-            batch_start_index : batch_start_index + batch_size
-        ]
+    for symbol_name in missing_symbol_names:
         try:
-            downloaded_frame = yfinance.download(
-                tickers=batch_symbol_names,
+            downloaded_frame = yfinance.Ticker(symbol_name).history(
                 start=target_date,
                 end=exclusive_end_date,
-                progress=False,
+                interval="1d",
                 auto_adjust=True,
-                threads=True,
-                group_by="ticker",
+                actions=False,
                 timeout=YAHOO_MISSING_DATE_RETRY_TIMEOUT_SECONDS,
+                raise_errors=True,
             )
         except Exception as download_error:  # noqa: BLE001
             LOGGER.warning(
-                "Yahoo missing-date retry batch failed for %s symbols %s: %s",
+                "Yahoo missing-date retry failed for %s on %s: %s",
+                symbol_name,
                 target_date,
-                batch_symbol_names,
                 download_error,
             )
             continue
 
-        for symbol_name in batch_symbol_names:
-            target_rows = _extract_symbol_frame_from_retry_download(
-                downloaded_frame,
-                symbol_name,
-                batch_symbol_names,
-                target_timestamp,
-            )
-            cache_path = data_directory / f"{symbol_name}.csv"
-            if _merge_retry_rows_into_cache(cache_path, target_rows):
-                recovered_symbol_names.append(symbol_name)
+        target_rows = _extract_target_date_rows_from_symbol_download(
+            downloaded_frame,
+            target_timestamp,
+        )
+        cache_path = data_directory / f"{symbol_name}.csv"
+        if _merge_retry_rows_into_cache(cache_path, target_rows):
+            recovered_symbol_names.append(symbol_name)
 
     remaining_missing_symbol_names = _find_symbols_missing_cache_date(
         runtime_symbol_names,
