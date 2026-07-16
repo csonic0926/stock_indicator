@@ -1384,6 +1384,110 @@ def compute_cohort_co_movement_for_today(
     )
 
 
+def describe_per_bucket_entry_filter_rejection(
+    bucket_def: strategy.ComplexStrategySetDefinition,
+    slope_60: float | None,
+    near_delta: float | None,
+    above_pv: float | None = None,
+    above_pv_previous: float | None = None,
+    fuel_drawdown: float | None = None,
+    cohort_entry_detail: strategy.TradeDetail | None = None,
+) -> str | None:
+    """Return the first simulator-compatible entry-filter rejection.
+
+    - slope_max / slope_min: unconditional bounds on slope_60 at entry.
+    - free_fall_slope + free_fall_near_delta: compound AND filter (skip
+      when both deeply negative — toxic free-fall cell).
+    - slope_dead_zone_min / slope_dead_zone_max: skip INSIDE band
+      (mid-rally noise, not regime transition).
+    - v_filter_threshold: keep ONLY when above_pv crosses DOWN through
+      the threshold within one bar (T-1 > threshold AND T < threshold).
+    The checks deliberately remain in simulator order so the displayed
+    reason is the same first gate that prevents the candidate there.
+    Returns ``None`` when the candidate survives all filters.
+    """
+    if slope_60 is not None:
+        if (
+            bucket_def.slope_max is not None
+            and slope_60 > bucket_def.slope_max
+        ):
+            return (
+                "slope_max: "
+                f"slope_60={slope_60:.4f} > {bucket_def.slope_max:.4f}"
+            )
+        if (
+            bucket_def.slope_min is not None
+            and slope_60 < bucket_def.slope_min
+        ):
+            return (
+                "slope_min: "
+                f"slope_60={slope_60:.4f} < {bucket_def.slope_min:.4f}"
+            )
+    if (
+        bucket_def.free_fall_slope is not None
+        and bucket_def.free_fall_near_delta is not None
+        and slope_60 is not None
+        and near_delta is not None
+        and slope_60 < bucket_def.free_fall_slope
+        and near_delta < bucket_def.free_fall_near_delta
+    ):
+        return (
+            "free_fall: "
+            f"slope_60={slope_60:.4f} < {bucket_def.free_fall_slope:.4f} "
+            "and "
+            f"near_delta={near_delta:.4f} < "
+            f"{bucket_def.free_fall_near_delta:.4f}"
+        )
+    if (
+        bucket_def.slope_dead_zone_min is not None
+        and bucket_def.slope_dead_zone_max is not None
+        and slope_60 is not None
+        and bucket_def.slope_dead_zone_min
+        <= slope_60
+        <= bucket_def.slope_dead_zone_max
+    ):
+        return (
+            "slope_dead_zone: "
+            f"{bucket_def.slope_dead_zone_min:.4f} <= "
+            f"slope_60={slope_60:.4f} <= "
+            f"{bucket_def.slope_dead_zone_max:.4f}"
+        )
+    if bucket_def.v_filter_threshold is not None:
+        if above_pv is None or above_pv_previous is None:
+            return "v_filter: above-PV data unavailable"
+        if (
+            above_pv_previous <= bucket_def.v_filter_threshold
+            or above_pv >= bucket_def.v_filter_threshold
+        ):
+            return (
+                "v_filter: no downward cross "
+                f"(previous={above_pv_previous:.4f}, "
+                f"current={above_pv:.4f}, "
+                f"threshold={bucket_def.v_filter_threshold:.4f})"
+            )
+    # Squeeze-fuel gate: keep ONLY when the pre-surge window drew down
+    # at least to the threshold (mirrors strategy.py event-loop gate).
+    if bucket_def.fuel_drawdown_max is not None:
+        if fuel_drawdown is None:
+            return "fuel_drawdown: price history unavailable"
+        if fuel_drawdown > bucket_def.fuel_drawdown_max:
+            return (
+                "fuel_drawdown: "
+                f"drawdown={fuel_drawdown:.4f} > "
+                f"required={bucket_def.fuel_drawdown_max:.4f}"
+            )
+    if (
+        bucket_def.cohort_co_movement_gate is not None
+        and cohort_entry_detail is not None
+        and strategy.should_skip_for_cohort_co_movement_gate(
+            cohort_entry_detail,
+            bucket_def.cohort_co_movement_gate,
+        )
+    ):
+        return "cohort_co_movement_gate: isolated drawdown"
+    return None
+
+
 def passes_per_bucket_entry_filters(
     bucket_def: strategy.ComplexStrategySetDefinition,
     slope_60: float | None,
@@ -1393,71 +1497,16 @@ def passes_per_bucket_entry_filters(
     fuel_drawdown: float | None = None,
     cohort_entry_detail: strategy.TradeDetail | None = None,
 ) -> bool:
-    """Mirror simulator strategy.py:1684-1780 entry filters.
-
-    - slope_max / slope_min: unconditional bounds on slope_60 at entry.
-    - free_fall_slope + free_fall_near_delta: compound AND filter (skip
-      when both deeply negative — toxic free-fall cell).
-    - slope_dead_zone_min / slope_dead_zone_max: skip INSIDE band
-      (mid-rally noise, not regime transition).
-    - v_filter_threshold: keep ONLY when above_pv crosses DOWN through
-      the threshold within one bar (T-1 > threshold AND T < threshold).
-    Returns True when the candidate survives all filters."""
-    if slope_60 is not None:
-        if (
-            bucket_def.slope_max is not None
-            and slope_60 > bucket_def.slope_max
-        ):
-            return False
-        if (
-            bucket_def.slope_min is not None
-            and slope_60 < bucket_def.slope_min
-        ):
-            return False
-    if (
-        bucket_def.free_fall_slope is not None
-        and bucket_def.free_fall_near_delta is not None
-        and slope_60 is not None
-        and near_delta is not None
-        and slope_60 < bucket_def.free_fall_slope
-        and near_delta < bucket_def.free_fall_near_delta
-    ):
-        return False
-    if (
-        bucket_def.slope_dead_zone_min is not None
-        and bucket_def.slope_dead_zone_max is not None
-        and slope_60 is not None
-        and bucket_def.slope_dead_zone_min
-        <= slope_60
-        <= bucket_def.slope_dead_zone_max
-    ):
-        return False
-    if bucket_def.v_filter_threshold is not None:
-        if (
-            above_pv is None
-            or above_pv_previous is None
-            or above_pv_previous <= bucket_def.v_filter_threshold
-            or above_pv >= bucket_def.v_filter_threshold
-        ):
-            return False
-    # Squeeze-fuel gate: keep ONLY when the pre-surge window drew down
-    # at least to the threshold (mirrors strategy.py event-loop gate).
-    if bucket_def.fuel_drawdown_max is not None:
-        if (
-            fuel_drawdown is None
-            or fuel_drawdown > bucket_def.fuel_drawdown_max
-        ):
-            return False
-    if (
-        bucket_def.cohort_co_movement_gate is not None
-        and cohort_entry_detail is not None
-        and strategy.should_skip_for_cohort_co_movement_gate(
-            cohort_entry_detail,
-            bucket_def.cohort_co_movement_gate,
-        )
-    ):
-        return False
-    return True
+    """Return whether a signal survives every per-bucket entry filter."""
+    return describe_per_bucket_entry_filter_rejection(
+        bucket_def,
+        slope_60,
+        near_delta,
+        above_pv=above_pv,
+        above_pv_previous=above_pv_previous,
+        fuel_drawdown=fuel_drawdown,
+        cohort_entry_detail=cohort_entry_detail,
+    ) is None
 
 
 # ----------------------------------------------------------------------
@@ -1466,12 +1515,18 @@ def passes_per_bucket_entry_filters(
 
 
 @dataclass
-class TradableEntrySignal:
-    """Complete entry metadata for one tradable bucket/symbol signal."""
+class EntrySignalIdentity:
+    """Identify one raw strategy entry without implying tradability."""
 
     bucket_label: str
     strategy_id: str
     symbol: str
+
+
+@dataclass
+class TradableEntrySignal(EntrySignalIdentity):
+    """Complete entry metadata for one tradable bucket/symbol signal."""
+
     entry_date: str
     tp_pct: float
     sl_pct: float
@@ -1492,7 +1547,7 @@ class TodaySignalsResult:
         str, List[Dict[str, str]]
     ]
     tradable_records: List[TradableEntrySignal]
-    filtered_out_records: List[Tuple[TradableEntrySignal, str]]
+    filtered_out_records: List[Tuple[EntrySignalIdentity, str]]
     log_lines: List[str]
 
 
@@ -1907,13 +1962,14 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
     # commit 1240118d). Across-bucket order: bucket_priority asc, then
     # dollar_volume rank asc (lower-priority value wins; lower rank wins).
     # ------------------------------------------------------------------
-    filtered_out_records: List[Tuple[TradableEntrySignal, str]] = []
+    filtered_out_records: List[Tuple[EntrySignalIdentity, str]] = []
     candidates: List[Tuple[int, int, str, str, TradableEntrySignal]] = []
     for bucket_label, bucket_def in config.bucket_definitions.items():
         strategy_identifier = bucket_def.strategy_identifier
         signals = per_bucket_signals[bucket_label]
         entry_signal_set = set(signals.get("entry_signals", []))
         filtered_symbols = signals.get("filtered_symbols", [])
+        ranked_entry_symbols: set[str] = set()
         for dollar_volume_rank, filtered_entry in enumerate(filtered_symbols):
             symbol_name = (
                 filtered_entry[0]
@@ -1922,6 +1978,7 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
             )
             if symbol_name not in entry_signal_set:
                 continue
+            ranked_entry_symbols.add(symbol_name)
             # Signal layer is intentionally pure: no held filter here.
             # signal_trades.json is a signal-emission log, not a fill
             # record. Filtering today's signals by yesterday's record
@@ -1981,15 +2038,35 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
                 if bucket_def.cohort_co_movement_gate is not None
                 else None
             )
+            filter_arguments = {
+                "above_pv": above_pv_value,
+                "above_pv_previous": above_pv_previous_value,
+                "fuel_drawdown": fuel_drawdown_value,
+                "cohort_entry_detail": cohort_entry_detail,
+            }
             if not passes_per_bucket_entry_filters(
                 bucket_def,
                 slope_60_value,
                 near_delta_value,
-                above_pv=above_pv_value,
-                above_pv_previous=above_pv_previous_value,
-                fuel_drawdown=fuel_drawdown_value,
-                cohort_entry_detail=cohort_entry_detail,
+                **filter_arguments,
             ):
+                filter_rejection_reason = (
+                    describe_per_bucket_entry_filter_rejection(
+                        bucket_def,
+                        slope_60_value,
+                        near_delta_value,
+                        **filter_arguments,
+                    )
+                    or "per_bucket_entry_filter"
+                )
+                filtered_out_records.append((
+                    EntrySignalIdentity(
+                        bucket_label=bucket_label,
+                        strategy_id=strategy_identifier,
+                        symbol=symbol_name,
+                    ),
+                    filter_rejection_reason,
+                ))
                 continue
             (
                 tp_pct,
@@ -2046,6 +2123,25 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
                 bucket_label,
                 symbol_name,
                 candidate_record,
+            ))
+
+        # A raw signal should never silently disappear between the strategy
+        # and tradable-candidate layers. This is an invariant diagnostic,
+        # not a normal strategy gate: compute_signals_for_date ordinarily
+        # returns every entry inside its ranked filtered-symbol list.
+        for unranked_entry_symbol in sorted(
+            entry_signal_set - ranked_entry_symbols
+        ):
+            filtered_out_records.append((
+                EntrySignalIdentity(
+                    bucket_label=bucket_label,
+                    strategy_id=strategy_identifier,
+                    symbol=unranked_entry_symbol,
+                ),
+                (
+                    "signal_pipeline_mismatch: raw entry missing from "
+                    "dollar-volume ranking"
+                ),
             ))
 
     candidates.sort(

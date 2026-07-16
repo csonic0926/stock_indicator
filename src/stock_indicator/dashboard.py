@@ -2850,7 +2850,7 @@ function render(state, futu) {
   html += tradableCandidates.length ? tradableCandidates.map(candidate => tagWithBucketLabel(candidate.symbol, 'buy', shortBucket(candidate.bucket))).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   const filteredOutRecords = ((log.signal_candidate_summary||{}).filtered_out) || [];
-  html += '<div class="signal-row"><strong style="color:var(--text2)">FILTERED OUT (signal):</strong> ';
+  html += '<div class="signal-row"><strong style="color:var(--text2)">NOT TRADABLE (cron):</strong> ';
   html += filteredOutRecords.length ? filteredOutRecords.map(record => tagWithBucketLabel(record.symbol, 'neutral', shortBucket(record.bucket), record.reason || '?')).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">SELL:</strong> ';
@@ -2863,7 +2863,7 @@ function render(state, futu) {
   html += '<div style="margin-top:8px; font-size:0.85em; color:var(--text2)">';
   html += 'Raw entries: ' + (log.entry_signals||[]).length + ' | ';
   html += 'Tradable candidates: ' + tradableCandidates.length + ' | ';
-  html += 'Filtered out: ' + filteredOutRecords.length + ' | ';
+  html += 'Not tradable: ' + filteredOutRecords.length + ' | ';
   html += 'Exit signals: ' + (log.exit_signals||[]).length + ' | ';
   html += 'Virtual reference open trades: ' + (log.adaptive_tp_sl_virtual_open_trade_count||0);
   html += '</div>';
@@ -2929,7 +2929,7 @@ async function loadDate(d) {
   html += tradableCandidates.length ? tradableCandidates.map(candidate => tagWithBucketLabel(candidate.symbol, 'buy', shortBucket(candidate.bucket))).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   const filteredOutRecords = ((log.signal_candidate_summary||{}).filtered_out) || [];
-  html += '<div class="signal-row"><strong style="color:var(--text2)">FILTERED OUT (signal):</strong> ';
+  html += '<div class="signal-row"><strong style="color:var(--text2)">NOT TRADABLE (cron):</strong> ';
   html += filteredOutRecords.length ? filteredOutRecords.map(record => tagWithBucketLabel(record.symbol, 'neutral', shortBucket(record.bucket), record.reason || '?')).join('') : '<span style="color:var(--text2)">—</span>';
   html += '</div>';
   html += '<div class="signal-row"><strong style="color:var(--text2)">SELL:</strong> ';
@@ -2941,7 +2941,7 @@ async function loadDate(d) {
   html += '<div style="margin-top:8px; font-size:0.85em; color:var(--text2)">';
   html += 'Raw entries: ' + (log.entry_signals||[]).length + ' | ';
   html += 'Tradable candidates: ' + tradableCandidates.length + ' | ';
-  html += 'Filtered out: ' + filteredOutRecords.length + ' | ';
+  html += 'Not tradable: ' + filteredOutRecords.length + ' | ';
   html += 'Exit signals: ' + (log.exit_signals||[]).length + ' | ';
   html += 'Virtual reference open trades: ' + (log.adaptive_tp_sl_virtual_open_trade_count||0);
   html += '</div>';

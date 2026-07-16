@@ -276,6 +276,78 @@ def test_compute_today_signals_filters_ineligible_symbol_before_publication(
     )
 
 
+def test_compute_today_signals_logs_exact_entry_filter_rejection(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Every raw signal rejected before publication should explain why."""
+
+    signal_results_by_strategy: dict[str, dict[str, Any]] = {
+        "fish_head_production_buy": {
+            "filtered_symbols": [("OKLO", 1)],
+            "entry_signals": ["OKLO"],
+            "exit_signals": [],
+        },
+        "fish_tail_explore_buy": {
+            "filtered_symbols": [],
+            "entry_signals": [],
+            "exit_signals": [],
+        },
+    }
+    monkeypatch.setattr(
+        strategy,
+        "compute_signals_for_date",
+        lambda *, buy_strategy_name, **_: signal_results_by_strategy[
+            buy_strategy_name
+        ],
+    )
+    monkeypatch.setattr(
+        multi_bucket_today.daily_job,
+        "filter_debug_values",
+        lambda *arguments, **keyword_arguments: {
+            "slope_60": -0.3079,
+            "near_delta": -0.1218,
+        },
+    )
+
+    config = _build_test_config()
+    fish_head_bucket = config.bucket_definitions["fish_head_production"]
+    fish_head_bucket.free_fall_slope = -0.2
+    fish_head_bucket.free_fall_near_delta = -0.05
+    state = _build_adaptive_tp_sl_virtual_trade_history_state()
+
+    result = compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
+        config=config,
+        eval_date=pandas.Timestamp("2026-07-15"),
+        adaptive_tp_sl_virtual_open_trades_by_strategy={},
+        state_document=state,
+        data_directory=tmp_path,
+        allowed_symbols=None,
+    )
+
+    assert result.tradable_records == []
+    assert len(result.filtered_out_records) == 1
+    rejected_signal, rejection_reason = result.filtered_out_records[0]
+    assert rejected_signal.symbol == "OKLO"
+    assert rejected_signal.bucket_label == "fish_head_production"
+    assert rejection_reason == (
+        "free_fall: slope_60=-0.3079 < -0.2000 and "
+        "near_delta=-0.1218 < -0.0500"
+    )
+    assert "[ENTRY_SIGNAL] bucket=fish_head_production" in "\n".join(
+        result.log_lines
+    )
+    assert (
+        "('OKLO', 'fish_head_production', "
+        "'free_fall: slope_60=-0.3079 < -0.2000 and "
+        "near_delta=-0.1218 < -0.0500')"
+    ) in next(
+        log_line
+        for log_line in result.log_lines
+        if log_line.startswith("filtered_out:")
+    )
+
+
 def test_compute_today_signals_emits_all_dashboard_exit_signals(
     tmp_path: Path,
     monkeypatch,

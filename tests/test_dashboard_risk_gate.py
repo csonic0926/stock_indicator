@@ -220,6 +220,27 @@ def test_parse_log_separates_raw_entries_from_tradable_candidates(
     assert parsed_log["adaptive_tp_sl_virtual_open_trade_count"] == 2
 
 
+def test_parse_slot_allocation_pairs_preserves_detailed_rejection_reason() -> None:
+    """Dashboard should show cron's measured rejection reason unchanged."""
+
+    parsed_records = dashboard._parse_slot_allocation_pairs(
+        "[('OKLO', 'fish_head_production', "
+        "'free_fall: slope_60=-0.3079 < -0.2000 and "
+        "near_delta=-0.1218 < -0.0500')]"
+    )
+
+    assert parsed_records == [
+        {
+            "symbol": "OKLO",
+            "bucket": "fish_head_production",
+            "reason": (
+                "free_fall: slope_60=-0.3079 < -0.2000 and "
+                "near_delta=-0.1218 < -0.0500"
+            ),
+        }
+    ]
+
+
 def test_parse_log_uses_last_cron_run_when_log_was_appended(
     tmp_path: Path,
 ) -> None:
