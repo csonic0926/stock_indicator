@@ -153,7 +153,11 @@ def test_update_all_data_from_yf_deduplicates_history(
         return combined_frame
 
     monkeypatch.setattr(daily_job, "download_history", fake_download_history)
-    monkeypatch.setattr(daily_job, "load_symbols", lambda: ["AAA"])
+    monkeypatch.setattr(
+        daily_job,
+        "load_symbols_allowed_for_price_refresh",
+        lambda production_path, status_path: ["AAA"],
+    )
     monkeypatch.setattr(
         daily_job.strategy, "load_ff12_groups_by_symbol", lambda: {"AAA": 1}
     )
@@ -205,7 +209,11 @@ def test_update_all_data_from_yf_treats_end_as_inclusive(
         return data_frame
 
     monkeypatch.setattr(daily_job, "download_history", fake_download_history)
-    monkeypatch.setattr(daily_job, "load_symbols", lambda: ["AAA"])
+    monkeypatch.setattr(
+        daily_job,
+        "load_symbols_allowed_for_price_refresh",
+        lambda production_path, status_path: ["AAA"],
+    )
     monkeypatch.setattr(
         daily_job.strategy, "load_ff12_groups_by_symbol", lambda: {"AAA": 1}
     )
@@ -262,7 +270,11 @@ def test_update_all_data_from_yf_preserves_existing_rows(
         return combined_frame
 
     monkeypatch.setattr(daily_job, "download_history", fake_download_history)
-    monkeypatch.setattr(daily_job, "load_symbols", lambda: ["AAA"])
+    monkeypatch.setattr(
+        daily_job,
+        "load_symbols_allowed_for_price_refresh",
+        lambda production_path, status_path: ["AAA"],
+    )
     monkeypatch.setattr(
         daily_job.strategy, "load_ff12_groups_by_symbol", lambda: {"AAA": 1}
     )
@@ -310,7 +322,11 @@ def test_update_all_data_from_yf_logs_warning_on_error(
         return frame
 
     monkeypatch.setattr(daily_job, "download_history", fake_download_history)
-    monkeypatch.setattr(daily_job, "load_symbols", lambda: ["AAA", "BBB"])
+    monkeypatch.setattr(
+        daily_job,
+        "load_symbols_allowed_for_price_refresh",
+        lambda production_path, status_path: ["AAA", "BBB"],
+    )
     monkeypatch.setattr(
         daily_job.strategy,
         "load_ff12_groups_by_symbol",
@@ -434,12 +450,17 @@ def test_retry_missing_date_from_yf_retries_each_missing_symbol_separately(
 def test_load_runtime_download_symbols_skips_missing_sector_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Runtime refresh should trust symbols.txt and only require FF12 coverage."""
+    """Runtime refresh should trust production status and require FF12 coverage."""
 
     monkeypatch.setattr(
         daily_job,
-        "load_symbols",
-        lambda: ["AAA", "BBB", "CCC", daily_job.SP500_SYMBOL],
+        "load_symbols_allowed_for_price_refresh",
+        lambda production_path, status_path: [
+            "AAA",
+            "BBB",
+            "CCC",
+            daily_job.SP500_SYMBOL,
+        ],
     )
     monkeypatch.setattr(
         daily_job.strategy,
@@ -472,8 +493,16 @@ def test_load_runtime_download_symbols_does_not_apply_hidden_legacy_guardrails(
 
     monkeypatch.setattr(
         daily_job,
-        "load_symbols",
-        lambda: ["AAA", "ETF", "UNKNOWN", "WARRANT", "FLWS", "CRWS", "CWT"],
+        "load_symbols_allowed_for_price_refresh",
+        lambda production_path, status_path: [
+            "AAA",
+            "ETF",
+            "UNKNOWN",
+            "WARRANT",
+            "FLWS",
+            "CRWS",
+            "CWT",
+        ],
     )
     monkeypatch.setattr(
         daily_job.strategy,

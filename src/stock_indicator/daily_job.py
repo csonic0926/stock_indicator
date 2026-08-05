@@ -20,6 +20,7 @@ from pandas.tseries.offsets import BDay
 
 from .cron import parse_daily_task_arguments, run_daily_tasks
 from .data_loader import download_history, load_local_history
+from .production_symbol_status import load_symbols_allowed_for_price_refresh
 from .symbols import SP500_SYMBOL, load_symbols
 from . import strategy
 
@@ -37,6 +38,8 @@ YAHOO_CACHE_REFRESH_LOOKBACK_DAYS = 365
 YAHOO_MISSING_DATE_RETRY_TIMEOUT_SECONDS = 20
 DATA_DIRECTORY = Path(__file__).resolve().parent.parent.parent / "data"
 STOCK_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
+PRODUCTION_SYMBOLS_PATH = DATA_DIRECTORY / "production_symbols.txt"
+PRODUCTION_SYMBOL_STATUS_PATH = DATA_DIRECTORY / "production_symbol_status.csv"
 BACKTEST_UNIVERSE_DIRECTORY = DATA_DIRECTORY / "backtest_universe_alpha_vantage"
 ETF_SYMBOLS_PATH = (
     BACKTEST_UNIVERSE_DIRECTORY / "backtest_etf_symbols_2010_2026_plus_runtime.csv"
@@ -391,16 +394,19 @@ def load_runtime_download_symbols() -> list[str]:
     """Return the symbol-cache universe for the daily Yahoo refresh.
 
     Runtime trading must not depend on every cached CSV under ``stock_data``.
-    The current ``symbols.txt`` cache is the stock-eligibility contract; ETF,
-    ETN, preferred, SPAC, fund, royalty-trust and quarantine decisions must be
-    resolved upstream before the cache is written.  This function only checks
-    FF12 coverage because production selection is group-aware and cannot buy
-    symbols without that layer.
+    ``production_symbols.txt`` is the append-preserving source contract.
+    Confirmed inactive instruments are skipped through
+    ``production_symbol_status.csv``; ``price_unavailable`` symbols remain in
+    the refresh set so a recovered Yahoo feed can reactivate them.  FF12
+    coverage remains mandatory because production selection is group-aware.
     """
 
     current_symbols = [
         symbol_name.strip().upper()
-        for symbol_name in load_symbols()
+        for symbol_name in load_symbols_allowed_for_price_refresh(
+            PRODUCTION_SYMBOLS_PATH,
+            PRODUCTION_SYMBOL_STATUS_PATH,
+        )
         if symbol_name and symbol_name.strip() and symbol_name != SP500_SYMBOL
     ]
     current_symbols = sorted(dict.fromkeys(current_symbols))
@@ -409,7 +415,7 @@ def load_runtime_download_symbols() -> list[str]:
     if not symbol_to_group_identifier:
         LOGGER.warning(
             "FF12 sector map is unavailable; runtime refresh will trust "
-            "symbols.txt without sector coverage checks"
+            "production_symbols.txt without sector coverage checks"
         )
 
     runtime_symbols: list[str] = []
@@ -425,7 +431,7 @@ def load_runtime_download_symbols() -> list[str]:
 
     runtime_symbols.append(SP500_SYMBOL)
     LOGGER.info(
-        "Runtime Yahoo refresh universe: %d symbols (%d current, "
+        "Runtime Yahoo refresh universe: %d symbols (%d production-status, "
         "%d missing-sector skipped)",
         len(runtime_symbols),
         len(current_symbols),

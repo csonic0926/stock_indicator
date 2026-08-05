@@ -3,7 +3,7 @@
 This document records the current production JSON contract so the live config
 does not drift through accidental `.json` edits.
 
-Last aligned with `data/multi_bucket_production.json`: 2026-06-03.
+Last aligned with `data/multi_bucket_production.json`: 2026-08-05.
 
 ---
 
@@ -29,6 +29,8 @@ strategy tuning:
 |---|---:|---|
 | `data_source` | `daily` | Live signal generation must read the daily Yahoo cache. |
 | `symbol_list` | `production` | Live signals must consume `data/production_symbols.txt`. |
+| `production_symbol_status_path` | `data/production_symbol_status.csv` | Non-active symbols stay in production history but cannot open new positions. Exit signals remain observable. |
+| `symbol_exclude_list` | `crypto_proxy_blocked` | Policy-blocked symbols remain observable for exits and are blocked only from new entries. |
 | `ff12_data_path` | `data/production_symbols_with_sector.parquet` | Pick-N sector balancing must use production sector rows. |
 | `symbol_seasoning.enabled` | `true` | Newly promoted symbols must pass the live-entry seasoning gate. |
 | `symbol_seasoning.eligibility_path` | `data/production_symbol_eligibility.csv` | Missing eligibility rows fail closed. |
@@ -38,6 +40,15 @@ strategy tuning:
 
 Do **not** point the live config at candidate symbol files. Candidate outputs
 are staging inputs for audited promotion only.
+
+`production_symbols.txt` is append-preserving: delisting, non-common-security,
+and price-source failures are recorded in `production_symbol_status.csv`
+instead of deleting the symbol. `active` rows may enter; `inactive` and
+`price_unavailable` rows are excluded before Top-N/Pick-N selection.
+`price_unavailable` rows remain in the Yahoo refresh set so they can recover.
+Seasoning-ineligible rows are also removed before Top-N/Pick-N selection, so a
+new or unaudited symbol cannot consume a slot that an eligible symbol should
+backfill.
 
 ---
 

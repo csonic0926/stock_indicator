@@ -62,6 +62,9 @@ def test_load_multi_bucket_config_preserves_bucket_sigma_overrides(
                 "ff12_data_path": (
                     "data/production_candidate_symbols_with_sector.parquet"
                 ),
+                "production_symbol_status_path": (
+                    "data/production_symbol_status.csv"
+                ),
                 "symbol_seasoning": {
                     "enabled": True,
                     "eligibility_path": "data/production_symbol_eligibility.csv",
@@ -114,6 +117,10 @@ def test_load_multi_bucket_config_preserves_bucket_sigma_overrides(
     assert (
         loaded_config.ff12_data_path_text
         == "data/production_candidate_symbols_with_sector.parquet"
+    )
+    assert (
+        loaded_config.production_symbol_status_path_text
+        == "data/production_symbol_status.csv"
     )
     assert loaded_config.symbol_seasoning is not None
     assert loaded_config.symbol_seasoning.enabled is True
@@ -200,13 +207,19 @@ def test_compute_today_signals_filters_ineligible_symbol_before_publication(
         },
     }
 
+    recorded_entry_blocked_symbols: list[set[str]] = []
+
     def fake_compute_signals_for_date(
         *,
         buy_strategy_name: str,
+        symbols_blocked_for_new_entries: set[str],
         **_: Any,
     ) -> dict[str, Any]:
         """Return deterministic bucket signals without reading stock data."""
 
+        recorded_entry_blocked_symbols.append(
+            set(symbols_blocked_for_new_entries)
+        )
         return signal_results_by_strategy[buy_strategy_name]
 
     monkeypatch.setattr(
@@ -246,7 +259,7 @@ def test_compute_today_signals_filters_ineligible_symbol_before_publication(
         adaptive_tp_sl_virtual_open_trades_by_strategy={},
         state_document=state,
         data_directory=tmp_path,
-        allowed_symbols=None,
+        allowed_symbols={"VST", "AMZN"},
         symbol_first_eligible_trade_dates={
             "VST": pandas.Timestamp("2026-05-15").date(),
             "AMZN": pandas.Timestamp("2026-05-14").date(),
@@ -257,6 +270,7 @@ def test_compute_today_signals_filters_ineligible_symbol_before_publication(
         (record.symbol, reason)
         for record, reason in result.filtered_out_records
     ] == [("VST", "symbol_seasoning")]
+    assert recorded_entry_blocked_symbols == [{"VST"}, {"VST"}]
     assert [record.symbol for record in result.tradable_records] == ["AMZN"]
     adaptive_tp_sl_history = (
         adaptive_tp_sl_virtual_trade_history.

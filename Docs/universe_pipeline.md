@@ -29,10 +29,12 @@ production runtime contract, not the candidate contract directly. See
 
 | File | Meaning |
 |---|---|
-| `data/symbols.txt` | Active production runtime symbol contract. Newline-separated. Runtime trusts this exactly. |
-| `data/production_symbols.txt` | Explicit active production symbol contract used by production configs. |
-| `data/production_symbols_with_sector.parquet` | Active production universe + `cik`, `sic`, `ff12`, `ff48`, `ff49`, `ff_label`, `sic_desc`, `ff12_source` columns. Used for sector-aware Pick-N. |
-| `data/production_symbols_with_sector.csv` | Human-readable mirror of active production parquet. |
+| `data/symbols.txt` | Compatibility mirror of `production_symbols.txt`; no longer the cron source of truth. |
+| `data/production_symbols.txt` | Append-preserving production observation universe. Inactive symbols are retained. |
+| `data/production_symbol_status.csv` | Total current-status map over production. `inactive` and `price_unavailable` block new entries without suppressing exits. |
+| `data/production_symbols_with_sector.parquet` | Total FF12 mapping over the production observation universe. Used for sector-aware Pick-N. |
+| `data/production_symbols_with_sector.csv` | Human-readable mirror of production parquet. |
+| `data/production_symbol_eligibility.csv` | Partial seasoning map. A missing row blocks entry; it does not remove the production symbol. |
 | `data/production_candidate_symbols.txt` | Audited candidate contract produced by `update_universe_pipeline`; this is the source for future production additions, not a direct runtime swap. |
 | `data/production_candidate_symbols_with_sector.parquet` | Candidate universe with 100% FF12 coverage. `sync_production_ff12_sector` reads this when promoted symbols need sector rows. |
 | `data/production_candidate_symbols_with_sector.csv` | Human-readable mirror of candidate parquet. |
@@ -44,6 +46,24 @@ non-null `ff12` (1-12). Candidate rule: any symbol in
 `data/production_candidate_symbols.txt` **must** have a row in
 `data/production_candidate_symbols_with_sector.parquet` with the same FF12
 guarantee. Coverage is **100%** in both contracts.
+
+Trading selection applies current status, the policy blacklist, and seasoning
+before Top-N/Pick-N. These are entry-only filters: observation and exit-signal
+paths retain the full production contract.
+
+### Production status schema
+
+`production_symbol_status.csv` has exactly one row per production symbol:
+
+| Status | Download view | New-entry view | Meaning |
+|---|---|---|---|
+| `active` | included | included unless another entry gate blocks it | Current official listing, common-stock policy pass, and latest market-date price row. |
+| `price_unavailable` | included for recovery retry | blocked | Listing remains valid but the local Yahoo cache is stale or missing. |
+| `inactive` | skipped | blocked | Missing from current official exchange directories, an ETF, or a non-common security under the production hard filter. |
+
+`status_changed_on` changes only when `status` or `status_reason` changes; an
+unchanged daily refresh does not rewrite the semantic transition date. Official
+listing inputs are Nasdaq Trader's `nasdaqlisted.txt` and `otherlisted.txt`.
 
 ---
 
@@ -498,8 +518,10 @@ The live production JSON settings are locked in
 any deliberate production JSON edit.
 
 ```bash
-# === Phase A: Price data (consumes active production symbols.txt) ===
-update_all_data_from_yf               # download per symbols.txt
+# === Phase A: Price data (production base minus confirmed inactive) ===
+update_all_data_from_yf               # reads production_symbols.txt + status
+retry_missing_date_from_yf
+update_production_symbol_status       # listing/type/price status refresh
 
 # === Phase B: Signal generation ===
 multi_bucket_daily_signal data/multi_bucket_production.json
@@ -509,7 +531,7 @@ multi_bucket_daily_signal data/multi_bucket_production.json
 
 | Pipeline | Suggested frequency | Why |
 |---|---|---|
-| Production daily cache | Daily | Uses active `data/symbols.txt` / `data/production_symbols.txt` |
+| Production daily cache | Daily | Uses `data/production_symbols.txt`; inactive status rows are skipped, while price-unavailable rows keep retrying |
 | Production daily signal | Daily, after price refresh | Uses `data/multi_bucket_production.json` |
 | Production-candidate refresh | Manual / controlled cron only | Publishes `production_candidate_*` staging outputs and must not change active production files |
 
@@ -517,6 +539,9 @@ Heavy SEC submissions API calls are cached, so daily re-runs only fetch new CIKs
 
 ### Atomic swap discipline
 
+- Never delete an invalid or delisted member from `production_symbols.txt` as
+  routine data maintenance. Record its status in
+  `production_symbol_status.csv`.
 - Never edit production `symbols.txt` / production sector parquet in place.
 - Build to temp files, then replace with same-filesystem atomic swaps.
 - `update_universe_pipeline` writes only the production-candidate contract:
@@ -550,6 +575,7 @@ that, return to the default 5% guard because normal daily churn should be tiny.
 | SEC API down / timeout | Candidate refresh aborts; active production remains unchanged |
 | LLM API down / rate limit | Stage 4 aborts; existing classifications retained; new symbols stay out until next run |
 | yf cumulative failure | Production daily cache refresh is partial; signal generation uses whatever CSVs exist |
+| Exchange-directory/status refresh failure | Daily cron stops before signal publication; the prior status file remains intact |
 | Validation / parquet rebuild fail | Candidate refresh aborts; existing candidate files remain unchanged |
 
 **Fail-closed for new symbols**: if a new ticker cannot be classified, keep it
@@ -567,11 +593,11 @@ new noise.
 
 ## Official production add-symbol policy
 
-The production rule is **stable baseline plus audited additions**:
+The production rule is **append-preserving baseline plus audited additions**:
 
 1. Existing symbols and FF12 rows in `data/production_symbols.txt` and
-   `data/production_symbols_with_sector.*` stay frozen unless deliberately
-   edited.
+   `data/production_symbols_with_sector.*` stay retained. Invalid/delisted
+   symbols change status rather than being removed.
 2. New SEC symbols are processed by `update_universe_pipeline` into the
    production-candidate contract.
 3. A new symbol may enter the candidate contract only after it passes:

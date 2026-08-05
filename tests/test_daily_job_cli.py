@@ -40,6 +40,11 @@ def test_manager_cli_generates_logs_and_signals(
 
     monkeypatch.setattr(daily_job_module, "load_symbols", lambda: ["AAA"])
     monkeypatch.setattr(
+        daily_job_module,
+        "load_symbols_allowed_for_price_refresh",
+        lambda production_path, status_path: ["AAA"],
+    )
+    monkeypatch.setattr(
         daily_job_module.strategy, "load_ff12_groups_by_symbol", lambda: {"AAA": 1}
     )
     monkeypatch.setattr(

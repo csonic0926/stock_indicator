@@ -241,7 +241,9 @@ def test_update_all_data_from_yf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 
     symbol_list = ["AAA", "BBB", manage_module.SP500_SYMBOL]
 
-    def fake_load_symbols() -> list[str]:
+    def fake_load_symbols(
+        *_unused_paths: Path,
+    ) -> list[str]:
         return symbol_list
 
     download_calls: list[str] = []
@@ -264,7 +266,11 @@ def test_update_all_data_from_yf(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
             data_frame.to_csv(cache_path)
         return data_frame
 
-    monkeypatch.setattr(manage_module.daily_job, "load_symbols", fake_load_symbols)
+    monkeypatch.setattr(
+        manage_module.daily_job,
+        "load_symbols_allowed_for_price_refresh",
+        fake_load_symbols,
+    )
     monkeypatch.setattr(
         manage_module.daily_job, "download_history", fake_download_history
     )
@@ -3737,6 +3743,126 @@ def test_load_symbol_exclude_list_parses_symbols_and_comments(
         str(exclude_list_path)
     )
     assert excluded_symbols == {"MSTR", "MARA", "RIOT"}
+
+
+def test_daily_context_keeps_observation_universe_and_blocks_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Status and policy denylists should not remove exit observations."""
+
+    import stock_indicator.manage as manage_module
+    from stock_indicator import multi_bucket_today, production_symbol_status
+
+    data_directory = tmp_path / "prices"
+    data_directory.mkdir()
+    production_symbols_path = tmp_path / "production_symbols.txt"
+    production_symbols_path.write_text(
+        "AAA\nINACTIVE\nCRYPTO\n",
+        encoding="utf-8",
+    )
+    status_path = tmp_path / "production_symbol_status.csv"
+    pandas.DataFrame(
+        [
+            {
+                "symbol": symbol_name,
+                "status": status_name,
+                "status_reason": status_reason,
+                "exchange": "NASDAQ",
+                "security_name": symbol_name,
+                "price_last_date": "2026-08-04",
+                "status_changed_on": "2026-08-05",
+            }
+            for symbol_name, status_name, status_reason in [
+                (
+                    "AAA",
+                    "active",
+                    "listed_common_stock_with_current_price",
+                ),
+                (
+                    "INACTIVE",
+                    "inactive",
+                    "not_in_current_exchange_directories",
+                ),
+                (
+                    "CRYPTO",
+                    "active",
+                    "listed_common_stock_with_current_price",
+                ),
+            ]
+        ],
+        columns=production_symbol_status.STATUS_COLUMNS,
+    ).to_csv(status_path, index=False)
+    exclude_list_path = tmp_path / "crypto_proxy_blocked_symbols.txt"
+    exclude_list_path.write_text("CRYPTO\n", encoding="utf-8")
+
+    loaded_config = multi_bucket_today.MultiBucketRunConfig(
+        bucket_definitions={},
+        adaptive_tp_sl=manage_module.strategy.AdaptiveTPSLConfig(),
+        maximum_position_count=1,
+        starting_cash=1_000.0,
+        withdraw_amount=0.0,
+        margin_multiplier=1.0,
+        minimum_holding_bars=0,
+        show_trade_details=False,
+        start_date_string=None,
+        confirmation_mode=None,
+        use_confirmation_angle=False,
+        confirmation_entry_mode="limit",
+        confirmation_sma_angle_range=None,
+        data_source_name="daily",
+        symbol_list_name="production",
+        ff12_data_path_text=None,
+        max_same_symbol=1,
+        raw_document={},
+        symbol_exclude_list_name="crypto_proxy_blocked",
+        production_symbol_status_path_text=str(status_path),
+    )
+    monkeypatch.setattr(
+        manage_module.multi_bucket_today,
+        "load_multi_bucket_config",
+        lambda _config_path: loaded_config,
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "DATA_SOURCE_PATHS",
+        {"daily": data_directory},
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "SYMBOL_LIST_PATHS",
+        {"production": production_symbols_path},
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "SYMBOL_EXCLUDE_LIST_PATHS",
+        {"crypto_proxy_blocked": exclude_list_path},
+    )
+    monkeypatch.setattr(
+        manage_module.multi_bucket_today,
+        "load_adaptive_tp_sl_virtual_trade_history_state",
+        lambda _state_path: (
+            multi_bucket_today.
+            empty_adaptive_tp_sl_virtual_trade_history_state_document()
+        ),
+    )
+
+    context = manage_module.load_multi_bucket_daily_context(
+        tmp_path / "config.json",
+        ensure_state_directory=False,
+    )
+
+    assert context.allowed_symbols == {"AAA", "INACTIVE", "CRYPTO"}
+    assert context.symbols_blocked_for_new_entries == {"INACTIVE", "CRYPTO"}
+    assert any(
+        "Production symbol status: entry_blocked=1" in setup_message
+        for setup_message in context.setup_messages
+    )
+    assert any(
+        "entry_blocked=1" in setup_message
+        and "Symbol exclude list" in setup_message
+        for setup_message in context.setup_messages
+    )
 
 
 def test_load_symbol_exclude_list_is_fail_closed(tmp_path: Path) -> None:

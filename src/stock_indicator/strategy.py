@@ -4025,6 +4025,7 @@ def compute_signals_for_date(
     allowed_fama_french_groups: set[int] | None = None,
     skipped_fama_french_groups: set[int] | None = None,
     allowed_symbols: set[str] | None = None,
+    symbols_blocked_for_new_entries: set[str] | None = None,
     exclude_other_ff12: bool = True,
     maximum_symbols_per_group: int = 1,
     use_unshifted_signals: bool = False,
@@ -4072,6 +4073,10 @@ def compute_signals_for_date(
         ranking, allowing other groups to backfill the freed TopN/PickN slots.
     allowed_symbols:
         Optional whitelist of symbols (CSV stems) to consider.
+    symbols_blocked_for_new_entries:
+        Symbols retained for exit-signal calculation but excluded before
+        dollar-volume ranking and entry selection. This keeps an inactive
+        holding closable without letting it consume a Top-N/Pick-N slot.
     exclude_other_ff12:
         Legacy compatibility flag. Stock eligibility is resolved upstream by
         the symbol cache, so this no longer applies hidden SIC/override
@@ -4180,9 +4185,21 @@ def compute_signals_for_date(
         axis=1,
     )
 
+    normalized_entry_blocked_symbols = {
+        str(symbol_name).strip().upper()
+        for symbol_name in (symbols_blocked_for_new_entries or set())
+        if str(symbol_name).strip()
+    }
+    entry_eligible_columns = [
+        column_name
+        for column_name in merged_volume_frame.columns
+        if column_name.upper() not in normalized_entry_blocked_symbols
+    ]
+    entry_volume_frame = merged_volume_frame.loc[:, entry_eligible_columns]
+
     # Build eligibility mask (group-aware when sector data is available)
     eligibility_mask = _build_eligibility_mask(
-        merged_volume_frame,
+        entry_volume_frame,
         minimum_average_dollar_volume=minimum_average_dollar_volume,
         top_dollar_volume_rank=top_dollar_volume_rank,
         minimum_average_dollar_volume_ratio=minimum_average_dollar_volume_ratio,
@@ -4206,7 +4223,7 @@ def compute_signals_for_date(
 
     if filtered_symbols_with_groups and last_eligible_date is not None:
         try:
-            latest_average_dollar_volume_series = merged_volume_frame.loc[
+            latest_average_dollar_volume_series = entry_volume_frame.loc[
                 last_eligible_date
             ]
         except KeyError:
@@ -4237,6 +4254,16 @@ def compute_signals_for_date(
     selected_symbol_data: List[tuple[Path, pandas.DataFrame, pandas.Series]] = []
     for csv_file_path, price_data_frame in symbol_frames:
         symbol_name = csv_file_path.stem
+        if symbol_name.upper() in normalized_entry_blocked_symbols:
+            blocked_entry_mask = pandas.Series(
+                False,
+                index=price_data_frame.index,
+                dtype=bool,
+            )
+            selected_symbol_data.append(
+                (csv_file_path, price_data_frame, blocked_entry_mask)
+            )
+            continue
         if symbol_name not in eligibility_mask.columns:
             continue
         symbol_mask = eligibility_mask[symbol_name]

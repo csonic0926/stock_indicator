@@ -33,6 +33,7 @@ from . import (
 )
 from . import data_revision_audit
 from . import production_ff12_promotion
+from . import production_symbol_status
 from . import symbol_seasoning
 from . import universe_pipeline
 from .simulator import calc_commission
@@ -240,6 +241,7 @@ class MultiBucketDailyContext:
     config: multi_bucket_today.MultiBucketRunConfig
     data_directory: Path
     allowed_symbols: set[str] | None
+    symbols_blocked_for_new_entries: set[str]
     ff12_data_path: Path | None
     state_path: Path
     state: Dict[str, Any]
@@ -263,14 +265,52 @@ def load_multi_bucket_daily_context(
     if not data_directory.exists():
         raise ValueError(f"data source directory not found: {data_directory}")
     allowed_symbols = load_symbol_list(config.symbol_list_name)
-    allowed_symbols, symbol_exclude_message = apply_symbol_exclude_list(
-        allowed_symbols, config.symbol_exclude_list_name
+    symbols_blocked_for_new_entries: set[str] = set()
+    symbols_to_exclude = load_symbol_exclude_list(
+        config.symbol_exclude_list_name
     )
+    symbol_exclude_message = None
+    if symbols_to_exclude is not None:
+        if allowed_symbols is None:
+            raise ValueError(
+                "symbol_exclude_list requires symbol_list so the exclusion "
+                "applies to a bounded universe"
+            )
+        blocked_excluded_symbols = allowed_symbols & symbols_to_exclude
+        symbols_blocked_for_new_entries.update(blocked_excluded_symbols)
+        symbol_exclude_message = (
+            f"Symbol exclude list: {config.symbol_exclude_list_name} "
+            f"listed={len(symbols_to_exclude)} "
+            f"entry_blocked={len(blocked_excluded_symbols)}"
+        )
+
+    production_status_path = None
+    if config.production_symbol_status_path_text is not None:
+        if config.symbol_list_name != "production":
+            raise ValueError(
+                "production_symbol_status_path requires symbol_list='production'"
+            )
+        production_status_path = _resolve_repository_relative_path(
+            config.production_symbol_status_path_text
+        )
+        status_blocked_symbols = (
+            production_symbol_status.load_symbols_blocked_for_new_entries(
+                SYMBOL_LIST_PATHS["production"],
+                production_status_path,
+            )
+        )
+        symbols_blocked_for_new_entries.update(status_blocked_symbols)
     ff12_data_path = resolve_ff12_data_path(config.ff12_data_path_text)
 
     setup_messages: List[str] = []
     if symbol_exclude_message is not None:
         setup_messages.append(symbol_exclude_message)
+    if production_status_path is not None:
+        setup_messages.append(
+            "Production symbol status: "
+            f"entry_blocked={len(status_blocked_symbols)} "
+            f"path={production_status_path}"
+        )
     if ff12_data_path is not None:
         setup_messages.append(f"FF12 data: {ff12_data_path}")
 
@@ -308,6 +348,7 @@ def load_multi_bucket_daily_context(
         config=config,
         data_directory=data_directory,
         allowed_symbols=allowed_symbols,
+        symbols_blocked_for_new_entries=symbols_blocked_for_new_entries,
         ff12_data_path=ff12_data_path,
         state_path=state_path,
         state=state,
@@ -1037,6 +1078,71 @@ class StockShell(cmd.Cmd):
             "written atomically with symbols.txt runtime mirrors.\n"
             "Parameters:\n"
             "  --dry-run: validate and print the promotion diff without publishing.\n"
+        )
+
+    def do_update_production_symbol_status(
+        self,
+        argument_line: str,
+    ) -> None:  # noqa: D401
+        """update_production_symbol_status [TARGET_DATE] [--dry-run]
+        Refresh non-destructive production trading statuses."""
+
+        try:
+            argument_parts = shlex.split(argument_line)
+        except ValueError as parse_error:
+            self.stdout.write(f"invalid arguments: {parse_error}\n")
+            return
+
+        dry_run = False
+        target_date_text: str | None = None
+        for argument_text in argument_parts:
+            if argument_text == "--dry-run":
+                dry_run = True
+                continue
+            if target_date_text is not None:
+                self.stdout.write(
+                    "usage: update_production_symbol_status "
+                    "[TARGET_DATE] [--dry-run]\n"
+                )
+                return
+            target_date_text = argument_text
+
+        if target_date_text is None:
+            target_price_date = daily_job.determine_latest_cached_market_date(
+                STOCK_DATA_DIRECTORY
+            )
+        else:
+            try:
+                target_price_date = datetime.date.fromisoformat(target_date_text)
+            except ValueError:
+                self.stdout.write(
+                    "TARGET_DATE must use YYYY-MM-DD format\n"
+                )
+                return
+
+        try:
+            report = production_symbol_status.update_production_symbol_status(
+                data_directory=DATA_DIRECTORY,
+                price_data_directory=STOCK_DATA_DIRECTORY,
+                target_price_date=target_price_date,
+                publish_outputs=not dry_run,
+            )
+        except (FileNotFoundError, OSError, ValueError) as status_error:
+            self.stdout.write(
+                f"Production symbol status refresh failed: {status_error}\n"
+            )
+            raise
+        self.stdout.write("\n".join(report.to_lines()) + "\n")
+
+    def help_update_production_symbol_status(self) -> None:
+        """Display help for the production-symbol status refresh."""
+
+        self.stdout.write(
+            "update_production_symbol_status [TARGET_DATE] [--dry-run]\n"
+            "Keep production_symbols.txt unchanged, validate total FF12 "
+            "coverage and seasoning ownership, then refresh current listing, "
+            "instrument, and price-availability statuses. Inactive symbols "
+            "cannot open new positions but remain observable for exits.\n"
         )
 
     def do_update_sector_data(self, argument_line: str) -> None:  # noqa: D401
@@ -4546,6 +4652,9 @@ class StockShell(cmd.Cmd):
         config = runtime_context.config
         data_directory = runtime_context.data_directory
         allowed_symbols = runtime_context.allowed_symbols
+        symbols_blocked_for_new_entries = (
+            runtime_context.symbols_blocked_for_new_entries
+        )
         ff12_data_path = runtime_context.ff12_data_path
         state_path = runtime_context.state_path
         state = runtime_context.state
@@ -4653,6 +4762,9 @@ class StockShell(cmd.Cmd):
                         state_document=state,
                         data_directory=data_directory,
                         allowed_symbols=allowed_symbols,
+                        symbols_blocked_for_new_entries=(
+                            symbols_blocked_for_new_entries
+                        ),
                         symbol_first_eligible_trade_dates=(
                             symbol_first_eligible_trade_dates
                         ),

@@ -89,8 +89,13 @@ python -m stock_indicator.manage
 * `update_symbols` downloads the latest list of available ticker symbols from the SEC `company_tickers.json` dataset (via the sector pipeline integration) and writes `data/symbols.txt`.
 * `update_data_from_yf SYMBOL START END` saves historical data for the given symbol to
   `data/<SYMBOL>.csv`. ``END`` is inclusive.
-* `update_all_data_from_yf START END` performs the download for every cached symbol.
-  ``END`` is inclusive.
+* `update_all_data_from_yf START END` reads the append-preserving
+  `data/production_symbols.txt` contract and downloads active or
+  price-unavailable symbols. Confirmed inactive rows are recorded in
+  `data/production_symbol_status.csv` and skipped. ``END`` is inclusive.
+* `update_production_symbol_status [TARGET_DATE] [--dry-run]` refreshes the
+  official listing, instrument, and price-availability status map without
+  deleting production history.
 * `find_history_signal [DATE] DOLLAR_VOLUME_FILTER BUY_STRATEGY SELL_STRATEGY
   STOP_LOSS` or `find_history_signal [DATE] DOLLAR_VOLUME_FILTER STOP_LOSS
   strategy=ID` recalculates the entry and exit signals for `DATE`. The first

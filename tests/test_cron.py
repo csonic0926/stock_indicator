@@ -13,10 +13,16 @@ def test_run_daily_job_uses_production_universe_without_refresh() -> None:
     script_text = Path("run_daily_job.sh").read_text(encoding="utf-8")
     yahoo_update_position = script_text.index("update_all_data_from_yf")
     yahoo_retry_position = script_text.index("retry_missing_date_from_yf")
+    status_update_position = script_text.index("update_production_symbol_status")
     daily_signal_position = script_text.index("multi_bucket_daily_signal")
     assert "update_universe_pipeline" not in script_text
     assert yahoo_update_position < daily_signal_position
-    assert yahoo_update_position < yahoo_retry_position < daily_signal_position
+    assert (
+        yahoo_update_position
+        < yahoo_retry_position
+        < status_update_position
+        < daily_signal_position
+    )
     assert "FIRST_DOWNLOAD_END_EPOCH" in script_text
     assert "first_download_end_epoch" in script_text
     assert "first_download=${FIRST_DOWNLOAD_SECONDS}s" in script_text

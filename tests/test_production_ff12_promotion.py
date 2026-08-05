@@ -265,10 +265,10 @@ def test_sync_fails_on_invalid_promoted_sector_contract(
         )
 
 
-def test_sync_drops_inactive_sector_rows_to_match_symbol_contract(
+def test_sync_drops_orphan_sector_rows_to_match_symbol_contract(
     tmp_path: Path,
 ) -> None:
-    """Inactive sector rows should not remain in the active production contract."""
+    """Rows outside the append-preserving symbol contract are data orphans."""
 
     data_directory = tmp_path / "data"
     _write_promotion_inputs(
@@ -364,3 +364,46 @@ def test_manage_sync_command_runs_helper_in_dry_run(
 
     assert recorded_publish_values == [False]
     assert "dry run completed" in output_buffer.getvalue()
+
+
+def test_candidate_dash_dot_aliases_coalesce_when_ff12_agrees() -> None:
+    """Equivalent candidate aliases should not block a production sync."""
+
+    production_sector_frame = pandas.DataFrame(
+        [
+            {
+                "ticker": "OLD",
+                "ff12": 1,
+                "ff12_source": "legacy_backtest",
+                "classification_confidence": "high",
+            }
+        ]
+    )
+    candidate_sector_frame = pandas.DataFrame(
+        [
+            {
+                "ticker": "BRK-A",
+                "ff12": 11,
+                "ff12_source": "legacy_backtest",
+                "classification_confidence": "high",
+            },
+            {
+                "ticker": "BRK.A",
+                "ff12": 11,
+                "ff12_source": "sic_mapping",
+                "classification_confidence": "high",
+            },
+        ]
+    )
+
+    result = (
+        production_ff12_promotion.build_promoted_production_ff12_sector_frame(
+            production_symbols=["OLD", "BRK-A"],
+            production_sector_frame=production_sector_frame,
+            candidate_sector_frame=candidate_sector_frame,
+        )
+    )
+
+    assert result.appended_symbols == ["BRK.A"]
+    assert result.sector_frame["ticker"].tolist() == ["OLD", "BRK.A"]
+    assert result.sector_frame.loc[1, "ff12_source"] == "sic_mapping"

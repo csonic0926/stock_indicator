@@ -78,6 +78,9 @@ class MultiBucketRunConfig:
     # equity (pure-liquidity crypto proxies) violate the iceberg-position
     # premise and stay excluded even when historically profitable.
     symbol_exclude_list_name: str | None = None
+    # Total production-symbol status map. Non-active rows block only new
+    # entries; they remain observable so existing positions can still exit.
+    production_symbol_status_path_text: str | None = None
     symbol_seasoning: symbol_seasoning.SymbolSeasoningConfig | None = None
     # WR-gate (phantom) sensor config. The cron only maintains the sensor
     # and emits the per-entry degrading flag; the RS-combine + phantom
@@ -742,6 +745,11 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
         data_source_name=document.get("data_source"),
         symbol_list_name=document.get("symbol_list"),
         symbol_exclude_list_name=document.get("symbol_exclude_list"),
+        production_symbol_status_path_text=(
+            str(document["production_symbol_status_path"])
+            if document.get("production_symbol_status_path") is not None
+            else None
+        ),
         ff12_data_path_text=(
             str(raw_ff12_data_path_text)
             if raw_ff12_data_path_text is not None
@@ -1697,6 +1705,7 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
     state_document: Dict[str, Any],
     data_directory: Path,
     allowed_symbols: set[str] | None,
+    symbols_blocked_for_new_entries: set[str] | None = None,
     symbol_first_eligible_trade_dates: Dict[str, datetime.date] | None = None,
 ) -> TodaySignalsResult:
     """Advance raw-signal history and publish one day's tradable signals.
@@ -1760,10 +1769,33 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
             "symbol_seasoning is enabled but eligibility dates were not loaded"
         )
 
+    effective_symbols_blocked_for_new_entries = set(
+        symbols_blocked_for_new_entries or set()
+    )
+    seasoning_blocked_symbols: set[str] = set()
+    if seasoning_enabled and allowed_symbols is not None:
+        seasoning_blocked_symbols = {
+            symbol_name
+            for symbol_name in allowed_symbols
+            if not symbol_seasoning.is_symbol_eligible_on(
+                symbol_name,
+                eval_date,
+                symbol_first_eligible_trade_dates or {},
+            )
+        }
+        effective_symbols_blocked_for_new_entries.update(
+            seasoning_blocked_symbols
+        )
+
     log_lines: List[str] = []
     log_lines.append(
         f"[multi_bucket_daily_signal] eval_date={eval_date_string} "
         f"buckets={list(config.bucket_definitions.keys())}"
+    )
+    log_lines.append(
+        "entry-blocked symbols: "
+        f"total={len(effective_symbols_blocked_for_new_entries)} "
+        f"seasoning={len(seasoning_blocked_symbols)}"
     )
 
     # ------------------------------------------------------------------
@@ -1820,6 +1852,9 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
             maximum_symbols_per_group=bucket_def.maximum_symbols_per_group,
             minimum_average_dollar_volume_ratio=bucket_def.minimum_average_dollar_volume_ratio,
             allowed_symbols=allowed_symbols,
+            symbols_blocked_for_new_entries=(
+                effective_symbols_blocked_for_new_entries
+            ),
             skipped_fama_french_groups=bucket_def.skipped_fama_french_groups,
             # Live cron uses signal-day convention (entry_date == the
             # bar the strategy fired on).
@@ -1979,6 +2014,21 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
             if symbol_name not in entry_signal_set:
                 continue
             ranked_entry_symbols.add(symbol_name)
+            if symbol_name in effective_symbols_blocked_for_new_entries:
+                entry_block_reason = (
+                    "symbol_seasoning"
+                    if symbol_name in seasoning_blocked_symbols
+                    else "symbol_entry_blocked"
+                )
+                filtered_out_records.append((
+                    EntrySignalIdentity(
+                        bucket_label=bucket_label,
+                        strategy_id=strategy_identifier,
+                        symbol=symbol_name,
+                    ),
+                    entry_block_reason,
+                ))
+                continue
             # Signal layer is intentionally pure: no held filter here.
             # signal_trades.json is a signal-emission log, not a fill
             # record. Filtering today's signals by yesterday's record

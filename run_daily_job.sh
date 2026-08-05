@@ -35,8 +35,9 @@ CRON_START_EPOCH=$(date +%s)
 "$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage update_all_data_from_yf "$START_DATE" "$REFRESH_END_DATE" >> "$LOG_DIRECTORY/cron_stdout.log" 2>&1
 FIRST_DOWNLOAD_END_EPOCH=$(date +%s)
 "$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage retry_missing_date_from_yf "$REFRESH_END_DATE" >> "$LOG_DIRECTORY/cron_stdout.log" 2>&1
-UPDATE_END_EPOCH=$(date +%s)
 LATEST_DATE="$("$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -c 'from stock_indicator.daily_job import determine_latest_cached_market_date, STOCK_DATA_DIRECTORY;print(determine_latest_cached_market_date(STOCK_DATA_DIRECTORY))')"
+"$VIRTUAL_ENVIRONMENT_DIRECTORY/bin/python" -m stock_indicator.manage update_production_symbol_status "$LATEST_DATE" >> "$LOG_DIRECTORY/cron_stdout.log" 2>&1
+UPDATE_END_EPOCH=$(date +%s)
 
 # TODO: review
 # Multi-bucket signal generation. The cron publishes every tradable signal and

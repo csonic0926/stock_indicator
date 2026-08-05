@@ -52,7 +52,7 @@ class ProductionFf12PromotionPaths:
 
     @property
     def production_symbols_path(self) -> Path:
-        """Return the active production symbol contract path."""
+        """Return the append-preserving production symbol contract path."""
 
         return self.data_directory / PRODUCTION_SYMBOLS_FILE_NAME
 
@@ -125,7 +125,7 @@ class ProductionFf12PromotionReport:
             f"final sector rows: {self.final_sector_row_count}",
             "appended promoted symbols: "
             f"{len(self.appended_symbols)} ({appended_sample})",
-            "removed inactive sector rows: "
+            "removed orphan sector rows: "
             f"{len(self.removed_sector_symbols)} ({removed_sample})",
             f"ff12 sources: {_format_count_mapping(self.ff12_source_counts)}",
         ]
@@ -162,7 +162,7 @@ def _count_values(frame: pandas.DataFrame, column_name: str) -> dict[str, int]:
 
 
 def load_production_symbols(production_symbols_path: Path) -> list[str]:
-    """Return production symbols in file order, rejecting duplicates."""
+    """Return production vendor symbols in file order, rejecting aliases."""
 
     if not production_symbols_path.exists():
         raise FileNotFoundError(
@@ -170,19 +170,20 @@ def load_production_symbols(production_symbols_path: Path) -> list[str]:
         )
 
     production_symbols: list[str] = []
-    seen_symbols: set[str] = set()
+    normalized_symbol_to_vendor_symbol: dict[str, str] = {}
     duplicate_symbols: list[str] = []
     for line_text in production_symbols_path.read_text(
         encoding="utf-8"
     ).splitlines():
-        symbol_name = normalize_symbol_for_cache(line_text)
-        if not symbol_name:
+        vendor_symbol = line_text.strip().upper()
+        normalized_symbol = normalize_symbol_for_cache(vendor_symbol)
+        if not normalized_symbol:
             continue
-        if symbol_name in seen_symbols:
-            duplicate_symbols.append(symbol_name)
+        if normalized_symbol in normalized_symbol_to_vendor_symbol:
+            duplicate_symbols.append(normalized_symbol)
             continue
-        seen_symbols.add(symbol_name)
-        production_symbols.append(symbol_name)
+        normalized_symbol_to_vendor_symbol[normalized_symbol] = vendor_symbol
+        production_symbols.append(vendor_symbol)
 
     if duplicate_symbols:
         raise ValueError(
@@ -255,6 +256,55 @@ def _validate_sector_source_frame(
             f"{source_label} sector frame has duplicate tickers: "
             f"{duplicate_tickers[:10]}"
         )
+
+
+def _coalesce_equivalent_alias_rows(
+    sector_frame: pandas.DataFrame,
+    *,
+    source_label: str,
+) -> pandas.DataFrame:
+    """Coalesce dash/dot aliases when their FF12 classifications agree."""
+
+    missing_columns = REQUIRED_SECTOR_COLUMNS - set(sector_frame.columns)
+    if missing_columns:
+        raise ValueError(
+            f"{source_label} sector frame missing columns: "
+            f"{sorted(missing_columns)}"
+        )
+
+    normalized_frame = sector_frame.copy()
+    normalized_frame["_normalized_ticker"] = _normalized_ticker_series(
+        normalized_frame
+    )
+    output_records: list[dict[str, object]] = []
+    for normalized_ticker, alias_group in normalized_frame.groupby(
+        "_normalized_ticker",
+        sort=False,
+    ):
+        numeric_group_values = set(
+            pandas.to_numeric(alias_group["ff12"], errors="coerce").tolist()
+        )
+        if len(numeric_group_values) != 1:
+            alias_symbols = alias_group["ticker"].astype(str).tolist()
+            raise ValueError(
+                f"{source_label} sector has duplicate tickers whose aliases "
+                "disagree on FF12: "
+                f"{alias_symbols}"
+            )
+        exact_normalized_rows = alias_group.loc[
+            alias_group["ticker"].astype(str).str.strip().str.upper()
+            == str(normalized_ticker)
+        ]
+        selected_row = (
+            exact_normalized_rows.iloc[0]
+            if not exact_normalized_rows.empty
+            else alias_group.iloc[0]
+        ).drop(labels=["_normalized_ticker"])
+        selected_record = selected_row.to_dict()
+        selected_record["ticker"] = str(normalized_ticker)
+        output_records.append(selected_record)
+
+    return pandas.DataFrame(output_records, columns=sector_frame.columns)
 
 
 def _build_row_index_by_ticker(
@@ -394,8 +444,12 @@ def build_promoted_production_ff12_sector_frame(
         production_sector_frame,
         source_label="production",
     )
-    _validate_sector_source_frame(
+    coalesced_candidate_sector_frame = _coalesce_equivalent_alias_rows(
         candidate_sector_frame,
+        source_label="production candidate",
+    )
+    _validate_sector_source_frame(
+        coalesced_candidate_sector_frame,
         source_label="production candidate",
     )
 
@@ -404,7 +458,7 @@ def build_promoted_production_ff12_sector_frame(
         production_sector_frame
     )
     candidate_sector_row_by_ticker = _build_row_index_by_ticker(
-        candidate_sector_frame
+        coalesced_candidate_sector_frame
     )
 
     production_symbol_set = set(normalized_production_symbols)
@@ -449,7 +503,7 @@ def build_promoted_production_ff12_sector_frame(
             ][production_schema_columns].copy()
         else:
             row_index = candidate_sector_row_by_ticker[symbol_name]
-            selected_row = candidate_sector_frame.iloc[
+            selected_row = coalesced_candidate_sector_frame.iloc[
                 row_index,
             ][production_schema_columns].copy()
         selected_row["ticker"] = symbol_name

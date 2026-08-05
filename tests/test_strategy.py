@@ -2854,6 +2854,78 @@ def test_compute_signals_for_date_orders_filtered_symbols_by_dollar_volume(
     assert filtered_symbol_names == ["HIGH", "MEDIUM", "LOW"]
 
 
+def test_compute_signals_for_date_entry_block_preserves_exit_signal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Entry-blocked symbols cannot rank or enter but remain closable."""
+
+    price_dates = pandas.date_range("2024-01-01", periods=60, freq="D")
+    pandas.DataFrame(
+        {
+            "Date": price_dates,
+            "open": [1.0] * len(price_dates),
+            "close": [1.0] * len(price_dates),
+            "volume": [1_000_000] * len(price_dates),
+        }
+    ).to_csv(tmp_path / "BLOCKED.csv", index=False)
+
+    def attach_blocked_test_signals(
+        price_frame: pandas.DataFrame,
+        *,
+        include_raw_signals: bool = False,
+    ) -> None:
+        """Attach entry and exit signals on the latest test bar."""
+
+        price_frame["blocked_test_entry_signal"] = False
+        price_frame["blocked_test_exit_signal"] = False
+        price_frame.loc[price_frame.index[-1], "blocked_test_entry_signal"] = True
+        price_frame.loc[price_frame.index[-1], "blocked_test_exit_signal"] = True
+        if include_raw_signals:
+            price_frame["blocked_test_raw_entry_signal"] = False
+            price_frame["blocked_test_raw_exit_signal"] = False
+            price_frame.loc[
+                price_frame.index[-1],
+                "blocked_test_raw_entry_signal",
+            ] = True
+            price_frame.loc[
+                price_frame.index[-1],
+                "blocked_test_raw_exit_signal",
+            ] = True
+
+    monkeypatch.setitem(
+        strategy.BUY_STRATEGIES,
+        "blocked_test",
+        attach_blocked_test_signals,
+    )
+    monkeypatch.setitem(
+        strategy.SELL_STRATEGIES,
+        "blocked_test",
+        attach_blocked_test_signals,
+    )
+    monkeypatch.setattr(strategy, "load_symbols_excluded_by_industry", lambda: set())
+    monkeypatch.setattr(
+        strategy,
+        "load_ff12_groups_by_symbol",
+        lambda: {"BLOCKED": 1},
+    )
+
+    result = strategy.compute_signals_for_date(
+        data_directory=tmp_path,
+        evaluation_date=price_dates[-1],
+        buy_strategy_name="blocked_test",
+        sell_strategy_name="blocked_test",
+        top_dollar_volume_rank=1,
+        allowed_symbols={"BLOCKED"},
+        symbols_blocked_for_new_entries={"BLOCKED"},
+        use_unshifted_signals=True,
+    )
+
+    assert result["filtered_symbols"] == []
+    assert result["entry_signals"] == []
+    assert result["exit_signals"] == ["BLOCKED"]
+
+
 def test_calculate_chip_concentration_metrics_defaults_volume_profile_to_none() -> None:
     """Volume profile metrics should be ``None`` when not requested."""
 
