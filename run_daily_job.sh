@@ -10,9 +10,9 @@ REPOSITORY_ROOT="${REPO:-$SCRIPT_DIRECTORY}"
 SOURCE_DIRECTORY="${SRC:-$REPOSITORY_ROOT/src}"
 VIRTUAL_ENVIRONMENT_DIRECTORY="${VENV:-$REPOSITORY_ROOT/venv}"
 
-# Production multi-bucket config (live).  Mirrors the promoted
-# triple-bucket old-universe risk-priority setup, with data_source kept
-# as "daily" so cron reads data/stock_data/ (yfinance daily cache).
+# Production multi-bucket config (live). It includes the rolling-expectancy
+# stop/priority sensor and keeps data_source="daily" so cron reads the live
+# Yahoo cache.
 PRODUCTION_CONFIG="$REPOSITORY_ROOT/data/multi_bucket_production.json"
 
 # Set up logging directories
@@ -42,8 +42,10 @@ UPDATE_END_EPOCH=$(date +%s)
 # TODO: review
 # Multi-bucket signal generation. The cron publishes every tradable signal and
 # starts its ADAPTIVE TP/SL virtual-history observation independently of Futu
-# execution. Each [FROZEN_TP_SL] line carries the bucket-specific tp_pct /
-# sl_pct used by the separate dashboard allocation layer.
+# execution. The separate accepted-entry expectancy sensor advances before
+# the dashboard reads the resulting once-per-day regime heartbeat. Each
+# [FROZEN_TP_SL] line carries the bucket-specific tp_pct / sl_pct used by the
+# dashboard allocation layer.
 # compute_adaptive_tp_sl + show_positions were the legacy single-bucket
 # display path; per-bucket frozen values made them misleading (the
 # global TP/SL ignored per-bucket sigma / fixed_sl), so they are no

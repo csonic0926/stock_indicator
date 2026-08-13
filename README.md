@@ -235,9 +235,14 @@ Notes:
 
 The tests `tests/test_manage.py::test_start_simulate_accepts_slope_range_strategy_names` and `tests/test_strategy.py::test_evaluate_combined_strategy_passes_slope_range` demonstrate the slope-bound syntax. The former shows that `start_simulate` recognizes strategy identifiers with slope ranges, while the latter verifies that the evaluation function passes the provided bounds to the strategy implementation.
 
-The summary printed after each simulation includes the maximum drawdown. This
-value represents the largest peak-to-trough decline in portfolio value over the
-test period and is expressed as a percentage.
+The summary printed after each simulation includes maximum drawdown, Sharpe,
+and Sortino. Maximum drawdown is the largest peak-to-trough decline in
+portfolio value over the test period. Sharpe and Sortino are calculated from
+daily mark-to-market portfolio returns, use a zero-percent risk-free or
+minimum acceptable return, and are annualized using 252 trading days. External
+year-end withdrawals are excluded from the daily returns. A positive-return
+series with no measurable volatility or downside is reported as `inf` rather
+than as zero.
 
 To express the threshold as a percentage of total market dollar volume, use a
 percent sign. For example `dollar_volume>1%` retains only symbols whose

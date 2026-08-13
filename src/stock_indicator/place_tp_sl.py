@@ -44,9 +44,12 @@ DEFAULT_SL_MIN_HOLD_BARS = 1
 TERMINAL_ORDER_STATUSES = {
     "CANCELLED_PART",
     "CANCELLED_ALL",
+    "FILL_CANCELLED",
     "DISABLED",
     "FILLED_ALL",
     "FAILED",
+    "SUBMIT_FAILED",
+    "TIMEOUT",
     "DELETED",
 }
 BUCKET_TP_SL_WALK_BACK_DAYS = 14
@@ -294,8 +297,15 @@ def _load_futu_positions(position_data: Any) -> dict[str, dict[str, Any]]:
         if quantity <= 0:
             continue
         code = str(row.get("code", ""))
+        try:
+            available_to_sell_quantity = int(
+                row.get("can_sell_qty", quantity)
+            )
+        except (TypeError, ValueError):
+            available_to_sell_quantity = quantity
         positions[code] = {
             "qty": quantity,
+            "available_to_sell_qty": max(0, available_to_sell_quantity),
             "cost_price": float(row.get("cost_price", 0)),
         }
     return positions
@@ -303,18 +313,24 @@ def _load_futu_positions(position_data: Any) -> dict[str, dict[str, Any]]:
 
 def _load_existing_sell_order_coverage(
     order_data: Any,
-) -> tuple[dict[str, int], set[str]]:
-    """Return active TP quantities and symbols with active SL orders.
+) -> tuple[dict[str, int], set[str], set[str]]:
+    """Return active TP coverage, SL symbols, and market-exit symbols.
 
     # TODO: review
     A market BUY can fill in pieces.  Tracking only the presence of a TP would
     leave later fills uncovered, so active NORMAL sells are summed by their
-    remaining quantity.
+    remaining quantity.  A non-terminal MARKET sell is a strategy exit already
+    in flight, so TP/SL reconciliation must not compete for the same shares.
     """
     take_profit_quantity_by_code: dict[str, int] = {}
     existing_stop_loss_codes: set[str] = set()
+    pending_market_exit_codes: set[str] = set()
     if order_data is None or len(order_data) == 0:
-        return take_profit_quantity_by_code, existing_stop_loss_codes
+        return (
+            take_profit_quantity_by_code,
+            existing_stop_loss_codes,
+            pending_market_exit_codes,
+        )
 
     for _, row in order_data.iterrows():
         if "SELL" not in str(row.get("trd_side", "")).upper():
@@ -324,7 +340,9 @@ def _load_existing_sell_order_coverage(
             continue
         code = str(row.get("code", ""))
         order_type_value = str(row.get("order_type", "")).upper()
-        if "STOP" in order_type_value:
+        if "MARKET" in order_type_value:
+            pending_market_exit_codes.add(code)
+        elif "STOP" in order_type_value:
             existing_stop_loss_codes.add(code)
         elif "NORMAL" in order_type_value:
             try:
@@ -340,7 +358,11 @@ def _load_existing_sell_order_coverage(
                 take_profit_quantity_by_code.get(code, 0)
                 + remaining_quantity
             )
-    return take_profit_quantity_by_code, existing_stop_loss_codes
+    return (
+        take_profit_quantity_by_code,
+        existing_stop_loss_codes,
+        pending_market_exit_codes,
+    )
 
 
 def _entry_supports_take_profit_stop_loss(entry: dict[str, Any]) -> bool:
@@ -721,9 +743,11 @@ def _place_missing_take_profit_stop_loss_orders(
             if require_complete_take_profit_coverage:
                 raise RuntimeError("Failed to query live broker orders")
             return
-        take_profit_quantity_by_code, existing_stop_loss_codes = (
-            _load_existing_sell_order_coverage(order_data)
-        )
+        (
+            take_profit_quantity_by_code,
+            existing_stop_loss_codes,
+            pending_market_exit_codes,
+        ) = _load_existing_sell_order_coverage(order_data)
 
         today_text = date.today().isoformat()
         open_entries_by_symbol = _load_futu_open_trade_entries(
@@ -741,6 +765,13 @@ def _place_missing_take_profit_stop_loss_orders(
         LOGGER.info("--- TP check ---")
         for code, position in positions.items():
             symbol = code.replace("US.", "")
+            if code in pending_market_exit_codes:
+                LOGGER.info(
+                    "%s: pending market exit already owns the position, "
+                    "skip TP",
+                    symbol,
+                )
+                continue
             covered_take_profit_quantity = take_profit_quantity_by_code.get(
                 code,
                 0,
@@ -754,6 +785,21 @@ def _place_missing_take_profit_stop_loss_orders(
                     "%s: TP already covers qty=%d, skip",
                     symbol,
                     position["qty"],
+                )
+                continue
+            available_to_sell_quantity = position["available_to_sell_qty"]
+            take_profit_order_quantity = min(
+                uncovered_take_profit_quantity,
+                available_to_sell_quantity,
+            )
+            if take_profit_order_quantity <= 0:
+                LOGGER.warning(
+                    "%s: TP uncovered qty=%d but Futu can_sell_qty=0, skip",
+                    symbol,
+                    uncovered_take_profit_quantity,
+                )
+                incomplete_take_profit_reasons.append(
+                    f"{code}: no broker-sellable quantity for missing TP"
                 )
                 continue
 
@@ -801,13 +847,16 @@ def _place_missing_take_profit_stop_loss_orders(
             take_profit_price = round(position["cost_price"] * (1 + take_profit_pct), 2)
             bucket = entry.get("bucket", "?")
             LOGGER.info(
-                "%s [%s]: cost=$%.2f qty=%d uncovered=%d -> "
+                "%s [%s]: cost=$%.2f qty=%d uncovered=%d sellable=%d "
+                "tp_order=%d -> "
                 "TP=$%.2f (+%.2f%%) [GTC limit sell]",
                 symbol,
                 bucket,
                 position["cost_price"],
                 position["qty"],
                 uncovered_take_profit_quantity,
+                available_to_sell_quantity,
+                take_profit_order_quantity,
                 take_profit_price,
                 take_profit_pct * 100,
             )
@@ -818,7 +867,7 @@ def _place_missing_take_profit_stop_loss_orders(
 
             return_code, take_profit_data = trade_context.place_order(
                 price=take_profit_price,
-                qty=uncovered_take_profit_quantity,
+                qty=take_profit_order_quantity,
                 code=code,
                 trd_side=TrdSide.SELL,
                 order_type=OrderType.NORMAL,
@@ -829,7 +878,7 @@ def _place_missing_take_profit_stop_loss_orders(
                 "symbol": symbol,
                 "bucket": bucket,
                 "side": "TP_SELL",
-                "qty": uncovered_take_profit_quantity,
+                "qty": take_profit_order_quantity,
                 "entry_price": position["cost_price"],
                 "price": take_profit_price,
                 "tp_pct": round(take_profit_pct * 100, 4),
@@ -848,10 +897,21 @@ def _place_missing_take_profit_stop_loss_orders(
                 incomplete_take_profit_reasons.append(
                     f"{code}: TP order submission failed"
                 )
+            elif take_profit_order_quantity < uncovered_take_profit_quantity:
+                incomplete_take_profit_reasons.append(
+                    f"{code}: missing TP exceeds broker-sellable quantity"
+                )
 
         LOGGER.info("--- SL check ---")
         for code, position in positions.items():
             symbol = code.replace("US.", "")
+            if code in pending_market_exit_codes:
+                LOGGER.info(
+                    "%s: pending market exit already owns the position, "
+                    "skip SL",
+                    symbol,
+                )
+                continue
             entry = _merge_production_signal_metadata(
                 symbol=symbol,
                 entry=open_entries_by_symbol.get(symbol),

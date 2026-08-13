@@ -3,6 +3,7 @@
 
 import math
 import os
+import statistics
 import sys
 
 import pandas
@@ -15,27 +16,126 @@ sys.path.insert(
 )
 
 from stock_indicator.simulator import (
+    BROKER_COST_MODELS,
+    DEFAULT_BROKER_COST_MODEL_NAME,
+    TRADING_DAYS_PER_YEAR,
     SimulationResult,
     Trade,
     calc_commission,
     calculate_maximum_concurrent_positions,
     calculate_annual_returns,
     calculate_annual_trade_counts,
+    calculate_sharpe_ratio,
+    calculate_sortino_ratio,
+    get_active_broker_cost_model,
+    override_broker_cost_model,
+    resolve_broker_cost_model,
     simulate_trades,
     simulate_portfolio_balance,
     calculate_max_drawdown,
 )
 
 
+def test_calculate_sharpe_ratio_uses_sample_standard_deviation() -> None:
+    # TODO: review
+    period_returns = [0.10, -0.05, 0.20]
+
+    sharpe_ratio = calculate_sharpe_ratio(period_returns)
+
+    expected_ratio = (
+        math.sqrt(TRADING_DAYS_PER_YEAR)
+        * statistics.mean(period_returns)
+        / statistics.stdev(period_returns)
+    )
+    assert sharpe_ratio == pytest.approx(expected_ratio)
+
+
+def test_calculate_sharpe_ratio_handles_unmeasurable_volatility() -> None:
+    # TODO: review
+    assert calculate_sharpe_ratio([]) == 0.0
+    assert calculate_sharpe_ratio([0.10]) == 0.0
+    assert calculate_sharpe_ratio([0.10, 0.10]) == math.inf
+    assert calculate_sharpe_ratio([0.0, 0.0]) == 0.0
+
+
+def test_calculate_sortino_ratio_uses_zero_target_downside_deviation() -> None:
+    # TODO: review
+    period_returns = [0.10, -0.05, 0.20]
+
+    sortino_ratio = calculate_sortino_ratio(period_returns)
+
+    downside_deviation = math.sqrt((0.05 ** 2) / len(period_returns))
+    expected_ratio = (
+        math.sqrt(TRADING_DAYS_PER_YEAR)
+        * statistics.mean(period_returns)
+        / downside_deviation
+    )
+    assert sortino_ratio == pytest.approx(expected_ratio)
+
+
+def test_calculate_sortino_ratio_handles_missing_downside_returns() -> None:
+    # TODO: review
+    assert calculate_sortino_ratio([]) == 0.0
+    assert calculate_sortino_ratio([0.05, 0.10]) == math.inf
+    assert calculate_sortino_ratio([0.0, 0.0]) == 0.0
+
+
 def test_calc_commission_uses_minimum_when_share_count_is_small() -> None:
+    # One share leaves both Futu per-order minimums binding: 0.99 commission
+    # plus 1.00 platform fee, then 0.003 settlement on the single share.
     commission = calc_commission(shares=1, price=300.0)
-    assert commission == pytest.approx(0.99)
+    assert commission == pytest.approx(0.99 + 1.00 + 0.003, abs=1e-4)
 
 
-def test_calc_commission_caps_at_percentage_of_trade_value() -> None:
+def test_calc_commission_caps_commission_and_platform_fee_but_not_settlement() -> None:
     commission = calc_commission(shares=1_000_000, price=0.5)
-    expected_commission = 0.005 * 1_000_000 * 0.5
-    assert commission == pytest.approx(expected_commission)
+    capped_commission_and_platform_fee = 0.005 * 1_000_000 * 0.5
+    settlement_fee = 1_000_000 * 0.003
+    cat_fee = 1_000_000 * 0.000046
+    assert commission == pytest.approx(
+        capped_commission_and_platform_fee + settlement_fee + cat_fee
+    )
+
+
+def test_default_broker_cost_model_is_futu() -> None:
+    assert get_active_broker_cost_model().name == DEFAULT_BROKER_COST_MODEL_NAME
+    assert DEFAULT_BROKER_COST_MODEL_NAME == "futu_hk"
+
+
+def test_override_broker_cost_model_switches_and_restores() -> None:
+    original_commission = calc_commission(shares=1_000, price=50.0)
+    with override_broker_cost_model("ibkr_fixed") as active_model:
+        assert active_model.name == "ibkr_fixed"
+        ibkr_commission = calc_commission(shares=1_000, price=50.0)
+    assert get_active_broker_cost_model().name == DEFAULT_BROKER_COST_MODEL_NAME
+    assert calc_commission(shares=1_000, price=50.0) == pytest.approx(
+        original_commission
+    )
+    # Futu bills 0.0129 per share against IBKR Fixed's 0.005 per share.
+    assert ibkr_commission < original_commission
+
+
+def test_ibkr_tiered_costs_more_than_fixed_for_market_orders() -> None:
+    with override_broker_cost_model("ibkr_fixed"):
+        fixed_commission = calc_commission(shares=1_000, price=50.0)
+    with override_broker_cost_model("ibkr_tiered"):
+        tiered_commission = calc_commission(shares=1_000, price=50.0)
+    assert tiered_commission > fixed_commission
+
+
+def test_resolve_broker_cost_model_rejects_unknown_name() -> None:
+    with pytest.raises(ValueError, match="Unknown broker_cost_model"):
+        resolve_broker_cost_model("no_such_broker")
+
+
+def test_every_registered_broker_cost_model_is_self_consistent() -> None:
+    for model_name, model in BROKER_COST_MODELS.items():
+        assert model.name == model_name
+        assert model.margin_interest_annual_rate > 0.0
+        buy_fee = model.commission_function(1_000, 50.0, False)
+        sell_fee = model.commission_function(1_000, 50.0, True)
+        assert buy_fee > 0.0
+        assert sell_fee >= buy_fee
 
 
 def test_simulate_trades_executes_trade_flow_with_default_column() -> None:
@@ -60,9 +160,9 @@ def test_simulate_trades_executes_trade_flow_with_default_column() -> None:
     assert completed_trade.exit_date == expected_exit_date
     assert completed_trade.entry_price == 102.0
     assert completed_trade.exit_price == 106.0
-    expected_profit = (
-        4.0 - calc_commission(1, 102.0) - calc_commission(1, 106.0)
-    )
+    # simulate_trades reports gross profit; commission is applied by
+    # simulate_portfolio_balance, not at the trade level.
+    expected_profit = 4.0
     assert completed_trade.profit == expected_profit
     assert completed_trade.holding_period == 3
     assert result.total_profit == expected_profit
@@ -110,9 +210,9 @@ def test_simulate_trades_with_sma_strategy_uses_aligned_labels() -> None:
     assert completed_trade.exit_date == expected_exit_date
     assert completed_trade.entry_price == 102.0
     assert completed_trade.exit_price == 103.0
-    expected_profit = (
-        1.0 - calc_commission(1, 102.0) - calc_commission(1, 103.0)
-    )
+    # simulate_trades reports gross profit; commission is applied by
+    # simulate_portfolio_balance, not at the trade level.
+    expected_profit = 1.0
     assert completed_trade.profit == expected_profit
     assert completed_trade.holding_period == 2
     assert result.total_profit == expected_profit
@@ -146,9 +246,9 @@ def test_simulate_trades_handles_distinct_entry_and_exit_price_columns() -> None
     assert completed_trade.exit_date == expected_exit_date
     assert completed_trade.entry_price == 10.0
     assert completed_trade.exit_price == 13.0
-    expected_profit = (
-        3.0 - calc_commission(1, 10.0) - calc_commission(1, 13.0)
-    )
+    # simulate_trades reports gross profit; commission is applied by
+    # simulate_portfolio_balance, not at the trade level.
+    expected_profit = 3.0
     assert completed_trade.profit == expected_profit
     assert completed_trade.holding_period == 1
     assert result.total_profit == expected_profit
@@ -436,8 +536,8 @@ def test_simulate_portfolio_balance_uses_fixed_slot_weight() -> None:
         - 1 * 10.0
         - entry_commission_beta
     )
-    exit_commission_alpha = calc_commission(2, 20.0)
-    exit_commission_beta = calc_commission(1, 10.0)
+    exit_commission_alpha = calc_commission(2, 20.0, is_sell=True)
+    exit_commission_beta = calc_commission(1, 10.0, is_sell=True)
     expected_final_balance = (
         cash_after_entries
         + 2 * 20.0
@@ -471,7 +571,7 @@ def test_simulate_portfolio_balance_skips_trade_when_budget_insufficient() -> No
     )
     entry_commission = calc_commission(1, 30.0)
     cash_after_entry = 100.0 - 1 * 30.0 - entry_commission
-    exit_commission = calc_commission(1, 60.0)
+    exit_commission = calc_commission(1, 60.0, is_sell=True)
     expected_final_balance = cash_after_entry + 1 * 60.0 - exit_commission
     assert pytest.approx(final_balance, rel=1e-6) == expected_final_balance
 
@@ -484,7 +584,7 @@ def test_calculate_annual_returns_computes_yearly_returns() -> None:
         exit_price=110.0,
         profit=10.0
         - calc_commission(1, 100.0)
-        - calc_commission(1, 110.0),
+        - calc_commission(1, 110.0, is_sell=True),
         holding_period=1,
     )
     trade_two = Trade(
@@ -494,7 +594,7 @@ def test_calculate_annual_returns_computes_yearly_returns() -> None:
         exit_price=220.0,
         profit=20.0
         - calc_commission(1, 200.0)
-        - calc_commission(1, 220.0),
+        - calc_commission(1, 220.0, is_sell=True),
         holding_period=1,
     )
     simulation_start = pandas.Timestamp("2018-01-01")
@@ -508,7 +608,7 @@ def test_calculate_annual_returns_computes_yearly_returns() -> None:
     first_year_end = (
         1000.0 * (110.0 / 100.0)
         - calc_commission(10, 100.0)
-        - calc_commission(10, 110.0)
+        - calc_commission(10, 110.0, is_sell=True)
     )
     expected_return_2023 = (first_year_end - 1000.0) / 1000.0
     share_count_year_two = math.floor(first_year_end / 200.0)
@@ -517,12 +617,109 @@ def test_calculate_annual_returns_computes_yearly_returns() -> None:
         - share_count_year_two * 200.0
         - calc_commission(share_count_year_two, 200.0)
         + share_count_year_two * 220.0
-        - calc_commission(share_count_year_two, 220.0)
+        - calc_commission(share_count_year_two, 220.0, is_sell=True)
     )
     expected_return_2024 = (second_year_end - first_year_end) / first_year_end
     assert annual_returns[2018] == 0.0
     assert pytest.approx(annual_returns[2023], rel=1e-6) == expected_return_2023
     assert pytest.approx(annual_returns[2024], rel=1e-6) == expected_return_2024
+
+
+def test_calculate_annual_returns_collects_daily_portfolio_returns() -> None:
+    """Daily returns should follow mark-to-market portfolio values."""
+    # TODO: review
+    starting_cash = 1000.0
+    entry_price = 10.0
+    exit_price = 10.0
+    allocated_share_count = math.floor(starting_cash / entry_price)
+    trade_record = Trade(
+        entry_date=pandas.Timestamp("2020-01-02"),
+        exit_date=pandas.Timestamp("2020-01-06"),
+        entry_price=entry_price,
+        exit_price=exit_price,
+        profit=0.0,
+        holding_period=2,
+    )
+    closing_prices = pandas.Series(
+        [10.0, 8.0, 10.0],
+        index=pandas.to_datetime(
+            ["2020-01-02", "2020-01-03", "2020-01-06"]
+        ),
+    )
+    daily_portfolio_returns: list[float] = []
+
+    calculate_annual_returns(
+        [trade_record],
+        starting_cash=starting_cash,
+        maximum_position_count=1,
+        simulation_start=pandas.Timestamp("2020-01-02"),
+        margin_interest_annual_rate=0.0,
+        trade_symbol_lookup={trade_record: "AAA"},
+        closing_price_series_by_symbol={"AAA": closing_prices},
+        daily_portfolio_returns_output=daily_portfolio_returns,
+    )
+
+    entry_commission = calc_commission(
+        allocated_share_count,
+        entry_price,
+    )
+    exit_commission = calc_commission(
+        allocated_share_count,
+        exit_price,
+        is_sell=True,
+    )
+    entry_day_portfolio_value = starting_cash - entry_commission
+    drawdown_day_portfolio_value = (
+        starting_cash
+        - allocated_share_count * entry_price
+        - entry_commission
+        + allocated_share_count * 8.0
+    )
+    exit_day_portfolio_value = (
+        starting_cash - entry_commission - exit_commission
+    )
+    expected_daily_returns = [
+        (entry_day_portfolio_value - starting_cash) / starting_cash,
+        (
+            drawdown_day_portfolio_value - entry_day_portfolio_value
+        ) / entry_day_portfolio_value,
+        (
+            exit_day_portfolio_value - drawdown_day_portfolio_value
+        ) / drawdown_day_portfolio_value,
+        0.0,
+    ]
+    assert daily_portfolio_returns == pytest.approx(expected_daily_returns)
+
+
+def test_calculate_annual_returns_honors_inclusive_simulation_end() -> None:
+    """A bounded report should retain flat returns through its requested end."""
+    # TODO: review
+    trade_record = Trade(
+        entry_date=pandas.Timestamp("2024-01-02"),
+        exit_date=pandas.Timestamp("2024-01-03"),
+        entry_price=10.0,
+        exit_price=10.0,
+        profit=0.0,
+        holding_period=1,
+    )
+    valuation_dates = pandas.bdate_range("2024-01-02", "2024-01-10")
+    closing_prices = pandas.Series(10.0, index=valuation_dates)
+    daily_portfolio_returns: list[float] = []
+
+    calculate_annual_returns(
+        [trade_record],
+        starting_cash=1000.0,
+        maximum_position_count=1,
+        simulation_start=pandas.Timestamp("2024-01-02"),
+        simulation_end=pandas.Timestamp("2024-01-10"),
+        margin_interest_annual_rate=0.0,
+        trade_symbol_lookup={trade_record: "AAA"},
+        closing_price_series_by_symbol={"AAA": closing_prices},
+        daily_portfolio_returns_output=daily_portfolio_returns,
+    )
+
+    assert len(daily_portfolio_returns) == len(valuation_dates)
+    assert daily_portfolio_returns[-1] == 0.0
 
 
 def test_calculate_annual_returns_marks_unsettled_proceeds_in_year_end() -> None:
@@ -532,7 +729,7 @@ def test_calculate_annual_returns_marks_unsettled_proceeds_in_year_end() -> None
     exit_price = 110.0
     allocated_share_count = math.floor(starting_cash / entry_price)
     entry_commission = calc_commission(allocated_share_count, entry_price)
-    exit_commission = calc_commission(allocated_share_count, exit_price)
+    exit_commission = calc_commission(allocated_share_count, exit_price, is_sell=True)
     trade_profit = (
         allocated_share_count * (exit_price - entry_price)
         - entry_commission
@@ -577,7 +774,12 @@ def test_simulate_portfolio_balance_applies_withdraw() -> None:
         withdraw_amount=10.0,
         margin_interest_annual_rate=0.0,
     )
-    expected_balance = 89.0
+    expected_balance = (
+        100.0
+        - 10.0
+        - calc_commission(1, 100.0)
+        - calc_commission(1, 100.0, is_sell=True)
+    )
     assert pytest.approx(final_balance, rel=1e-6) == expected_balance
 
 
@@ -590,7 +792,7 @@ def test_calculate_annual_returns_applies_withdraw() -> None:
         exit_price=60.0,
         profit=10.0
         - calc_commission(1, 50.0)
-        - calc_commission(1, 60.0),
+        - calc_commission(1, 60.0, is_sell=True),
         holding_period=1,
     )
     trade_two = Trade(
@@ -600,7 +802,7 @@ def test_calculate_annual_returns_applies_withdraw() -> None:
         exit_price=60.0,
         profit=10.0
         - calc_commission(1, 50.0)
-        - calc_commission(1, 60.0),
+        - calc_commission(1, 60.0, is_sell=True),
         holding_period=1,
     )
     simulation_start = pandas.Timestamp("2023-01-01")
@@ -615,7 +817,7 @@ def test_calculate_annual_returns_applies_withdraw() -> None:
     first_year_end = (
         100.0 * (60.0 / 50.0)
         - calc_commission(2, 50.0)
-        - calc_commission(2, 60.0)
+        - calc_commission(2, 60.0, is_sell=True)
     )
     expected_return_2023 = (first_year_end - 100.0) / 100.0
     second_year_start = first_year_end - 10.0
@@ -625,7 +827,7 @@ def test_calculate_annual_returns_applies_withdraw() -> None:
         - share_count_year_two * 50.0
         - calc_commission(share_count_year_two, 50.0)
         + share_count_year_two * 60.0
-        - calc_commission(share_count_year_two, 60.0)
+        - calc_commission(share_count_year_two, 60.0, is_sell=True)
     )
     expected_return_2024 = (
         (second_year_end - second_year_start) / second_year_start
@@ -642,7 +844,7 @@ def test_calculate_annual_trade_counts_counts_trades_per_year() -> None:
         exit_price=11.0,
         profit=1.0
         - calc_commission(1, 10.0)
-        - calc_commission(1, 11.0),
+        - calc_commission(1, 11.0, is_sell=True),
         holding_period=1,
     )
     trade_beta = Trade(
@@ -652,7 +854,7 @@ def test_calculate_annual_trade_counts_counts_trades_per_year() -> None:
         exit_price=12.0,
         profit=2.0
         - calc_commission(1, 10.0)
-        - calc_commission(1, 12.0),
+        - calc_commission(1, 12.0, is_sell=True),
         holding_period=1,
     )
     trade_gamma = Trade(
@@ -662,7 +864,7 @@ def test_calculate_annual_trade_counts_counts_trades_per_year() -> None:
         exit_price=9.0,
         profit=-1.0
         - calc_commission(1, 10.0)
-        - calc_commission(1, 9.0),
+        - calc_commission(1, 9.0, is_sell=True),
         holding_period=1,
     )
     trade_counts = calculate_annual_trade_counts(
@@ -678,7 +880,7 @@ def test_calculate_max_drawdown_marks_to_market() -> None:
         exit_date=pandas.Timestamp("2020-01-04"),
         entry_price=10.0,
         exit_price=12.0,
-        profit=2.0 - calc_commission(1, 10.0) - calc_commission(1, 12.0),
+        profit=2.0 - calc_commission(1, 10.0) - calc_commission(1, 12.0, is_sell=True),
         holding_period=3,
     )
     trade_symbol_lookup = {trade: "AAA"}

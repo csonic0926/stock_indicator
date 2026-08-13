@@ -1062,6 +1062,8 @@ def test_start_simulate(monkeypatch: pytest.MonkeyPatch) -> None:
             annual_returns={2023: 0.1, 2024: -0.05},
             annual_trade_counts={2023: 2, 2024: 1},
             trade_details_by_year=trade_details_by_year,
+            sharpe_ratio=1.23,
+            sortino_ratio=2.34,
         )
 
     monkeypatch.setattr(
@@ -1090,6 +1092,8 @@ def test_start_simulate(monkeypatch: pytest.MonkeyPatch) -> None:
         "Final balance: 123.45",
         "CAGR: 10.00%",
         "Max drawdown: 25.00%",
+        "Sharpe: 1.23",
+        "Sortino: 2.34",
     ]
     summary_output = output_buffer.getvalue()
     for fragment in summary_fragments:
@@ -3097,6 +3101,8 @@ def test_multi_bucket_simulation_forwards_symbol_list(
     ) -> manage_module.strategy.ComplexSimulationMetrics:
         recorded_allowed_symbols["value"] = kwargs.get("allowed_symbols")
         empty_metrics = _create_empty_metrics()
+        empty_metrics.sharpe_ratio = 1.23
+        empty_metrics.sortino_ratio = 2.34
         return manage_module.strategy.ComplexSimulationMetrics(
             overall_metrics=empty_metrics,
             metrics_by_set={"fish_head_production": empty_metrics},
@@ -3114,6 +3120,279 @@ def test_multi_bucket_simulation_forwards_symbol_list(
 
     assert recorded_allowed_symbols["value"] == {"AAA", "BBB"}
     assert "Symbol list: 2 symbols" in output_buffer.getvalue()
+    assert "Sharpe: 1.23, Sortino: 2.34" in output_buffer.getvalue()
+
+
+# TODO: review
+def test_multi_bucket_simulation_date_range_uses_one_year_warmup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """CLI dates should separate the causal run from reported statistics."""
+
+    import json
+
+    import stock_indicator.manage as manage_module
+
+    data_directory = tmp_path / "prices"
+    data_directory.mkdir()
+    pandas.DataFrame(
+        {
+            "Date": pandas.to_datetime(
+                ["2022-01-03", "2023-02-28", "2024-12-31", "2025-01-02"]
+            ),
+            "close": [9.0, 10.0, 11.0, 12.0],
+            "volume": [100, 100, 100, 100],
+        }
+    ).to_csv(data_directory / "AAA.csv", index=False)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 2,
+                "starting_cash": 1000,
+                "start_date": "2020-01-01",
+                "data_source": "test",
+                "buckets": [
+                    {
+                        "label": "fish_head_production",
+                        "strategy_id": "fish_head_vacuum_turn",
+                        "dollar_volume_filter": (
+                            "dollar_volume>0.02%,Top500,Pick5"
+                        ),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        manage_module,
+        "DATA_SOURCE_PATHS",
+        {"test": data_directory},
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "load_strategy_set_mapping",
+        lambda: {
+            "fish_head_vacuum_turn": ("ema_sma_cross", "ema_sma_cross")
+        },
+    )
+    monkeypatch.setattr(manage_module, "load_strategy_entry_filters", lambda: {})
+    recorded_dates: dict[str, pandas.Timestamp | None] = {}
+    temporary_dataset_observation: dict[str, object] = {}
+
+    def fake_run_complex_simulation(
+        data_directory: Path,
+        set_definitions: dict[str, object],
+        **keyword_arguments: object,
+    ) -> manage_module.strategy.ComplexSimulationMetrics:
+        del set_definitions
+        temporary_dataset_observation["path"] = data_directory
+        bounded_data_frame = pandas.read_csv(data_directory / "AAA.csv")
+        temporary_dataset_observation["dates"] = bounded_data_frame[
+            "Date"
+        ].tolist()
+        for argument_name in (
+            "start_date",
+            "end_date",
+            "statistics_start_date",
+            "statistics_end_date",
+        ):
+            recorded_dates[argument_name] = keyword_arguments.get(argument_name)
+        empty_metrics = _create_empty_metrics()
+        return manage_module.strategy.ComplexSimulationMetrics(
+            overall_metrics=empty_metrics,
+            metrics_by_set={"fish_head_production": empty_metrics},
+        )
+
+    monkeypatch.setattr(
+        manage_module.strategy,
+        "run_complex_simulation",
+        fake_run_complex_simulation,
+    )
+
+    output_buffer = io.StringIO()
+    shell = manage_module.StockShell(stdout=output_buffer)
+    shell.onecmd(
+        f"multi_bucket_simulation {config_path} 2024-02-29 2024-12-31"
+    )
+
+    assert recorded_dates == {
+        "start_date": pandas.Timestamp("2023-02-28"),
+        "end_date": pandas.Timestamp("2024-12-31"),
+        "statistics_start_date": pandas.Timestamp("2024-02-29"),
+        "statistics_end_date": pandas.Timestamp("2024-12-31"),
+    }
+    temporary_dataset_path = temporary_dataset_observation["path"]
+    assert isinstance(temporary_dataset_path, Path)
+    assert temporary_dataset_path != data_directory
+    assert temporary_dataset_observation["dates"] == [
+        "2023-02-28",
+        "2024-12-31",
+    ]
+    assert not temporary_dataset_path.exists()
+    output_text = output_buffer.getvalue()
+    assert "Temporary date-bounded dataset: 1 non-empty CSVs, 2 rows" in (
+        output_text
+    )
+    assert "Simulation start date: 2023-02-28" in output_text
+    assert (
+        "Statistics date range: 2024-02-29 to 2024-12-31 (inclusive)"
+        in output_text
+    )
+
+
+# TODO: review
+def test_create_date_bounded_csv_dataset_filters_dates_and_symbols(
+    tmp_path: Path,
+) -> None:
+    """Temporary CSV creation should preserve schema and benchmark data."""
+
+    import stock_indicator.manage as manage_module
+
+    source_directory = tmp_path / "source"
+    target_directory = tmp_path / "target"
+    source_directory.mkdir()
+    source_rows = pandas.DataFrame(
+        {
+            "Date": ["2022-12-30", "2023-01-01", "2024-12-31", "2025-01-01"],
+            "close": [9.0, 10.0, 11.0, 12.0],
+            "volume": [100, 100, 100, 100],
+        }
+    )
+    source_rows.to_csv(source_directory / "AAA.csv", index=False)
+    source_rows.to_csv(source_directory / "BBB.csv", index=False)
+    source_rows.to_csv(
+        source_directory / f"{manage_module.SP500_SYMBOL}.csv",
+        index=False,
+    )
+
+    summary = manage_module.create_date_bounded_csv_dataset(
+        source_directory,
+        target_directory,
+        datetime.date(2023, 1, 1),
+        datetime.date(2024, 12, 31),
+        {"AAA"},
+    )
+
+    assert summary == manage_module.DateBoundedCsvDatasetSummary(
+        source_file_count=2,
+        output_file_count=2,
+        output_row_count=4,
+    )
+    assert sorted(path.name for path in target_directory.glob("*.csv")) == [
+        "AAA.csv",
+        f"{manage_module.SP500_SYMBOL}.csv",
+    ]
+    bounded_frame = pandas.read_csv(target_directory / "AAA.csv")
+    assert list(bounded_frame.columns) == ["Date", "close", "volume"]
+    assert bounded_frame["Date"].tolist() == ["2023-01-01", "2024-12-31"]
+
+
+# TODO: review
+def test_multi_bucket_simulation_cleans_temporary_dataset_after_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The bounded dataset should be removed when strategy execution fails."""
+
+    import json
+
+    import stock_indicator.manage as manage_module
+
+    data_directory = tmp_path / "prices"
+    data_directory.mkdir()
+    pandas.DataFrame(
+        {
+            "Date": ["2023-01-01", "2024-12-31"],
+            "close": [10.0, 11.0],
+            "volume": [100, 100],
+        }
+    ).to_csv(data_directory / "AAA.csv", index=False)
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 1,
+                "data_source": "test",
+                "buckets": [
+                    {
+                        "label": "bucket",
+                        "strategy_id": "strategy",
+                        "dollar_volume_filter": "dollar_volume>1",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "DATA_SOURCE_PATHS",
+        {"test": data_directory},
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "load_strategy_set_mapping",
+        lambda: {"strategy": ("ema_sma_cross", "ema_sma_cross")},
+    )
+    monkeypatch.setattr(manage_module, "load_strategy_entry_filters", lambda: {})
+    temporary_path_holder: dict[str, Path] = {}
+
+    def fail_simulation(
+        bounded_data_directory: Path,
+        *unused_arguments: object,
+        **unused_keyword_arguments: object,
+    ) -> object:
+        del unused_arguments, unused_keyword_arguments
+        temporary_path_holder["path"] = bounded_data_directory
+        assert bounded_data_directory.exists()
+        raise ValueError("expected test failure")
+
+    monkeypatch.setattr(
+        manage_module.strategy,
+        "run_complex_simulation",
+        fail_simulation,
+    )
+    output_buffer = io.StringIO()
+
+    shell = manage_module.StockShell(stdout=output_buffer)
+    shell.onecmd(
+        f"multi_bucket_simulation {config_path} 2024-01-01 2024-12-31"
+    )
+
+    assert "expected test failure" in output_buffer.getvalue()
+    assert not temporary_path_holder["path"].exists()
+
+
+# TODO: review
+def test_multi_bucket_simulation_date_range_requires_two_ordered_dates(
+    tmp_path: Path,
+) -> None:
+    """Incomplete and reversed CLI date ranges should fail before execution."""
+
+    import stock_indicator.manage as manage_module
+
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}", encoding="utf-8")
+
+    missing_end_output = io.StringIO()
+    missing_end_shell = manage_module.StockShell(stdout=missing_end_output)
+    missing_end_shell.onecmd(
+        f"multi_bucket_simulation {config_path} 2024-01-01"
+    )
+    assert "date range requires both START_DATE and END_DATE" in (
+        missing_end_output.getvalue()
+    )
+
+    reversed_output = io.StringIO()
+    reversed_shell = manage_module.StockShell(stdout=reversed_output)
+    reversed_shell.onecmd(
+        f"multi_bucket_simulation {config_path} 2024-12-31 2024-01-01"
+    )
+    assert "START_DATE must be on or before END_DATE" in reversed_output.getvalue()
 
 
 def test_multi_bucket_simulation_forwards_risk_score_priority_overrides(
@@ -3428,6 +3707,138 @@ def test_multi_bucket_daily_signal_forwards_ff12_data_path(
 
     assert recorded_override_paths == [ff12_data_path]
     assert f"FF12 data: {ff12_data_path}" in output_buffer.getvalue()
+
+
+def test_multi_bucket_daily_signal_advances_live_expectancy_sensor(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Cron should persist ADAPTIVE history before publishing one validated
+    production expectancy decision for the dashboard."""
+
+    import stock_indicator.manage as manage_module
+    from stock_indicator import multi_bucket_today
+
+    data_directory = tmp_path / "prices"
+    data_directory.mkdir()
+    config_path = tmp_path / "multi_bucket_config.json"
+    config_path.write_text("{}", encoding="utf-8")
+    gate_config = manage_module.strategy.ExpectancyGateConfig(
+        window=2,
+        baseline_mean=0.0,
+        baseline_sigma=0.1,
+        sigma_multiplier=1.0,
+        cold_start="open",
+    )
+    bucket_definition = manage_module.strategy.ComplexStrategySetDefinition(
+        label="fish_head_production",
+        buy_strategy_name="buy",
+        sell_strategy_name="sell",
+        strategy_identifier="fish_head_vacuum_turn",
+    )
+    loaded_config = multi_bucket_today.MultiBucketRunConfig(
+        bucket_definitions={bucket_definition.label: bucket_definition},
+        adaptive_tp_sl=manage_module.strategy.AdaptiveTPSLConfig(),
+        maximum_position_count=1,
+        starting_cash=1000.0,
+        withdraw_amount=0.0,
+        margin_multiplier=1.0,
+        minimum_holding_bars=0,
+        show_trade_details=False,
+        start_date_string=None,
+        confirmation_mode=None,
+        use_confirmation_angle=False,
+        confirmation_entry_mode="limit",
+        confirmation_sma_angle_range=None,
+        data_source_name="daily",
+        symbol_list_name=None,
+        ff12_data_path_text=None,
+        max_same_symbol=1,
+        raw_document={
+            "expectancy_gate": {
+                "enabled": True,
+                "window": 2,
+                "baseline_mean": 0.0,
+                "baseline_sigma": 0.1,
+                "sigma_multiplier": 1.0,
+                "cold_start": "open",
+            },
+            "buckets": [{"label": "fish_head_production"}],
+        },
+        expectancy_gate=gate_config,
+    )
+    state_document = (
+        multi_bucket_today.
+        empty_adaptive_tp_sl_virtual_trade_history_state_document()
+    )
+    monkeypatch.setattr(
+        manage_module.multi_bucket_today,
+        "load_multi_bucket_config",
+        lambda _config_path: loaded_config,
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "DATA_SOURCE_PATHS",
+        {"daily": data_directory},
+    )
+    monkeypatch.setattr(
+        manage_module,
+        "LIVE_STATE_DIRECTORY",
+        tmp_path / "live_state",
+    )
+    monkeypatch.setattr(
+        manage_module.multi_bucket_today,
+        "load_adaptive_tp_sl_virtual_trade_history_state",
+        lambda _state_path: state_document,
+    )
+    operation_order: list[str] = []
+    monkeypatch.setattr(
+        manage_module.multi_bucket_today,
+        "save_adaptive_tp_sl_virtual_trade_history_state_atomically",
+        lambda _state_path, _state: operation_order.append("adaptive_saved"),
+    )
+    monkeypatch.setattr(
+        manage_module.multi_bucket_today,
+        "compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history",
+        lambda **_keyword_arguments: multi_bucket_today.TodaySignalsResult(
+            eval_date_string="2026-01-02",
+            retained_adaptive_tp_sl_virtual_trades_per_strategy={},
+            tradable_records=[],
+            filtered_out_records=[],
+            log_lines=["signals_ready"],
+        ),
+    )
+    recorded_expectancy_state_paths: list[Path] = []
+
+    def fake_advance_expectancy_state(
+        **keyword_arguments: object,
+    ) -> tuple[dict[str, str], str]:
+        recorded_expectancy_state_paths.append(
+            keyword_arguments["state_path"]
+        )
+        operation_order.append("expectancy_advanced")
+        return (
+            {"status": "ready"},
+            "[EXPECTANCY_GATE_SENSOR] status=ready window=0/2",
+        )
+
+    monkeypatch.setattr(
+        manage_module.live_expectancy_gate,
+        "advance_expectancy_gate_state_at_path",
+        fake_advance_expectancy_state,
+    )
+
+    output_buffer = io.StringIO()
+    shell = manage_module.StockShell(stdout=output_buffer)
+    shell.onecmd(f"multi_bucket_daily_signal {config_path} 2026-01-02")
+
+    assert operation_order == ["adaptive_saved", "expectancy_advanced"]
+    assert recorded_expectancy_state_paths == [
+        tmp_path / "live_state" / "expectancy_gate_state.json"
+    ]
+    assert "[EXPECTANCY_GATE_SENSOR] status=ready window=0/2" in (
+        output_buffer.getvalue()
+    )
 
 
 def test_multi_bucket_daily_signal_forwards_symbol_seasoning_dates(

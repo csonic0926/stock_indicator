@@ -87,6 +87,10 @@ class MultiBucketRunConfig:
     # execution (slot occupancy, exit) live entirely in the order layer
     # (dashboard). None means the gate is unconfigured (cron stays inert).
     wr_gate: "strategy.WRGateConfig | None" = None
+    # Global accepted-trade expectancy sensor.  Cron advances its separate
+    # order-allocation ledger; dashboard applies both tiers once per signal
+    # day.  None keeps every live path inert.
+    expectancy_gate: "strategy.ExpectancyGateConfig | None" = None
 
 
 def _parse_volume_filter_text(text: str) -> Tuple[float | None, float | None, int | None, int]:
@@ -579,6 +583,12 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
                 and raw_bucket["fuel_drawdown_max"] is not None
                 else None
             ),
+            fuel_priority_threshold=(
+                float(raw_bucket["fuel_priority_threshold"])
+                if "fuel_priority_threshold" in raw_bucket
+                and raw_bucket["fuel_priority_threshold"] is not None
+                else None
+            ),
             pre_cross_signal_lookback=bool(
                 raw_bucket.get("pre_cross_signal_lookback", False)
             ),
@@ -698,9 +708,10 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
     # WR-gate sensor config. The cron consumes only the sensor-facing
     # fields (sensor_bucket / gated_buckets / window / curve) to maintain
     # the win-rate cross and stamp the per-entry degrading flag. The
-    # risk_score_activation_threshold is intentionally NOT applied here —
-    # the RS combine belongs to the dashboard's order layer. Mirrors the
-    # simulator parse in manage.py so both read the same JSON key.
+    # The optional risk_score_activation_threshold is not applied to sensor
+    # state. The dashboard owns that legacy order-layer condition; omitting
+    # it makes the configured production gate sensor-only. Mirrors the
+    # simulator parse in manage.py so both still read the same JSON key.
     wr_gate_config: strategy.WRGateConfig | None = None
     raw_wr_gate = document.get("ft_family_wr_gate")
     if raw_wr_gate is not None:
@@ -727,6 +738,15 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
                 else None
             ),
         )
+
+    # TODO: review
+    # Parse the global expectancy mechanism through the same shared parser as
+    # simulation, then validate the live bucket-label boundary exactly.
+    from stock_indicator import live_expectancy_gate
+
+    expectancy_gate_config = (
+        live_expectancy_gate.parse_live_expectancy_gate_config(document)
+    )
 
     return MultiBucketRunConfig(
         bucket_definitions=bucket_definitions,
@@ -759,6 +779,7 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
         raw_document=document,
         symbol_seasoning=seasoning_config,
         wr_gate=wr_gate_config,
+        expectancy_gate=expectancy_gate_config,
     )
 
 
@@ -950,26 +971,30 @@ def append_adaptive_tp_sl_virtual_trade_return(
         ] = loser_returns
 
 
-def compute_adaptive_tp_sl_virtual_trade_close_for_wr_gate(
+def compute_adaptive_tp_sl_virtual_trade_close(
     data_directory: Path,
     symbol: str,
     entry_date_string: str,
     entry_price: float,
     horizon_date_string: str,
     tp_pct: float,
+    sl_pct: float,
     *,
     min_hold_tp: int,
+    min_hold_sl: int,
+    disable_sl_trigger: bool,
+    breakeven_trigger_pct: float = 0.0,
     max_hold: int | None,
+    reset_hold_on_reentry_signal: bool = False,
+    re_fire_dates: set[pandas.Timestamp] | None = None,
 ) -> tuple[bool, float, str, pandas.Timestamp] | None:
-    """Compute a closed ft trade's ADAPTIVE (TP/SL) exit for the WR-gate
-    sensor, by reconstructing the entry-relative bar path from the daily
-    price cache and replaying it through the simulator's own
+    """Compute a final ADAPTIVE TP/SL exit from the daily price cache.
+
+    Reconstructs the entry-relative bar path and replays it through the
+    simulator's own
     ``_replay_trade_with_adaptive_tp_sl``.
 
-    Production runs SL disabled, so the adaptive exit is TP, max_hold, or
-    the signal exit (horizon). Bars start strictly AFTER the entry bar
-    (validated byte-for-byte against the simulator: 734/734 ft TP/max_hold
-    trades match on exit date, reason and pct). Returns
+    Bars start strictly AFTER the entry bar. Returns
     ``(win, pct, exit_reason, adaptive_exit_date)`` or None when price
     history is missing.
     """
@@ -1020,11 +1045,15 @@ def compute_adaptive_tp_sl_virtual_trade_close_for_wr_gate(
     adaptive_trade = strategy._replay_trade_with_adaptive_tp_sl(
         raw_trade,
         tp_pct=tp_pct,
-        sl_pct=0.0,
+        sl_pct=sl_pct,
         minimum_holding_bars=0,
         minimum_holding_bars_tp=min_hold_tp,
-        disable_sl_trigger=True,
+        minimum_holding_bars_sl=min_hold_sl,
+        breakeven_trigger_pct=breakeven_trigger_pct,
+        disable_sl_trigger=disable_sl_trigger,
         max_hold_bars=max_hold,
+        reset_hold_on_reentry_signal=reset_hold_on_reentry_signal,
+        re_fire_dates=re_fire_dates,
     )
     adaptive_pct = (
         (adaptive_trade.exit_price - entry_price) / entry_price
@@ -1034,6 +1063,35 @@ def compute_adaptive_tp_sl_virtual_trade_close_for_wr_gate(
         adaptive_pct,
         adaptive_trade.exit_reason,
         adaptive_trade.exit_date,
+    )
+
+
+def compute_adaptive_tp_sl_virtual_trade_close_for_wr_gate(
+    data_directory: Path,
+    symbol: str,
+    entry_date_string: str,
+    entry_price: float,
+    horizon_date_string: str,
+    tp_pct: float,
+    *,
+    min_hold_tp: int,
+    max_hold: int | None,
+) -> tuple[bool, float, str, pandas.Timestamp] | None:
+    """Replay the production WR sensor's SL-disabled adaptive exit."""
+
+    return compute_adaptive_tp_sl_virtual_trade_close(
+        data_directory,
+        symbol,
+        entry_date_string,
+        entry_price,
+        horizon_date_string,
+        tp_pct,
+        0.0,
+        min_hold_tp=min_hold_tp,
+        min_hold_sl=0,
+        disable_sl_trigger=True,
+        breakeven_trigger_pct=0.0,
+        max_hold=max_hold,
     )
 
 
@@ -1541,7 +1599,10 @@ class TradableEntrySignal(EntrySignalIdentity):
     rolling_mp: float
     slope_60: float | None
     near_delta: float | None
+    fuel_drawdown: float | None
     dollar_volume_rank: int
+    entry_priority: float
+    insertion_counter: int
     max_hold: int | None
     reset_hold_on_reentry_signal: bool
 
@@ -1999,6 +2060,7 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
     # ------------------------------------------------------------------
     filtered_out_records: List[Tuple[EntrySignalIdentity, str]] = []
     candidates: List[Tuple[int, int, str, str, TradableEntrySignal]] = []
+    candidate_insertion_counter = 0
     for bucket_label, bucket_def in config.bucket_definitions.items():
         strategy_identifier = bucket_def.strategy_identifier
         signals = per_bucket_signals[bucket_label]
@@ -2075,7 +2137,10 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
                     symbol_name,
                     signal_lookup_date_string,
                 )
-                if bucket_def.fuel_drawdown_max is not None
+                if (
+                    bucket_def.fuel_drawdown_max is not None
+                    or bucket_def.fuel_priority_threshold is not None
+                )
                 else None
             )
             cohort_entry_detail = (
@@ -2142,6 +2207,22 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
                 ),
                 entry_slope_60=slope_60_value,
             )
+            average_dollar_volume_by_symbol = signals.get(
+                "average_dollar_volume_by_symbol", {}
+            )
+            average_dollar_volume_value = (
+                average_dollar_volume_by_symbol.get(symbol_name)
+                if isinstance(average_dollar_volume_by_symbol, dict)
+                else None
+            )
+            entry_priority_value = 0.0
+            if (
+                average_dollar_volume_value is not None
+                and not pandas.isna(average_dollar_volume_value)
+            ):
+                entry_priority_value = -float(
+                    average_dollar_volume_value
+                )
             candidate_record = TradableEntrySignal(
                 bucket_label=bucket_label,
                 strategy_id=strategy_identifier,
@@ -2152,12 +2233,20 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
                 rolling_mp=rolling_mp,
                 slope_60=slope_60_value if slope_60_value is not None else None,
                 near_delta=near_delta_value if near_delta_value is not None else None,
+                fuel_drawdown=(
+                    fuel_drawdown_value
+                    if fuel_drawdown_value is not None
+                    else None
+                ),
                 dollar_volume_rank=dollar_volume_rank,
+                entry_priority=entry_priority_value,
+                insertion_counter=candidate_insertion_counter,
                 max_hold=bucket_def.max_hold,
                 reset_hold_on_reentry_signal=(
                     bucket_def.reset_hold_on_reentry_signal
                 ),
             )
+            candidate_insertion_counter += 1
             if seasoning_enabled and not symbol_seasoning.is_symbol_eligible_on(
                 symbol_name,
                 eval_date,
@@ -2349,10 +2438,11 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
 
     # WR-gate degrading flag. The sensor is identical for every entry on
     # this run (it advanced once, before any entry decision), so evaluate
-    # it once. The flag is the cron's endogenous half of the phantom
-    # decision; the dashboard ANDs it with the month's risk score and owns
-    # the phantom execution (slot occupancy + exit). Stamped only on gated
-    # buckets — non-gated entries always read wr_degrading=False.
+    # it once. The dashboard owns phantom execution (slot occupancy + exit)
+    # and consumes this endogenous flag directly in production. Historical
+    # configs may additionally condition it on a monthly risk score. The flag
+    # is stamped only on gated buckets; non-gated entries always read
+    # wr_degrading=False.
     wr_gate_degrading = False
     if config.wr_gate is not None:
         sensor_state = state_document.get("wr_gate_sensor")
@@ -2367,6 +2457,11 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
         near_delta_text = (
             f"{record.near_delta:.4f}" if record.near_delta is not None else "None"
         )
+        fuel_drawdown_text = (
+            f"{record.fuel_drawdown:.6f}"
+            if record.fuel_drawdown is not None
+            else "None"
+        )
         record_degrading = (
             wr_gate_degrading
             and config.wr_gate is not None
@@ -2377,9 +2472,12 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
             f"bucket={record.bucket_label} strategy_id={record.strategy_id} "
             f"symbol={record.symbol} "
             f"dollar_volume_rank={record.dollar_volume_rank} "
+            f"entry_priority={record.entry_priority:.6f} "
+            f"insertion_counter={record.insertion_counter} "
             f"tp_pct={record.tp_pct:.6f} sl_pct={record.sl_pct:.6f} "
             f"rolling_mp={record.rolling_mp:.6f} "
             f"slope_60={slope_text} near_delta={near_delta_text} "
+            f"fuel_drawdown={fuel_drawdown_text} "
             f"min_hold_tp={adaptive.min_hold_tp} "
             f"disable_sl_trigger={adaptive.disable_sl_trigger} "
             f"max_hold={record.max_hold} "

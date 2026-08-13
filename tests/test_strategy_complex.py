@@ -200,6 +200,85 @@ def test_symbol_seasoning_skips_before_date_and_allows_on_date(
     assert metrics.overall_metrics.total_trades == 1
 
 
+# TODO: review
+def test_statistics_period_keeps_warmup_state_but_excludes_warmup_trades(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Warm-up trades should affect slot selection without entering metrics."""
+
+    warmup_trade, warmup_detail_pair = _build_trade(
+        "2023-12-20",
+        "2024-01-10",
+        symbol="WARMUP",
+    )
+    blocked_period_trade, blocked_period_detail_pair = _build_trade(
+        "2024-01-05",
+        "2024-01-08",
+        symbol="BLOCKED",
+    )
+    accepted_period_trade, accepted_period_detail_pair = _build_trade(
+        "2024-01-11",
+        "2024-01-12",
+        symbol="ACCEPTED",
+    )
+    artifacts = _build_artifacts(
+        [
+            (warmup_trade, warmup_detail_pair),
+            (blocked_period_trade, blocked_period_detail_pair),
+            (accepted_period_trade, accepted_period_detail_pair),
+        ]
+    )
+    recorded_generation_dates: dict[str, pandas.Timestamp | None] = {}
+
+    def fake_generate_artifacts(
+        *positional_arguments: object,
+        **keyword_arguments: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        del positional_arguments
+        recorded_generation_dates["start_date"] = keyword_arguments.get(
+            "start_date"
+        )
+        recorded_generation_dates["end_date"] = keyword_arguments.get("end_date")
+        return artifacts
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate_artifacts,
+    )
+    _stub_metrics_functions(monkeypatch)
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=1,
+        start_date=pandas.Timestamp("2023-01-01"),
+        end_date=pandas.Timestamp("2024-12-31"),
+        statistics_start_date=pandas.Timestamp("2024-01-01"),
+        statistics_end_date=pandas.Timestamp("2024-12-31"),
+    )
+
+    assert recorded_generation_dates == {
+        "start_date": pandas.Timestamp("2023-01-01"),
+        "end_date": pandas.Timestamp("2024-12-31"),
+    }
+    assert metrics.overall_metrics.total_trades == 1
+    open_details = [
+        trade_detail
+        for detail_list in metrics.overall_metrics.trade_details_by_year.values()
+        for trade_detail in detail_list
+        if trade_detail.action == "open"
+    ]
+    assert [trade_detail.symbol for trade_detail in open_details] == ["ACCEPTED"]
+
+
 def test_resolve_trade_decision_dates_non_pending() -> None:
     """Non-pending mode: signal_date is one trading bar before fill,
     confirmation_date coincides with signal_date (no separate B-layer

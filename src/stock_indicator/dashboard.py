@@ -6,7 +6,6 @@ import ast
 import csv
 import json
 import logging
-import math
 import os
 import re
 import threading
@@ -21,10 +20,22 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-from stock_indicator import adaptive_tp_sl_virtual_trade_history, daily_job
+from stock_indicator import (
+    adaptive_tp_sl_virtual_trade_history,
+    daily_job,
+    live_expectancy_gate,
+)
 from stock_indicator.futu_trade_metadata import (
     format_futu_order_remark,
     parse_futu_order_remark,
+)
+from stock_indicator.live_order_sizing import (
+    DEFAULT_MARGIN_MULTIPLIER,
+    compute_target_share_quantity,
+)
+from stock_indicator.pre_open_entry_scheduler import (
+    record_confirmed_entry_intent,
+    record_entry_submission_result,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -154,12 +165,18 @@ def _parse_log_key_value_tokens(line_body: str) -> dict[str, Any]:
                 "rolling_ml",
                 "slope_60",
                 "near_delta",
+                "fuel_drawdown",
+                "entry_priority",
+                "mean",
+                "stop_threshold",
+                "soft_threshold",
             }:
                 fields[key_text] = float(raw_value_text)
             elif key_text in {
                 "min_hold_tp",
                 "min_hold_sl",
                 "dollar_volume_rank",
+                "insertion_counter",
                 "max_hold",
                 "winner_returns",
                 "loser_returns",
@@ -167,6 +184,9 @@ def _parse_log_key_value_tokens(line_body: str) -> dict[str, Any]:
                 "closed_trades",
                 "open_pending",
                 "fed_this_run",
+                "closed_episodes",
+                "expectancy_gated_trades",
+                "priority_override_entries",
             }:
                 fields[key_text] = int(raw_value_text)
             elif key_text in {
@@ -181,6 +201,8 @@ def _parse_log_key_value_tokens(line_body: str) -> dict[str, Any]:
                 "wr_degrading",
                 "degrading",
                 "window_full",
+                "gate_closed",
+                "priority_override_active",
             }:
                 fields[key_text] = raw_value_text.lower() == "true"
             else:
@@ -268,6 +290,21 @@ def _parse_log(log_path: Path) -> dict[str, Any]:
         )
     result["wr_gate_sensor"] = (
         wr_gate_sensor_records[-1] if wr_gate_sensor_records else {}
+    )
+
+    expectancy_gate_sensor_records: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        if not line.startswith("[EXPECTANCY_GATE_SENSOR]"):
+            continue
+        expectancy_gate_sensor_records.append(
+            _parse_log_key_value_tokens(
+                line[len("[EXPECTANCY_GATE_SENSOR]"):]
+            )
+        )
+    result["expectancy_gate_sensor"] = (
+        expectancy_gate_sensor_records[-1]
+        if expectancy_gate_sensor_records
+        else {}
     )
 
     adaptive_tp_sl_virtual_history_state_records: list[dict[str, Any]] = []
@@ -672,7 +709,7 @@ def api_futu_positions():
 # Order execution
 # ---------------------------------------------------------------------------
 
-MARGIN_MULTIPLIER = 1.5
+MARGIN_MULTIPLIER = DEFAULT_MARGIN_MULTIPLIER
 # TODO: review
 # Manual launches are safe by default. The installed production LaunchAgent
 # explicitly sets STOCK_INDICATOR_TRADING_ENV=REAL.
@@ -696,24 +733,30 @@ PREVIEW_SKIP_STATUSES = {
     "risk_score_stop",
     "min_hold_block",
     "wr_gate_phantom",
+    "expectancy_gate_phantom",
 }
 TERMINAL_BROKER_ORDER_STATUSES = {
     "CANCELLED_PART",
     "CANCELLED_ALL",
+    "FILL_CANCELLED",
     "DISABLED",
     "FILLED_ALL",
     "FAILED",
+    "SUBMIT_FAILED",
+    "TIMEOUT",
     "DELETED",
 }
 
-# WR-gate phantom positions tracked by the ORDER LAYER (this module),
+# Zero-capital phantom positions tracked by the ORDER LAYER (this module),
 # separate from cron's adaptive_state.json. A phantom is a degrading-regime
-# ft-family entry that won a slot but deploys zero capital: it occupies a
-# slot (blocking other buckets) while never placing a real Futu order. The
-# cron emits the endogenous wr_degrading flag; the dashboard ANDs it with
-# the month's risk score, records the phantom here, counts its slot as
-# occupied, and releases it when the position would have adaptively closed.
+# WR entry, an expectancy-stop entry, or both. It wins and occupies one slot
+# while never placing a real Futu order, then releases the slot at its final
+# adaptive exit.
 PHANTOM_POSITIONS_PATH = LIVE_STATE_DIRECTORY / "phantom_positions.json"
+EXPECTANCY_GATE_STATE_PATH = (
+    LIVE_STATE_DIRECTORY / "expectancy_gate_state.json"
+)
+ADAPTIVE_STATE_PATH = LIVE_STATE_DIRECTORY / "adaptive_state.json"
 # Production data_source is "daily" -> data/stock_data. Phantom exit
 # detection replays the same per-symbol daily CSVs the cron sensor uses.
 PRODUCTION_DATA_DIRECTORY = DATA_DIRECTORY / "stock_data"
@@ -748,25 +791,42 @@ def _save_phantom_positions(positions: list[dict[str, Any]]) -> None:
     _os.replace(temp_path, PHANTOM_POSITIONS_PATH)
 
 
-def _wr_gate_activation_threshold() -> int | None:
-    """Read ft_family_wr_gate.risk_score_activation_threshold from the
-    production config. None means the WR-gate is unconfigured (no phantom
-    behaviour) or always-on; phantom needs an explicit threshold to AND
-    against the month's risk score, so None disables phantom in the order
-    layer."""
+# TODO: review
+def _load_wr_gate_order_config() -> dict[str, Any]:
+    """Return the production WR-gate's order-layer activation settings.
+
+    Omitting ``risk_score_activation_threshold`` makes the configured WR gate
+    sensor-only: a degrading sensor directly creates a phantom.  The optional
+    threshold remains supported for historical and research configurations.
+    """
+
+    default_config: dict[str, Any] = {
+        "configured": False,
+        "activation_mode": "off",
+        "risk_score_activation_threshold": None,
+    }
     try:
         raw_gate = _load_production_config().get("ft_family_wr_gate")
     except (OSError, json.JSONDecodeError, ValueError):
-        return None
+        return default_config
     if not isinstance(raw_gate, dict):
-        return None
+        return default_config
     threshold = raw_gate.get("risk_score_activation_threshold")
     if threshold is None:
-        return None
+        return {
+            "configured": True,
+            "activation_mode": "sensor_only",
+            "risk_score_activation_threshold": None,
+        }
     try:
-        return int(threshold)
+        activation_threshold = int(threshold)
     except (TypeError, ValueError):
-        return None
+        return default_config
+    return {
+        "configured": True,
+        "activation_mode": "risk_score",
+        "risk_score_activation_threshold": activation_threshold,
+    }
 
 
 def _phantom_still_open(
@@ -775,46 +835,45 @@ def _phantom_still_open(
     """Return whether a phantom position is still holding its slot as of
     eval_date. Lazily resolves the fill date / entry price (signal+1 open)
     in place — mirroring the cron's wr_gate_pending_ft lazy fill — then
-    replays the entry-relative bar path via the simulator's adaptive exit
-    logic. Closed iff a TP or max_hold exit fired by eval_date; signal
-    exits are not replay-detectable, so a phantom over-holds its slot to
-    max_hold at the latest (bounded, conservative — never frees early).
-    A missing price history or unresolved fill keeps the slot held."""
-    from stock_indicator import multi_bucket_today
+    replays the final adaptive outcome. TP/max-hold and signal exits release
+    the slot only on a strictly later evaluation date, matching the
+    no-lookahead rule used by both live sensors. Missing state or price data
+    keeps the slot held (fail closed)."""
 
-    signal_date = phantom.get("signal_date")
-    if not signal_date:
+    if not eval_date_string:
         return True
-    fill_date = phantom.get("fill_date") or multi_bucket_today._execution_date_string(
-        signal_date
-    )
-    entry_price = phantom.get("entry_price")
-    if entry_price is None:
-        resolved = multi_bucket_today._read_open_price(
-            PRODUCTION_DATA_DIRECTORY, phantom["symbol"], fill_date
+    adaptive_state_document = _load_json(ADAPTIVE_STATE_PATH)
+    try:
+        adaptive_history_state = (
+            adaptive_tp_sl_virtual_trade_history.
+            get_adaptive_tp_sl_virtual_trade_history(
+                adaptive_state_document
+            )
         )
-        if resolved is not None:
-            phantom["fill_date"] = fill_date
-            phantom["entry_price"] = round(float(resolved), 4)
-            entry_price = phantom["entry_price"]
-    if entry_price is None:
-        # Fill not yet available (entry just signalled) -> obviously open.
+        closed_trade_by_identity = (
+            live_expectancy_gate.build_closed_signal_trade_index(
+                adaptive_history_state
+            )
+        )
+        reentry_signal_dates_by_symbol = (
+            live_expectancy_gate.build_reentry_signal_dates_by_symbol(
+                adaptive_history_state
+            )
+        )
+        resolved_outcome = (
+            live_expectancy_gate.resolve_trade_outcome_before_date(
+                pending_trade=phantom,
+                evaluation_date=pandas.Timestamp(eval_date_string),
+                data_directory=PRODUCTION_DATA_DIRECTORY,
+                closed_trade_by_identity=closed_trade_by_identity,
+                reentry_signal_dates_by_symbol=(
+                    reentry_signal_dates_by_symbol
+                ),
+            )
+        )
+    except (KeyError, TypeError, ValueError):
         return True
-    adaptive = multi_bucket_today.compute_adaptive_tp_sl_virtual_trade_close_for_wr_gate(
-        PRODUCTION_DATA_DIRECTORY,
-        phantom["symbol"],
-        fill_date,
-        float(entry_price),
-        eval_date_string,
-        float(phantom["tp_pct"]),
-        min_hold_tp=int(phantom["min_hold_tp"]),
-        max_hold=phantom.get("max_hold"),
-    )
-    if adaptive is None:
-        # Cannot determine -> keep the slot held (never free on uncertainty).
-        return True
-    _win, _pct, reason, _exit_ts = adaptive
-    return reason not in ("adaptive_take_profit", "max_hold")
+    return resolved_outcome is None
 
 # TODO: review
 
@@ -825,6 +884,210 @@ def _load_production_config() -> dict[str, Any]:
     if not isinstance(config_document, dict):
         raise ValueError("production config root must be a JSON object")
     return config_document
+
+
+def _load_expectancy_gate_decision(
+    parsed_log: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate and return the cron-owned once-per-day gate decision.
+
+    An enabled gate never guesses from missing, malformed, stale, or
+    configuration-mismatched sensor output.  Such cases return ``error`` so
+    the preview cannot submit BUY orders under an unknown regime.
+    """
+
+    default_state: dict[str, Any] = {
+        "enabled": False,
+        "status": "off",
+        "gate_closed": False,
+        "priority_override_active": False,
+        "reason": "expectancy_gate not configured",
+    }
+    try:
+        config_document = _load_production_config()
+        gate_config = live_expectancy_gate.parse_live_expectancy_gate_config(
+            config_document
+        )
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as config_error:
+        return {
+            **default_state,
+            "enabled": True,
+            "status": "error",
+            "reason": f"invalid expectancy gate config: {config_error}",
+        }
+    if gate_config is None:
+        return default_state
+
+    try:
+        persisted_state = live_expectancy_gate.load_expectancy_gate_state(
+            EXPECTANCY_GATE_STATE_PATH,
+            gate_config,
+            allow_missing=False,
+        )
+    except (OSError, TypeError, ValueError) as state_error:
+        return {
+            **default_state,
+            "enabled": True,
+            "status": "error",
+            "reason": f"invalid expectancy gate state: {state_error}",
+        }
+    persisted_sensor_state = (
+        live_expectancy_gate.build_expectancy_gate_sensor_state(
+            persisted_state, gate_config
+        )
+    )
+    if str(persisted_state.get("last_evaluation_date") or "") != str(
+        parsed_log.get("date") or ""
+    ):
+        return {
+            **default_state,
+            "enabled": True,
+            "status": "error",
+            "reason": "expectancy gate live state date does not match log date",
+        }
+
+    sensor_state = parsed_log.get("expectancy_gate_sensor")
+    if not isinstance(sensor_state, dict) or not sensor_state:
+        return {
+            **default_state,
+            "enabled": True,
+            "status": "error",
+            "reason": "enabled expectancy gate has no sensor heartbeat",
+        }
+    if sensor_state.get("status") != "ready":
+        return {
+            **default_state,
+            "enabled": True,
+            "status": "error",
+            "reason": "expectancy gate sensor heartbeat is not ready",
+        }
+
+    try:
+        window_count_text, window_size_text = str(
+            sensor_state["window"]
+        ).split("/", maxsplit=1)
+        window_count = int(window_count_text)
+        window_size = int(window_size_text)
+        stop_threshold = float(sensor_state["stop_threshold"])
+        soft_threshold_value = sensor_state.get("soft_threshold")
+        soft_threshold = (
+            float(soft_threshold_value)
+            if soft_threshold_value is not None
+            else None
+        )
+        gate_closed = sensor_state["gate_closed"]
+        priority_override_active = sensor_state[
+            "priority_override_active"
+        ]
+        if not isinstance(gate_closed, bool) or not isinstance(
+            priority_override_active, bool
+        ):
+            raise ValueError("decision fields must be booleans")
+    except (KeyError, TypeError, ValueError) as sensor_error:
+        return {
+            **default_state,
+            "enabled": True,
+            "status": "error",
+            "reason": f"invalid expectancy gate heartbeat: {sensor_error}",
+        }
+
+    expected_soft_threshold = gate_config.priority_override_threshold
+    threshold_tolerance = 0.0000006
+    threshold_mismatch = abs(stop_threshold - gate_config.threshold) > (
+        threshold_tolerance
+    )
+    soft_threshold_mismatch = (
+        (soft_threshold is None) != (expected_soft_threshold is None)
+        or (
+            soft_threshold is not None
+            and expected_soft_threshold is not None
+            and abs(soft_threshold - expected_soft_threshold)
+            > threshold_tolerance
+        )
+    )
+    window_full = bool(sensor_state.get("window_full"))
+    if (
+        window_size != gate_config.window
+        or window_count < 0
+        or window_count > window_size
+        or window_full != (window_count >= window_size)
+        or threshold_mismatch
+        or soft_threshold_mismatch
+        or not live_expectancy_gate.is_finite_sensor_state(sensor_state)
+    ):
+        return {
+            **default_state,
+            "enabled": True,
+            "status": "error",
+            "reason": (
+                "expectancy gate heartbeat does not match production config"
+            ),
+        }
+    if not window_full and priority_override_active:
+        return {
+            **default_state,
+            "enabled": True,
+            "status": "error",
+            "reason": "expectancy priority override active before full window",
+        }
+
+    persisted_rolling_mean = persisted_sensor_state.get("rolling_mean")
+    heartbeat_rolling_mean = sensor_state.get("mean")
+    rolling_mean_mismatch = (
+        (persisted_rolling_mean is None) != (heartbeat_rolling_mean is None)
+        or (
+            persisted_rolling_mean is not None
+            and heartbeat_rolling_mean is not None
+            and abs(
+                float(persisted_rolling_mean)
+                - float(heartbeat_rolling_mean)
+            )
+            > threshold_tolerance
+        )
+    )
+    if (
+        persisted_sensor_state["count"] != window_count
+        or persisted_sensor_state["gate_closed"] != gate_closed
+        or persisted_sensor_state["priority_override_active"]
+        != priority_override_active
+        or rolling_mean_mismatch
+    ):
+        return {
+            **default_state,
+            "enabled": True,
+            "status": "error",
+            "reason": "expectancy gate heartbeat does not match live state",
+        }
+
+    return {
+        **sensor_state,
+        "enabled": True,
+        "status": "closed" if gate_closed else "open",
+        "cold_start": gate_config.cold_start,
+        "gate_closed": gate_closed,
+        "priority_override_active": priority_override_active,
+        # Accepted allocations may be appended after the once-per-day cron
+        # decision. Surface current ledger counters without recomputing or
+        # changing that frozen decision.
+        "open_pending_at_evaluation": sensor_state.get("open_pending"),
+        "open_pending": persisted_sensor_state["open_pending"],
+        "closed_episodes": persisted_sensor_state["closed_episodes"],
+        "expectancy_gated_trades": persisted_sensor_state[
+            "expectancy_gated_trades"
+        ],
+        "priority_override_entries": persisted_sensor_state[
+            "priority_override_entries"
+        ],
+        "reason": (
+            f"warming up; cold_start={gate_config.cold_start}"
+            if not window_full
+            else (
+                "rolling mean below stop threshold"
+                if gate_closed
+                else "rolling mean at or above stop threshold"
+            )
+        ),
+    }
 
 
 def _load_max_positions() -> int:
@@ -843,6 +1106,8 @@ def _load_max_positions() -> int:
 # TODO: review
 def _load_current_bucket_entry_limits(
     risk_score_value: int | None = None,
+    *,
+    expectancy_priority_override_active: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Load effective live priorities and caps for portfolio allocation.
 
@@ -890,6 +1155,16 @@ def _load_current_bucket_entry_limits(
                         raw_priority,
                     )
 
+    expectancy_priority_overrides: dict[str, int] = {}
+    if (
+        expectancy_priority_override_active
+        and config.expectancy_gate is not None
+        and config.expectancy_gate.priority_override is not None
+    ):
+        expectancy_priority_overrides = dict(
+            config.expectancy_gate.priority_override.priorities
+        )
+
     limits_by_key: dict[str, dict[str, Any]] = {}
     for bucket_label, bucket_definition in config.bucket_definitions.items():
         maximum_positions = (
@@ -900,13 +1175,19 @@ def _load_current_bucket_entry_limits(
         limit = {
             "bucket": bucket_label,
             "strategy_id": bucket_definition.strategy_identifier,
-            "entry_priority": priority_overrides.get(
+            "entry_priority": expectancy_priority_overrides.get(
                 bucket_label,
-                bucket_definition.entry_priority,
+                priority_overrides.get(
+                    bucket_label,
+                    bucket_definition.entry_priority,
+                ),
             ),
             "maximum_positions": maximum_positions,
             "fill_remaining": bucket_definition.fill_remaining,
             "max_same_symbol": config.max_same_symbol,
+            "fuel_priority_threshold": (
+                bucket_definition.fuel_priority_threshold
+            ),
         }
         limits_by_key[bucket_label] = limit
         if bucket_definition.strategy_identifier:
@@ -1000,7 +1281,7 @@ def _entry_limit_skip_reason(
 def _tradable_candidate_sort_key(
     candidate_record: dict[str, Any],
     current_bucket_entry_limits: dict[str, dict[str, Any]],
-) -> tuple[int, int, str, str]:
+) -> tuple[int, float, int]:
     """Return the configured greedy competition key for one candidate."""
     bucket_key = str(
         candidate_record.get("bucket")
@@ -1012,17 +1293,36 @@ def _tradable_candidate_sort_key(
         entry_priority = int(entry_limit.get("entry_priority", 0))
     except (TypeError, ValueError):
         entry_priority = 0
+    fuel_priority_threshold = entry_limit.get("fuel_priority_threshold")
+    fuel_drawdown = candidate_record.get("fuel_drawdown")
     try:
-        dollar_volume_rank = int(
-            candidate_record.get("dollar_volume_rank", 2**31 - 1)
+        if (
+            fuel_priority_threshold is not None
+            and fuel_drawdown is not None
+            and float(fuel_drawdown) <= float(fuel_priority_threshold)
+        ):
+            entry_priority -= 1
+    except (TypeError, ValueError):
+        pass
+    try:
+        within_bucket_priority = float(
+            candidate_record.get(
+                "entry_priority",
+                candidate_record.get("dollar_volume_rank", 2**31 - 1),
+            )
         )
     except (TypeError, ValueError):
-        dollar_volume_rank = 2**31 - 1
+        within_bucket_priority = float(2**31 - 1)
+    try:
+        insertion_counter = int(
+            candidate_record.get("insertion_counter", 2**31 - 1)
+        )
+    except (TypeError, ValueError):
+        insertion_counter = 2**31 - 1
     return (
         entry_priority,
-        dollar_volume_rank,
-        str(candidate_record.get("bucket") or ""),
-        _normalize_symbol_text(candidate_record.get("symbol")),
+        within_bucket_priority,
+        insertion_counter,
     )
 
 
@@ -1252,11 +1552,12 @@ def _compute_order_size(
 
     total_assets is in HKD, price is in USD.  Uses ~7.8 HKD/USD.
     """
-    hkd_per_position = total_assets_hkd * MARGIN_MULTIPLIER / max_positions
-    usd_per_position = hkd_per_position / 7.8
-    if price_usd <= 0:
-        return 0
-    return math.floor(usd_per_position / price_usd)
+    return compute_target_share_quantity(
+        total_assets_hkd=total_assets_hkd,
+        price_usd=price_usd,
+        maximum_position_count=max_positions,
+        margin_multiplier=MARGIN_MULTIPLIER,
+    )
 
 
 def _count_weekday_bars_held(entry_date_text: str, signal_date_text: str) -> int:
@@ -1676,6 +1977,34 @@ def _log_order(order_data: dict) -> None:
     log_path.write_text(json.dumps(orders, indent=2), encoding="utf-8")
 
 
+def _update_persisted_entry_intent(
+    entry_intent_record: dict[str, Any] | None,
+    *,
+    symbol: str,
+    status: str,
+    order_id: str | None = None,
+    error: str | None = None,
+) -> None:
+    """Record a BUY result without misreporting an already-sent Futu order."""
+    if entry_intent_record is None:
+        return
+    try:
+        record_entry_submission_result(
+            market_date_text=str(entry_intent_record["market_date"]),
+            symbol=symbol,
+            status=status,
+            order_id=order_id,
+            error=error,
+            state_path=LIVE_STATE_DIRECTORY / "pending_entry_intents.json",
+        )
+    except (OSError, TypeError, ValueError) as state_error:
+        LOGGER.error(
+            "Failed to update persisted entry intent for %s: %s",
+            symbol,
+            state_error,
+        )
+
+
 def _signal_trades_path() -> Path:
     """Resolve the live signal_trades.json path at call time so tests can
     monkeypatch LIVE_STATE_DIRECTORY after import."""
@@ -1778,6 +2107,15 @@ def api_preview_orders():
         held_broker_symbols = set()
         if ret_pos == 0 and len(pos_data) > 0:
             for _position_index, position_row in pos_data.iterrows():
+                try:
+                    position_quantity = float(position_row.get("qty", 0))
+                except (TypeError, ValueError):
+                    continue
+                # TODO: review
+                # Futu can retain same-day closed positions as qty=0 rows.
+                # Those rows are execution history, not occupied positions.
+                if position_quantity <= 0:
+                    continue
                 held_broker_symbol = _normalize_symbol_text(
                     position_row.get("code", "")
                 )
@@ -1807,14 +2145,33 @@ def api_preview_orders():
         trd_ctx.close()
         return {"error": risk_gate_state.get("reason"), "risk_score_gate": risk_gate_state}
     buy_orders_blocked_by_risk_score = _risk_gate_blocks_buy_orders(risk_gate_state)
+    expectancy_gate_state = _load_expectancy_gate_decision(log)
+    if expectancy_gate_state.get("status") == "error":
+        trd_ctx.close()
+        return {
+            "error": expectancy_gate_state.get("reason"),
+            "expectancy_gate": expectancy_gate_state,
+        }
 
     current_bucket_exit_rules = _load_current_bucket_exit_rules()
     risk_score_value = risk_gate_state.get("risk_score")
     current_bucket_entry_limits = _load_current_bucket_entry_limits(
         risk_score_value
         if isinstance(risk_score_value, int)
-        else None
+        else None,
+        expectancy_priority_override_active=bool(
+            expectancy_gate_state.get("priority_override_active", False)
+        ),
     )
+    if expectancy_gate_state.get("enabled") and not current_bucket_entry_limits:
+        trd_ctx.close()
+        return {
+            "error": "failed to load bucket limits for enabled expectancy gate",
+            "expectancy_gate": {
+                **expectancy_gate_state,
+                "status": "error",
+            },
+        }
     max_same_symbol = _load_current_max_same_symbol(
         current_bucket_entry_limits
     )
@@ -1829,16 +2186,24 @@ def api_preview_orders():
     buy_order_index_by_symbol: dict[str, int] = {}
 
     # WR-gate phantom accounting (read-only here; persistence happens at
-    # execute). Resolve which previously-recorded phantoms still hold a
-    # slot as of today, and whether the gate is active this month (its
-    # risk-score activation threshold met). The phantom decision is the
-    # cron's wr_degrading flag ANDed with this month's risk score.
+    # execute). Resolve which previously-recorded phantoms still hold a slot
+    # as of today. Production uses the endogenous sensor directly; historical
+    # configs may still add an optional risk-score activation threshold.
     eval_date_string = log.get("date") or ""
-    wr_activation_threshold = _wr_gate_activation_threshold()
-    wr_gate_active = (
-        wr_activation_threshold is not None
-        and isinstance(risk_score_value, int)
-        and risk_score_value >= wr_activation_threshold
+    wr_gate_order_config = _load_wr_gate_order_config()
+    wr_activation_threshold = wr_gate_order_config[
+        "risk_score_activation_threshold"
+    ]
+    wr_gate_armed = bool(
+        wr_gate_order_config["configured"]
+        and (
+            wr_gate_order_config["activation_mode"] == "sensor_only"
+            or (
+                isinstance(wr_activation_threshold, int)
+                and isinstance(risk_score_value, int)
+                and risk_score_value >= wr_activation_threshold
+            )
+        )
     )
     open_phantom_positions = [
         phantom
@@ -1972,10 +2337,23 @@ def api_preview_orders():
         if broker_symbol != normalized_strategy_symbol:
             order_dict["signal_symbol"] = normalized_strategy_symbol
         # A candidate is a phantom when the cron flagged its win-rate cross
-        # as degrading AND this month's risk score has activated the gate.
-        # The flag is stamped gated-buckets-only by the cron, so non-gated
-        # buckets read wr_degrading=False and never phantom here.
-        is_phantom = wr_gate_active and bool(meta.get("wr_degrading"))
+        # as degrading and the WR gate is armed. Production is sensor-only;
+        # the flag is stamped on gated buckets only, so non-gated buckets
+        # always read wr_degrading=False.
+        is_wr_gate_phantom = wr_gate_armed and bool(meta.get("wr_degrading"))
+        is_expectancy_gate_phantom = bool(
+            expectancy_gate_state.get("gate_closed", False)
+        )
+        is_phantom = is_wr_gate_phantom or is_expectancy_gate_phantom
+        if expectancy_gate_state.get("enabled"):
+            order_dict["signal_date"] = eval_date_string
+            order_dict["min_hold_tp"] = meta.get("min_hold_tp")
+            order_dict["rolling_mp"] = meta.get("rolling_mp")
+            order_dict["wr_gate_phantom"] = is_wr_gate_phantom
+            order_dict["expectancy_gated"] = is_expectancy_gate_phantom
+            order_dict["expectancy_priority_override"] = bool(
+                expectancy_gate_state.get("priority_override_active", False)
+            )
         same_symbol_limit_reached = (
             max_same_symbol < 999
             and occupied_symbol_counts.get(broker_symbol, 0)
@@ -2023,14 +2401,42 @@ def api_preview_orders():
             # order. Carries phantom_record so execute can persist it to
             # the order layer's phantom list (slot stays occupied until it
             # adaptively closes).
-            order_dict["status"] = "wr_gate_phantom"
-            order_dict["qty"] = 0
-            order_dict["skip_reason"] = (
-                f"WR-gate phantom: wr_degrading=True and risk_score="
-                f"{risk_score_value} >= activation={wr_activation_threshold} "
-                f"for {risk_gate_state.get('year_month')} "
-                f"(slot held, no capital)"
+            order_dict["status"] = (
+                "expectancy_gate_phantom"
+                if is_expectancy_gate_phantom
+                else "wr_gate_phantom"
             )
+            order_dict["qty"] = 0
+            if is_expectancy_gate_phantom:
+                phantom_reason_parts = [
+                    "expectancy mean below stop threshold"
+                ]
+                if is_wr_gate_phantom:
+                    phantom_reason_parts.append(
+                        "WR sensor degrading"
+                    )
+                order_dict["skip_reason"] = (
+                    "Zero-capital phantom: "
+                    + " and ".join(phantom_reason_parts)
+                    + " (slot held, no capital)"
+                )
+            else:
+                if (
+                    wr_gate_order_config["activation_mode"]
+                    == "sensor_only"
+                ):
+                    order_dict["skip_reason"] = (
+                        "WR-gate phantom: wr_degrading=True "
+                        "(sensor-only; slot held, no capital)"
+                    )
+                else:
+                    order_dict["skip_reason"] = (
+                        "WR-gate phantom: wr_degrading=True and "
+                        f"risk_score={risk_score_value} >= activation="
+                        f"{wr_activation_threshold} "
+                        f"for {risk_gate_state.get('year_month')} "
+                        "(slot held, no capital)"
+                    )
             order_dict["phantom_record"] = {
                 "symbol": normalized_strategy_symbol,
                 "signal_date": eval_date_string,
@@ -2039,6 +2445,24 @@ def api_preview_orders():
                 "min_hold_tp": meta.get("min_hold_tp"),
                 "max_hold": meta.get("max_hold"),
             }
+            if expectancy_gate_state.get("enabled"):
+                order_dict["phantom_record"].update({
+                    "strategy_id": meta.get("strategy_id"),
+                    "sl_pct": meta.get("sl_pct"),
+                    "rolling_mp": meta.get("rolling_mp"),
+                    "min_hold_sl": order_dict.get("min_hold_sl", 0),
+                    "disable_sl_trigger": order_dict.get(
+                        "disable_sl_trigger", False
+                    ),
+                    "reset_hold_on_reentry_signal": order_dict.get(
+                        "reset_hold_on_reentry_signal", False
+                    ),
+                    "wr_gate_phantom": is_wr_gate_phantom,
+                    "expectancy_gated": is_expectancy_gate_phantom,
+                    "expectancy_priority_override": order_dict[
+                        "expectancy_priority_override"
+                    ],
+                })
             slots_remaining -= 1
             occupied_position_count += 1
             bucket_label = str(order_dict.get("bucket") or "")
@@ -2068,11 +2492,13 @@ def api_preview_orders():
             existing_order = orders[existing_order_index]
             existing_order_won_allocation = (
                 existing_order.get("status") not in PREVIEW_SKIP_STATUSES
-                or existing_order.get("status") == "wr_gate_phantom"
+                or existing_order.get("status")
+                in {"wr_gate_phantom", "expectancy_gate_phantom"}
             )
             current_order_won_allocation = (
                 order_dict.get("status") not in PREVIEW_SKIP_STATUSES
-                or order_dict.get("status") == "wr_gate_phantom"
+                or order_dict.get("status")
+                in {"wr_gate_phantom", "expectancy_gate_phantom"}
             )
             if current_order_won_allocation and not existing_order_won_allocation:
                 orders[existing_order_index] = order_dict
@@ -2182,9 +2608,11 @@ def api_preview_orders():
         "trading_env": TRADING_ENV,
         "signal_date": log.get("date"),
         "risk_score_gate": risk_gate_state,
+        "expectancy_gate": expectancy_gate_state,
         "wr_gate": {
-            "configured": wr_activation_threshold is not None,
-            "active": wr_gate_active,
+            "configured": wr_gate_order_config["configured"],
+            "active": wr_gate_armed,
+            "activation_mode": wr_gate_order_config["activation_mode"],
             "risk_score": risk_score_value,
             "activation_threshold": wr_activation_threshold,
             # The cron's per-run sensor heartbeat (ema/sma/breakeven/
@@ -2202,7 +2630,10 @@ def api_preview_orders():
             "phantomed_today": [
                 order["symbol"]
                 for order in orders
-                if order.get("status") == "wr_gate_phantom"
+                if (
+                    order.get("status") == "wr_gate_phantom"
+                    or order.get("wr_gate_phantom") is True
+                )
             ],
         },
     }
@@ -2294,6 +2725,76 @@ def _execute_orders_from_fresh_server_preview(req: ExecuteRequest):
     if not authorized_orders:
         return {"results": results}
 
+    # TODO: review
+    # Persist allocation acceptance before contacting Futu.  The expectancy
+    # sensor follows the selected counterfactual trade in exactly the same way
+    # for funded, WR-phantom, and expectancy-phantom entries.  A state error
+    # blocks the batch rather than submitting capital under an unrecorded
+    # sensor transition.
+    accepted_expectancy_trades: list[dict[str, Any]] = []
+    for order in authorized_orders:
+        order_status = order.get("status")
+        order_is_zero_capital_phantom = order_status in {
+            "wr_gate_phantom",
+            "expectancy_gate_phantom",
+        }
+        order_is_funded_buy = (
+            order.get("side") == "BUY"
+            and order_status not in PREVIEW_SKIP_STATUSES
+            and int(order.get("qty", 0)) > 0
+        )
+        if not order_is_zero_capital_phantom and not order_is_funded_buy:
+            continue
+        accepted_expectancy_trades.append({
+            "signal_date": order.get("signal_date"),
+            "bucket": order.get("bucket"),
+            "strategy_id": order.get("strategy_id"),
+            "symbol": order.get("signal_symbol") or order.get("symbol"),
+            "tp_pct": order.get("tp_pct"),
+            "sl_pct": order.get("sl_pct"),
+            "min_hold_tp": order.get("min_hold_tp"),
+            "min_hold_sl": order.get("min_hold_sl"),
+            "disable_sl_trigger": order.get("disable_sl_trigger", False),
+            "max_hold": order.get("max_hold"),
+            "rolling_mp": order.get("rolling_mp"),
+            "reset_hold_on_reentry_signal": order.get(
+                "reset_hold_on_reentry_signal", False
+            ),
+            "wr_gate_phantom": (
+                order_status == "wr_gate_phantom"
+                or bool(order.get("wr_gate_phantom"))
+            ),
+            "expectancy_gated": (
+                order_status == "expectancy_gate_phantom"
+                or bool(order.get("expectancy_gated"))
+            ),
+            "expectancy_priority_override": bool(
+                order.get("expectancy_priority_override", False)
+            ),
+        })
+    if accepted_expectancy_trades:
+        try:
+            live_expectancy_gate.record_accepted_trades_at_path(
+                state_path=EXPECTANCY_GATE_STATE_PATH,
+                config_document=_load_production_config(),
+                accepted_trades=accepted_expectancy_trades,
+            )
+        except (OSError, TypeError, ValueError) as expectancy_state_error:
+            return {
+                "results": results
+                + [
+                    {
+                        "symbol": order.get("symbol"),
+                        "status": "error",
+                        "error": (
+                            "Failed to persist expectancy gate acceptance: "
+                            f"{expectancy_state_error}"
+                        ),
+                    }
+                    for order in authorized_orders
+                ]
+            }
+
     trd_ctx = _get_futu_trd_ctx()
     trd_env = _get_trd_env()
 
@@ -2318,9 +2819,10 @@ def _execute_orders_from_fresh_server_preview(req: ExecuteRequest):
         if order.get("status") in PREVIEW_SKIP_STATUSES:
             # A phantom is recorded (not sent) so its slot stays occupied
             # across days until it adaptively closes.
-            if order.get("status") == "wr_gate_phantom" and order.get(
-                "phantom_record"
-            ):
+            if order.get("status") in {
+                "wr_gate_phantom",
+                "expectancy_gate_phantom",
+            } and order.get("phantom_record"):
                 confirmed_phantom_records.append(order["phantom_record"])
             results.append({
                 "symbol": symbol,
@@ -2344,6 +2846,29 @@ def _execute_orders_from_fresh_server_preview(req: ExecuteRequest):
         if qty <= 0:
             results.append({"symbol": symbol, "status": "skipped", "reason": "qty=0"})
             continue
+
+        entry_intent_record: dict[str, Any] | None = None
+        if order["side"] == "BUY" and TRADING_ENV == "REAL":
+            try:
+                # TODO: review
+                # Persist confirmation before contacting Futu so a rejected
+                # order can be resized and retried by the pre-open scheduler.
+                entry_intent_record = record_confirmed_entry_intent(
+                    order,
+                    state_path=(
+                        LIVE_STATE_DIRECTORY / "pending_entry_intents.json"
+                    ),
+                )
+            except (OSError, TypeError, ValueError) as intent_error:
+                results.append({
+                    "symbol": symbol,
+                    "status": "error",
+                    "error": (
+                        "Failed to persist confirmed entry intent: "
+                        f"{intent_error}"
+                    ),
+                })
+                continue
 
         try:
             # For SELL orders, cancel any existing pending sell orders
@@ -2399,6 +2924,12 @@ def _execute_orders_from_fresh_server_preview(req: ExecuteRequest):
                 }
                 results.append(result)
                 _log_order(result)
+                _update_persisted_entry_intent(
+                    entry_intent_record,
+                    symbol=symbol,
+                    status="submitted",
+                    order_id=order_id,
+                )
                 # Local mirror update only. Futu positions/orders/history remain
                 # the source of truth for all live decisions.
                 if order["side"] == "BUY":
@@ -2417,17 +2948,41 @@ def _execute_orders_from_fresh_server_preview(req: ExecuteRequest):
                 else:
                     _remove_sell_from_signal_trades(symbol)
             else:
-                results.append({
+                failed_result = {
                     "symbol": symbol,
+                    "side": order["side"],
+                    "qty": qty,
                     "status": "failed",
                     "error": str(data),
-                })
+                    "env": TRADING_ENV,
+                    "timestamp": datetime.now().isoformat(),
+                }
+                results.append(failed_result)
+                _log_order(failed_result)
+                _update_persisted_entry_intent(
+                    entry_intent_record,
+                    symbol=symbol,
+                    status="failed",
+                    error=str(data),
+                )
         except Exception as exc:
-            results.append({
+            error_result = {
                 "symbol": symbol,
+                "side": order["side"],
+                "qty": qty,
                 "status": "error",
                 "error": str(exc),
-            })
+                "env": TRADING_ENV,
+                "timestamp": datetime.now().isoformat(),
+            }
+            results.append(error_result)
+            _log_order(error_result)
+            _update_persisted_entry_intent(
+                entry_intent_record,
+                symbol=symbol,
+                status="error",
+                error=str(exc),
+            )
 
     # Persist the phantom list: prune any phantom that has adaptively
     # closed (frees its slot) and append this call's confirmed phantoms,
@@ -2587,7 +3142,7 @@ HTML_PAGE = """<!DOCTYPE html>
   <!-- Order Preview -->
   <div class="card full" id="orders-card">
     <h2>Order Preview <span class="env-badge" id="env-badge"></span></h2>
-    <div id="orders-content"><div style="color:var(--text2)">Click "Preview Orders" to load</div></div>
+    <div id="orders-content"><div style="color:var(--text2)">Loading gate status and order preview...</div></div>
     <div style="margin-top: 12px">
       <button class="btn btn-preview" onclick="previewOrders()">Preview Orders</button>
       <button class="btn btn-confirm" id="confirm-btn" onclick="executeOrders()" disabled>Confirm &amp; Send</button>
@@ -2971,12 +3526,6 @@ async function previewOrders() {
     badge.textContent = env;
     badge.className = env === 'REAL' ? 'env-badge env-real' : 'env-badge env-simulate';
 
-    if (data.orders.length === 0) {
-      const pendingBuyText = (data.pending_buy_count||0) ? ' Pending broker buys: ' + data.pending_buy_count + '.' : '';
-      $('#orders-content').innerHTML = '<div style="color:var(--text2)">No dashboard-sendable orders (signal date: ' + (data.signal_date||'—') + ').' + pendingBuyText + ' Cron may still have tradable candidates that Futu holdings or allocation settings make non-actionable.</div>';
-      return;
-    }
-
     const phantomCount = data.phantom_count || 0;
     const pendingBuyCount = data.pending_buy_count || 0;
     const slotsFree = Math.max(0, (data.max_positions||0) - (data.held_count||0) - phantomCount - pendingBuyCount);
@@ -2986,7 +3535,7 @@ async function previewOrders() {
     html += ' | Futu held: ' + data.held_count + '/' + data.max_positions;
     if (pendingBuyCount > 0) html += ' | Pending buys: ' + pendingBuyCount;
     if (phantomCount > 0) {
-      html += ' | <span title="WR-gate phantom slots (held, zero capital)">👻 phantom: ' + phantomCount + '</span>';
+      html += ' | <span title="Zero-capital phantom slots held by WR or expectancy gates">👻 phantom: ' + phantomCount + '</span>';
     }
     html += ' | Slots free: <strong' + (slotsFree===0 ? ' style="color:var(--red)"' : '') + '>' + slotsFree + '</strong>';
     html += ' | Signal: ' + (data.signal_date||'—');
@@ -2996,6 +3545,53 @@ async function previewOrders() {
     }
     html += '</div>';
 
+    // Expectancy gate status comes from the cron-owned heartbeat after the
+    // backend has matched it against the persisted live state and config.
+    const expectancy = data.expectancy_gate || {};
+    if (expectancy.enabled) {
+      const expectancyWarming = !expectancy.window_full;
+      const expectancyStopped = expectancy.gate_closed === true;
+      const expectancyPriority = expectancy.priority_override_active === true;
+      const expectancyColor = expectancyStopped
+        ? 'var(--red)'
+        : expectancyWarming
+        ? 'var(--orange)'
+        : expectancyPriority
+        ? 'var(--orange)'
+        : 'var(--green)';
+      const expectancyStatus = expectancyWarming
+        ? 'WARMING'
+        : expectancyStopped
+        ? 'STOP'
+        : expectancyPriority
+        ? 'PRIORITY OVERRIDE'
+        : 'OPEN';
+      const expectancyMean = expectancy.mean != null
+        ? Number(expectancy.mean).toFixed(4)
+        : '—';
+      const stopThreshold = expectancy.stop_threshold != null
+        ? Number(expectancy.stop_threshold).toFixed(4)
+        : '—';
+      const softThreshold = expectancy.soft_threshold != null
+        ? Number(expectancy.soft_threshold).toFixed(4)
+        : '—';
+      let expectancyHtml = '<div style="font-size:0.78em; margin-bottom:8px; padding:6px 8px; border-left:3px solid ' + expectancyColor + '; background:rgba(127,127,127,0.06)">';
+      expectancyHtml += '<strong>Expectancy gate</strong> ';
+      expectancyHtml += '<strong style="color:' + expectancyColor + '">' + expectancyStatus + '</strong>';
+      expectancyHtml += ' | mean=' + expectancyMean;
+      expectancyHtml += ' stop&lt;' + stopThreshold;
+      expectancyHtml += ' soft&lt;' + softThreshold;
+      expectancyHtml += ' | window=' + (expectancy.window || '—');
+      if (expectancyWarming) {
+        expectancyHtml += ' (cold-start ' + (expectancy.cold_start || '—') + ')';
+      }
+      expectancyHtml += ' | pending=' + (expectancy.open_pending != null ? expectancy.open_pending : '—');
+      expectancyHtml += ' fed=' + (expectancy.fed_this_run != null ? expectancy.fed_this_run : '—');
+      expectancyHtml += ' | closed episodes=' + (expectancy.closed_episodes != null ? expectancy.closed_episodes : '—');
+      expectancyHtml += '</div>';
+      html += expectancyHtml;
+    }
+
     // WR-gate (phantom) status panel — visible whenever the gate is
     // configured, so a quiet day still shows the sensor is alive.
     const wr = data.wr_gate || {};
@@ -3003,11 +3599,25 @@ async function previewOrders() {
       const s = wr.sensor || {};
       const sensorKnown = s.degrading != null;
       const degrading = sensorKnown ? s.degrading : null;
-      const activeColor = wr.active ? 'var(--red)' : 'var(--text2)';
+      const wrTriggered = wr.active && degrading === true;
+      const activeColor = wrTriggered
+        ? 'var(--red)'
+        : !sensorKnown || !s.window_full
+        ? 'var(--orange)'
+        : 'var(--green)';
+      const wrStatus = wrTriggered
+        ? 'PHANTOM'
+        : wr.active
+        ? 'monitoring'
+        : 'inactive';
       let wrHtml = '<div style="font-size:0.78em; margin-bottom:8px; padding:6px 8px; border-left:3px solid ' + activeColor + '; background:rgba(127,127,127,0.06)">';
       wrHtml += '<strong>WR-gate</strong> ';
-      wrHtml += '<span style="color:' + activeColor + '">' + (wr.active ? 'ACTIVE' : 'inactive') + '</span>';
-      wrHtml += ' (risk_score=' + (wr.risk_score != null ? wr.risk_score : '—') + ' vs activation≥' + (wr.activation_threshold != null ? wr.activation_threshold : '—') + ')';
+      wrHtml += '<span style="color:' + activeColor + '">' + wrStatus + '</span>';
+      if (wr.activation_mode === 'sensor_only') {
+        wrHtml += ' (sensor-only)';
+      } else {
+        wrHtml += ' (risk_score=' + (wr.risk_score != null ? wr.risk_score : '—') + ' vs activation≥' + (wr.activation_threshold != null ? wr.activation_threshold : '—') + ')';
+      }
       if (sensorKnown) {
         wrHtml += ' | sensor: ' + (degrading ? '<strong style="color:var(--red)">degrading</strong>' : 'healthy');
         wrHtml += ' (ema=' + (s.ema != null ? s.ema.toFixed(3) : '—') + ' sma=' + (s.sma != null ? s.sma.toFixed(3) : '—') + ' be=' + (s.breakeven != null ? s.breakeven.toFixed(3) : '—');
@@ -3030,6 +3640,15 @@ async function previewOrders() {
     html += 'Cron supplies every tradable candidate. This table is the single settings + Futu allocation pass that decides which orders are sendable.';
     html += '</div>';
 
+    if (data.orders.length === 0) {
+      const pendingBuyText = pendingBuyCount
+        ? ' Pending broker buys: ' + pendingBuyCount + '.'
+        : '';
+      html += '<div style="color:var(--text2)">No dashboard-sendable orders (signal date: ' + (data.signal_date||'—') + ').' + pendingBuyText + ' Cron may still have tradable candidates that Futu holdings or allocation settings make non-actionable.</div>';
+      $('#orders-content').innerHTML = html;
+      return;
+    }
+
     html += '<div class="order-row order-header"><span>Side</span><span>Symbol</span><span>Bucket</span><span>Rank</span><span>Qty</span><span>Ref Price</span><span>TP%</span><span>SL%</span></div>';
     for (const o of data.orders) {
       const sideClass = o.side === 'BUY' ? 'positive' : 'negative';
@@ -3041,7 +3660,7 @@ async function previewOrders() {
       const rankDisplay = o.exit_reason === 'max_hold'
         ? `max ${o.bars_held}/${o.max_hold}`
         : (o.dollar_volume_rank != null) ? '#' + o.dollar_volume_rank : '—';
-      const isPhantom = o.status === 'wr_gate_phantom';
+      const isPhantom = o.status === 'wr_gate_phantom' || o.status === 'expectancy_gate_phantom';
       const skipped = o.status === 'bucket_cap' || o.status === 'slot_full' || o.status === 'risk_score_stop' || o.status === 'min_hold_block' || o.status === 'price_unavailable' || isPhantom;
       const rowStyle = skipped ? ' style="opacity:0.45"' : '';
       const statusDetail = o.status === 'min_hold_block' && o.bars_held != null && o.min_hold != null
@@ -3143,7 +3762,14 @@ async function placeTPSL() {
   btn.textContent = 'Place TP/SL';
 }
 
-load();
+// Load the mechanical gate panels on first paint. The preview remains
+// read-only; order submission still requires the explicit confirm action.
+async function initializeDashboard() {
+  await load();
+  await previewOrders();
+}
+
+initializeDashboard();
 </script>
 </body>
 </html>

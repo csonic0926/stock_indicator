@@ -10,7 +10,11 @@ from typing import Any
 
 import pandas
 
-from stock_indicator import adaptive_tp_sl_virtual_trade_history, dashboard
+from stock_indicator import (
+    adaptive_tp_sl_virtual_trade_history,
+    dashboard,
+    live_expectancy_gate,
+)
 from stock_indicator.futu_trade_metadata import parse_futu_order_remark
 
 
@@ -427,6 +431,37 @@ def test_preview_orders_allows_buy_orders_when_risk_score_is_below_stop(
     assert "status" not in order
 
 
+def test_preview_orders_ignores_closed_zero_quantity_futu_rows(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Same-day closed rows must not occupy slots or count as holdings."""
+    config_path, log_directory = _write_dashboard_fixture(
+        tmp_path,
+        signal_date="2026-05-15",
+        risk_score=50,
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: FakeTradeContext(
+            positions=[{"code": "US.CLOSED", "qty": 0}],
+        ),
+    )
+
+    preview = dashboard.api_preview_orders()
+
+    assert preview["held_count"] == 0
+    assert preview["orders"][0]["symbol"] == "AAA"
+    assert "status" not in preview["orders"][0]
+
+
 def test_preview_does_not_duplicate_pending_broker_buy(
     tmp_path: Path,
     monkeypatch,
@@ -464,6 +499,32 @@ def test_preview_does_not_duplicate_pending_broker_buy(
 
     assert preview["orders"] == []
     assert preview["pending_buy_count"] == 1
+
+
+def test_submit_failed_buy_is_not_treated_as_pending() -> None:
+    """A rejected Futu BUY must remain eligible for pre-open retry."""
+    order_data = pandas.DataFrame(
+        [
+            {
+                "code": "US.OKLO",
+                "trd_side": "BUY",
+                "order_status": "SUBMIT_FAILED",
+                "order_type": "MARKET",
+                "remark": "si2|s=h|tp=784|sl=335|ms=1|ds=1|rr=0",
+            },
+            {
+                "code": "US.BE",
+                "trd_side": "BUY",
+                "order_status": "SUBMITTED",
+                "order_type": "MARKET",
+                "remark": "si2|s=h|tp=784|sl=335|ms=1|ds=1|rr=0",
+            },
+        ]
+    )
+
+    pending_symbols = dashboard._load_pending_buy_order_symbols(order_data)
+
+    assert pending_symbols == {"BE"}
 
 
 def test_futu_positions_include_bucket_metadata(monkeypatch) -> None:
@@ -1212,7 +1273,9 @@ def test_preview_orders_adds_max_hold_sell_order(
             "bucket": "fish_head_b30_35",
             "strategy_id": "fish_head_b30_35",
             "exit_reason": "max_hold",
-            "bars_held": 11,
+            # Entry bar is zero, matching the simulator's
+            # bars_since_anchor counter.
+            "bars_held": 10,
             "max_hold": 10,
             "entry_source": "futu_history_deals",
         }
@@ -1614,7 +1677,8 @@ def test_preview_orders_blocks_sell_when_min_hold_not_satisfied(
     assert blocked_order["symbol"] == "UNH"
     assert blocked_order["status"] == "min_hold_block"
     assert blocked_order["qty"] == 0
-    assert blocked_order["bars_held"] == 1
+    # The entry bar is zero; the first subsequent trading bar is one.
+    assert blocked_order["bars_held"] == 0
     assert blocked_order["min_hold"] == 5
     assert blocked_order["entry_date"] == "2026-05-26"
     assert "min_hold=5" in blocked_order["skip_reason"]
@@ -2070,6 +2134,196 @@ def test_preview_no_phantom_when_not_degrading(
     assert order.get("status") != "wr_gate_phantom"
 
 
+def test_preview_wr_gate_uses_sensor_without_risk_score(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Production-style WR config must phantom directly from its sensor."""
+
+    config_path, log_directory = _write_phantom_fixture(
+        tmp_path,
+        signal_date="2026-05-15",
+        risk_score=30,
+        wr_degrading=True,
+    )
+    config_document = json.loads(config_path.read_text(encoding="utf-8"))
+    config_document.pop("risk_score_gate")
+    config_document["ft_family_wr_gate"].pop(
+        "risk_score_activation_threshold"
+    )
+    config_path.write_text(
+        json.dumps(config_document),
+        encoding="utf-8",
+    )
+    (tmp_path / "historical_risk_scores.csv").unlink()
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    _patch_phantom_paths(monkeypatch, tmp_path)
+
+    preview = dashboard.api_preview_orders()
+
+    assert preview["risk_score_gate"]["status"] == "off"
+    order = preview["orders"][0]
+    assert order["status"] == "wr_gate_phantom"
+    assert order["qty"] == 0
+    assert "sensor-only" in order["skip_reason"]
+    assert preview["wr_gate"] == {
+        "configured": True,
+        "active": True,
+        "activation_mode": "sensor_only",
+        "risk_score": None,
+        "activation_threshold": None,
+        "sensor": {
+            "ema": 0.48,
+            "sma": 0.6,
+            "breakeven": 0.45,
+            "degrading": True,
+            "window": "12/12",
+            "window_full": True,
+            "open_pending": 1,
+            "fed_this_run": 0,
+        },
+        "open_phantoms": [],
+        "phantomed_today": ["PHX"],
+    }
+
+
+def test_dashboard_html_renders_mechanical_gate_status() -> None:
+    """The order preview must expose both mechanical gate panels."""
+
+    assert "<strong>Expectancy gate</strong>" in dashboard.HTML_PAGE
+    assert "WARMING" in dashboard.HTML_PAGE
+    assert "PRIORITY OVERRIDE" in dashboard.HTML_PAGE
+    assert "(sensor-only)" in dashboard.HTML_PAGE
+    assert "expectancy_gate_phantom" in dashboard.HTML_PAGE
+    assert "await previewOrders();" in dashboard.HTML_PAGE
+    assert "initializeDashboard();" in dashboard.HTML_PAGE
+
+
+def test_preview_applies_expectancy_priority_and_zero_capital_phantom(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """The cron heartbeat reorders one daily contest and Tier 1 preserves
+    the winning slot as a zero-capital phantom."""
+
+    signal_date = "2026-05-15"
+    config_path = tmp_path / "multi_bucket_production.json"
+    config_path.write_text(
+        json.dumps({
+            "max_position_count": 1,
+            "starting_cash": 10_000,
+            "margin": 1.0,
+            "withdraw": 0,
+            "expectancy_gate": {
+                "enabled": True,
+                "window": 2,
+                "baseline_mean": 0.0,
+                "baseline_sigma": 0.1,
+                "sigma_multiplier": 1.0,
+                "cold_start": "open",
+                "priority_override": {
+                    "enabled": True,
+                    "sigma_multiplier": 0.5,
+                    "priorities": {
+                        "fish_head_production": 2,
+                        "fish_tail_production": 1,
+                    },
+                },
+            },
+            "adaptive_tp_sl": {"window": 2},
+            "buckets": [
+                {
+                    "label": "fish_head_production",
+                    "strategy_id": "fish_head_vacuum_turn",
+                    "dollar_volume_filter": "dollar_volume=Top5",
+                    "priority": 1,
+                },
+                {
+                    "label": "fish_tail_production",
+                    "strategy_id": "fish_tail_blow_off_top",
+                    "dollar_volume_filter": "dollar_volume=Top5",
+                    "priority": 2,
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+    log_directory = tmp_path / "logs"
+    log_directory.mkdir()
+    (log_directory / f"{signal_date}.log").write_text(
+        "[EXPECTANCY_GATE_SENSOR] status=ready mean=-0.200000 "
+        "stop_threshold=-0.100000 soft_threshold=-0.050000 "
+        "gate_closed=True priority_override_active=True window=2/2 "
+        "window_full=True open_pending=0 fed_this_run=0 "
+        "closed_episodes=0 expectancy_gated_trades=0 "
+        "priority_override_entries=0\n"
+        "[FROZEN_TP_SL] entry_date=2026-05-15 "
+        "bucket=fish_head_production strategy_id=fish_head_vacuum_turn "
+        "symbol=HEAD dollar_volume_rank=0 tp_pct=0.050000 sl_pct=0.000000 "
+        "rolling_mp=0.040000 slope_60=0.1 near_delta=0.1 "
+        "fuel_drawdown=None min_hold_tp=1 disable_sl_trigger=True "
+        "max_hold=7 wr_degrading=False\n"
+        "[FROZEN_TP_SL] entry_date=2026-05-15 "
+        "bucket=fish_tail_production strategy_id=fish_tail_blow_off_top "
+        "symbol=TAIL dollar_volume_rank=0 tp_pct=0.050000 sl_pct=0.000000 "
+        "rolling_mp=0.040000 slope_60=0.1 near_delta=0.1 "
+        "fuel_drawdown=None min_hold_tp=1 disable_sl_trigger=True "
+        "max_hold=7 wr_degrading=False\n",
+        encoding="utf-8",
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    _patch_phantom_paths(monkeypatch, tmp_path)
+    expectancy_state_path = (
+        tmp_path / "live_state" / "expectancy_gate_state.json"
+    )
+    expectancy_gate_config = (
+        live_expectancy_gate.parse_live_expectancy_gate_config(
+            json.loads(config_path.read_text(encoding="utf-8"))
+        )
+    )
+    assert expectancy_gate_config is not None
+    expectancy_state_document = (
+        live_expectancy_gate.empty_expectancy_gate_state_document(
+            expectancy_gate_config
+        )
+    )
+    expectancy_state_document["rolling_outcomes"] = [
+        {"percentage_change": -0.2},
+        {"percentage_change": -0.2},
+    ]
+    expectancy_state_document["last_evaluation_date"] = signal_date
+    live_expectancy_gate.save_expectancy_gate_state_atomically(
+        expectancy_state_path,
+        expectancy_state_document,
+        expectancy_gate_config,
+    )
+    monkeypatch.setattr(
+        dashboard,
+        "EXPECTANCY_GATE_STATE_PATH",
+        expectancy_state_path,
+    )
+
+    preview = dashboard.api_preview_orders()
+
+    assert preview["expectancy_gate"]["status"] == "closed"
+    assert preview["orders"][0]["symbol"] == "TAIL"
+    assert preview["orders"][0]["status"] == "expectancy_gate_phantom"
+    assert preview["orders"][0]["qty"] == 0
+    assert preview["orders"][0]["expectancy_priority_override"] is True
+    assert preview["orders"][1]["symbol"] == "HEAD"
+    assert preview["orders"][1]["status"] == "slot_full"
+
+
 def test_phantom_still_open_detects_tp_close_and_open_hold(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -2229,6 +2483,118 @@ def test_execute_records_phantom_and_places_no_order(
     assert len(dashboard._load_phantom_positions()) == 1
 
 
+def test_execute_records_funded_buy_in_expectancy_sensor_before_broker(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A funded confirmed allocation enters the sensor before Futu submit."""
+
+    config_document = {
+        "max_position_count": 1,
+        "expectancy_gate": {
+            "enabled": True,
+            "window": 2,
+            "baseline_mean": 0.0,
+            "baseline_sigma": 0.1,
+            "sigma_multiplier": 1.0,
+            "cold_start": "open",
+        },
+        "buckets": [{"label": "fish_head_production"}],
+    }
+    config_path = tmp_path / "multi_bucket_production.json"
+    config_path.write_text(json.dumps(config_document), encoding="utf-8")
+    log_directory = tmp_path / "logs"
+    log_directory.mkdir()
+    (log_directory / "2026-05-15.log").write_text(
+        "[multi_bucket_daily_signal mode=live]\n",
+        encoding="utf-8",
+    )
+    state_path = tmp_path / "live_state" / "expectancy_gate_state.json"
+    gate_config = live_expectancy_gate.parse_live_expectancy_gate_config(
+        config_document
+    )
+    assert gate_config is not None
+    expectancy_state_document = (
+        live_expectancy_gate.empty_expectancy_gate_state_document(
+            gate_config
+        )
+    )
+    expectancy_state_document["last_evaluation_date"] = "2026-05-15"
+    live_expectancy_gate.save_expectancy_gate_state_atomically(
+        state_path, expectancy_state_document, gate_config
+    )
+    monkeypatch.setattr(dashboard, "PRODUCTION_CONFIG_PATH", config_path)
+    monkeypatch.setattr(dashboard, "LOGS_DIRECTORY", log_directory)
+    monkeypatch.setattr(dashboard, "EXPECTANCY_GATE_STATE_PATH", state_path)
+    monkeypatch.setattr(
+        dashboard,
+        "_load_risk_score_gate_state",
+        lambda _signal_date: {"status": "open"},
+    )
+    operation_order: list[str] = []
+
+    class _BuyContext(FakeTradeContext):
+        def place_order(self, **_keyword_arguments: Any):
+            operation_order.append("broker_submit")
+            return 0, pandas.DataFrame([{"order_id": "BUY-1"}])
+
+    monkeypatch.setattr(
+        dashboard, "_get_futu_trd_ctx", lambda: _BuyContext()
+    )
+    monkeypatch.setattr(dashboard, "_get_trd_env", lambda: object())
+    futu_module = types.SimpleNamespace(
+        TrdSide=types.SimpleNamespace(BUY="BUY", SELL="SELL"),
+        OrderType=types.SimpleNamespace(MARKET="MARKET"),
+        ModifyOrderOp=types.SimpleNamespace(CANCEL="CANCEL"),
+    )
+    monkeypatch.setitem(sys.modules, "futu", futu_module)
+    order = {
+        "side": "BUY",
+        "symbol": "AAA",
+        "qty": 5,
+        "bucket": "fish_head_production",
+        "strategy_id": "fish_head_vacuum_turn",
+        "signal_date": "2026-05-15",
+        "tp_pct": 0.05,
+        "sl_pct": 0.03,
+        "min_hold_tp": 1,
+        "min_hold_sl": 1,
+        "disable_sl_trigger": True,
+        "max_hold": 7,
+        "expectancy_gated": False,
+        "expectancy_priority_override": False,
+    }
+    monkeypatch.setattr(
+        dashboard,
+        "api_preview_orders",
+        lambda: {"orders": [dict(order)]},
+    )
+    original_record_function = (
+        dashboard.live_expectancy_gate.record_accepted_trades_at_path
+    )
+
+    def record_then_mark(**keyword_arguments: Any) -> int:
+        operation_order.append("sensor_acceptance")
+        return original_record_function(**keyword_arguments)
+
+    monkeypatch.setattr(
+        dashboard.live_expectancy_gate,
+        "record_accepted_trades_at_path",
+        record_then_mark,
+    )
+
+    response = dashboard.api_execute_orders(
+        dashboard.ExecuteRequest(orders=[order])
+    )
+
+    assert response["results"][0]["status"] == "sent"
+    assert operation_order == ["sensor_acceptance", "broker_submit"]
+    state_document = live_expectancy_gate.load_expectancy_gate_state(
+        state_path, gate_config
+    )
+    assert state_document["pending_trades"][0]["symbol"] == "AAA"
+
+
 # TODO: review
 def test_successful_dashboard_buy_does_not_write_adaptive_tp_sl_history(
     tmp_path: Path,
@@ -2330,6 +2696,88 @@ def test_successful_dashboard_buy_does_not_write_adaptive_tp_sl_history(
     assert adaptive_state_path.read_text(
         encoding="utf-8"
     ) == original_adaptive_state_text
+
+
+def test_failed_real_buy_persists_intent_for_pre_open_retry(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A buying-power rejection must retain the confirmed BUY intention."""
+    log_directory = tmp_path / "logs"
+    log_directory.mkdir()
+    (log_directory / "2026-05-15.log").write_text(
+        "[multi_bucket_daily_signal] eval_date=2026-05-15\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "multi_bucket_production.json"
+    config_path.write_text(
+        json.dumps({"max_position_count": 6}),
+        encoding="utf-8",
+    )
+    _patch_dashboard_paths(
+        monkeypatch,
+        config_path=config_path,
+        log_directory=log_directory,
+        repository_root=tmp_path,
+    )
+    _patch_phantom_paths(monkeypatch, tmp_path)
+
+    class RejectedBuyTradeContext(FakeTradeContext):
+        """Reject one market BUY with the incident's broker error."""
+
+        def place_order(self, **order_arguments: Any):
+            return 1, "Insufficient buying power"
+
+    futu_module = types.SimpleNamespace(
+        TrdSide=types.SimpleNamespace(BUY="BUY", SELL="SELL"),
+        OrderType=types.SimpleNamespace(MARKET="MARKET"),
+        ModifyOrderOp=types.SimpleNamespace(CANCEL="CANCEL"),
+    )
+    monkeypatch.setitem(sys.modules, "futu", futu_module)
+    monkeypatch.setattr(
+        dashboard,
+        "_get_futu_trd_ctx",
+        lambda: RejectedBuyTradeContext(),
+    )
+    monkeypatch.setattr(dashboard, "_get_trd_env", lambda: object())
+    monkeypatch.setattr(dashboard, "TRADING_ENV", "REAL")
+    monkeypatch.setattr(
+        dashboard,
+        "_load_risk_score_gate_state",
+        lambda signal_date_text: {"status": "open"},
+    )
+    canonical_buy_order = {
+        "side": "BUY",
+        "symbol": "OKLO",
+        "qty": 108,
+        "bucket": "fish_head_production",
+        "strategy_id": "fish_head_vacuum_turn",
+        "tp_pct": 0.0784,
+        "sl_pct": 0.0335,
+        "min_hold_sl": 1,
+        "disable_sl_trigger": True,
+        "reset_hold_on_reentry_signal": False,
+    }
+    monkeypatch.setattr(
+        dashboard,
+        "api_preview_orders",
+        lambda: {"orders": [dict(canonical_buy_order)]},
+    )
+
+    response = dashboard.api_execute_orders(
+        dashboard.ExecuteRequest(orders=[dict(canonical_buy_order)])
+    )
+
+    assert response["results"][0]["status"] == "failed"
+    intent_state_path = (
+        tmp_path / "live_state" / "pending_entry_intents.json"
+    )
+    intent_state = json.loads(intent_state_path.read_text(encoding="utf-8"))
+    persisted_intent = intent_state["intents"][0]
+    assert persisted_intent["symbol"] == "OKLO"
+    assert persisted_intent["requested_qty"] == 108
+    assert persisted_intent["status"] == "failed"
+    assert persisted_intent["error"] == "Insufficient buying power"
 
 
 def test_execute_rejects_order_not_in_fresh_server_preview(monkeypatch) -> None:

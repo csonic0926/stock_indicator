@@ -85,3 +85,6 @@ data/backtest_universe_alpha_vantage/
 # Live runtime state; keep local per machine.
 data/live_state/*
 !data/live_state/.gitkeep
+
+# Secret: system causal core (local only, never commit)
+causal_core/

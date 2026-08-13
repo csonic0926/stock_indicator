@@ -50,8 +50,12 @@ strategy names. The stop loss specifies the fractional decline that triggers an
 exit on the next day's open, and the boolean flag controls whether individual
 trade details are printed.
 
-The simulation report lists the maximum drawdown alongside other metrics. This
-percentage indicates the greatest decline from any previous portfolio peak.
+The simulation report lists maximum drawdown, Sharpe, and Sortino alongside
+the other metrics. Sharpe and Sortino use daily mark-to-market portfolio
+returns with a zero-percent risk-free or minimum acceptable return and are
+annualized with 252 trading days. External year-end withdrawals do not count
+as investment losses. A positive-return series with no measurable volatility
+or downside is shown as `inf`.
 
 The previous `start_ftd_ema_sma_cross` command has been removed.
 Use `start_simulate` with `ftd_ema_sma_cross` for both the buying and

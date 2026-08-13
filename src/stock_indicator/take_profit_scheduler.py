@@ -38,8 +38,6 @@ class TakeProfitCheckpoint:
 
 
 WEEKDAY_CHECKPOINTS = (
-    TakeProfitCheckpoint("pre_open", time(9, 20)),
-    TakeProfitCheckpoint("open_plus_1", time(9, 31)),
     TakeProfitCheckpoint("open_plus_3", time(9, 33)),
     TakeProfitCheckpoint("open_plus_5", time(9, 35)),
     TakeProfitCheckpoint("open_plus_10", time(9, 40)),
@@ -105,9 +103,10 @@ def run_due_take_profit_reconciliation(
 ) -> bool:
     """Run a due checkpoint once and return whether placement was invoked.
 
-    A launch after sleep or shutdown sees the latest missed checkpoint and
-    executes it immediately.  Later checkpoints deliberately re-verify broker
-    coverage, while ``place_tp_sl`` itself prevents duplicate live orders.
+    A launch after sleep or shutdown sees the latest missed post-open
+    checkpoint and executes it immediately. Later checkpoints deliberately
+    re-verify broker coverage, while ``place_tp_sl`` itself prevents duplicate
+    live orders. TP/SL placement never runs before the regular session opens.
     """
     evaluation_time = current_time or datetime.now(tz=NEW_YORK_TIME_ZONE)
     if evaluation_time.tzinfo is None:

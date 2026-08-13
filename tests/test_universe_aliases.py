@@ -79,8 +79,8 @@ def test_committed_multi_bucket_configs_select_expected_universes() -> None:
             assert config_document[config_key] == expected_value
 
 
-def test_production_config_uses_old_universe_risk_priority_path() -> None:
-    """Production cron config should promote the tested old-universe path."""
+def test_production_config_uses_expectancy_priority_path() -> None:
+    """Production cron config should use the mechanical priority sensor."""
 
     config_document = json.loads(
         (DATA_DIRECTORY / "multi_bucket_production.json").read_text(
@@ -104,14 +104,34 @@ def test_production_config_uses_old_universe_risk_priority_path() -> None:
     assert bucket_by_label["fish_tail_squeeze"]["priority"] == 1
     assert bucket_by_label["fish_tail_production"]["priority"] == 2
     assert bucket_by_label["fish_head_b30_35"]["priority"] == 3
-    assert config_document["risk_score_priority_overrides"] == {
-        "scores": [25, 50],
-        "priorities": {
-            "fish_head_production": 1,
-            "fish_tail_squeeze": 2,
-            "fish_tail_production": 3,
-            "fish_head_b30_35": 4,
+    assert "risk_score_priority_overrides" not in config_document
+    assert "risk_score_gate" not in config_document
+    assert config_document["expectancy_gate"] == {
+        "enabled": True,
+        "window": 20,
+        "baseline_mean": 0.0087,
+        "baseline_sigma": 0.013,
+        "sigma_multiplier": 3.0,
+        "cold_start": "open",
+        "priority_override": {
+            "enabled": True,
+            "sigma_multiplier": 1.5,
+            "priorities": {
+                "fish_head_production": 1,
+                "fish_tail_squeeze": 2,
+                "fish_tail_production": 3,
+                "fish_head_b30_35": 4,
+            },
         },
+    }
+    assert config_document["ft_family_wr_gate"] == {
+        "sensor_bucket": "fish_tail_production",
+        "gated_buckets": [
+            "fish_tail_production",
+            "fish_tail_squeeze",
+        ],
+        "window": 12,
+        "curve": "wr_cross",
     }
     assert config_document["symbol_seasoning"] == {
         "enabled": True,

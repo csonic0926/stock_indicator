@@ -3,18 +3,56 @@
 
 from __future__ import annotations
 
+import contextlib
 import math
+import statistics
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List
+from typing import Callable, Dict, Iterable, Iterator, List
 
 import pandas
 
 
-def calc_commission(shares: float, price: float, is_sell: bool = False) -> float:
-    """Calculate trading fees for a Futu HK US stock trade.
+TRADING_DAYS_PER_YEAR = 252.0
 
-    Includes broker commission, platform fee, settlement fee, and
-    sell-only regulatory fees (SEC fee, TAF).
+
+# ---------------------------------------------------------------------------
+# US regulatory pass-through fees
+# ---------------------------------------------------------------------------
+# These are statutory charges levied by the SEC and FINRA, not by the broker.
+# Every US-market broker passes them through at the same rate, so they are
+# shared by all broker cost models below and cancel out in any broker-to-broker
+# comparison.
+#
+# The whole backtest window is priced with the schedule in force today rather
+# than with a date-indexed history of past rates. That makes a backtest answer
+# "what would this system cost to run under today's fee schedule", which is the
+# question a broker decision actually turns on.
+
+US_SEC_FEE_RATE = 0.0
+"""SEC Section 31 fee as a fraction of trade value, charged on sells only.
+
+The SEC set this rate to zero effective 2025-05-14; the last non-zero
+published rate was ``0.0000278``. The rate is reset each federal fiscal year,
+so restore the published value here if a non-zero rate is reinstated.
+"""
+
+US_SEC_FEE_MINIMUM = 0.01
+"""Minimum SEC fee per execution, applied only when the rate is non-zero."""
+
+US_FINRA_TAF_PER_SHARE = 0.000166
+"""FINRA trading activity fee per share, charged on sells only."""
+
+US_FINRA_TAF_MINIMUM = 0.01
+US_FINRA_TAF_MAXIMUM = 8.30
+
+US_FINRA_CAT_FEE_PER_SHARE = 0.000046
+"""FINRA Consolidated Audit Trail fee per share for NMS stocks, both sides."""
+
+
+def calculate_us_regulatory_fees(
+    shares: float, price: float, is_sell: bool
+) -> float:
+    """Return the statutory US fees for one side of a trade.
 
     Parameters
     ----------
@@ -23,38 +61,324 @@ def calc_commission(shares: float, price: float, is_sell: bool = False) -> float
     price:
         Price per share.
     is_sell:
-        Whether this is a sell (exit) trade.  SEC regulatory fee and
-        FINRA trading activity fee apply only to sells.
+        Whether this is a sell (exit) trade. The SEC fee and the FINRA
+        trading activity fee apply only to sells; the CAT fee applies to
+        both sides.
+
+    Returns
+    -------
+    float
+        Total regulatory fees charged for this trade side.
+    """
+    regulatory_fees = shares * US_FINRA_CAT_FEE_PER_SHARE
+    if is_sell:
+        if US_SEC_FEE_RATE > 0.0:
+            regulatory_fees += max(
+                US_SEC_FEE_MINIMUM, shares * price * US_SEC_FEE_RATE
+            )
+        regulatory_fees += min(
+            US_FINRA_TAF_MAXIMUM,
+            max(US_FINRA_TAF_MINIMUM, shares * US_FINRA_TAF_PER_SHARE),
+        )
+    return regulatory_fees
+
+
+# ---------------------------------------------------------------------------
+# Per-broker commission schedules
+# ---------------------------------------------------------------------------
+# Each function returns the total fee for ONE side of a trade, inclusive of the
+# shared regulatory pass-through above. Rates verified 2026-08-08 against
+# futuhk.com (schedule dated 2025-07-03) and interactivebrokers.com.hk.
+
+FUTU_HK_COMMISSION_PER_SHARE = 0.0049
+FUTU_HK_COMMISSION_MINIMUM = 0.99
+FUTU_HK_PLATFORM_FEE_PER_SHARE = 0.005
+FUTU_HK_PLATFORM_FEE_MINIMUM = 1.00
+FUTU_HK_SETTLEMENT_FEE_PER_SHARE = 0.003
+FUTU_HK_COMBINED_CAP_TRADE_VALUE_FRACTION = 0.005
+FUTU_HK_MARGIN_INTEREST_ANNUAL_RATE = 0.048
+
+
+def calculate_futu_hk_commission(
+    shares: float, price: float, is_sell: bool = False
+) -> float:
+    """Return Futu Securities (HK) fees for one side of a US stock trade.
+
+    Futu charges the broker commission, the platform fee and the settlement
+    fee separately, which totals ``0.0129`` per share before the regulatory
+    pass-through.
+    """
+    trade_value = shares * price
+    broker_commission = max(
+        FUTU_HK_COMMISSION_MINIMUM, shares * FUTU_HK_COMMISSION_PER_SHARE
+    )
+    platform_fee = max(
+        FUTU_HK_PLATFORM_FEE_MINIMUM, shares * FUTU_HK_PLATFORM_FEE_PER_SHARE
+    )
+    # Commission plus platform fee is capped at a fraction of trade value, but
+    # the two per-order minimums still apply below that cap.
+    combined_cap = FUTU_HK_COMBINED_CAP_TRADE_VALUE_FRACTION * trade_value
+    broker_and_platform = min(
+        broker_commission + platform_fee,
+        max(
+            combined_cap,
+            FUTU_HK_COMMISSION_MINIMUM + FUTU_HK_PLATFORM_FEE_MINIMUM,
+        ),
+    )
+    settlement_fee = shares * FUTU_HK_SETTLEMENT_FEE_PER_SHARE
+    return (
+        broker_and_platform
+        + settlement_fee
+        + calculate_us_regulatory_fees(shares, price, is_sell)
+    )
+
+
+def calculate_futu_hk_legacy_commission(
+    shares: float, price: float, is_sell: bool = False
+) -> float:
+    """Return Futu HK fees using the regulatory rates frozen before 2026-08-08.
+
+    Kept so earlier result files stay reproducible. It applies a superseded
+    SEC rate, a superseded FINRA trading activity fee, and no CAT fee. Use
+    :func:`calculate_futu_hk_commission` for any new work.
+    """
+    trade_value = shares * price
+    broker_commission = max(
+        FUTU_HK_COMMISSION_MINIMUM, shares * FUTU_HK_COMMISSION_PER_SHARE
+    )
+    platform_fee = max(
+        FUTU_HK_PLATFORM_FEE_MINIMUM, shares * FUTU_HK_PLATFORM_FEE_PER_SHARE
+    )
+    combined_cap = FUTU_HK_COMBINED_CAP_TRADE_VALUE_FRACTION * trade_value
+    broker_and_platform = min(
+        broker_commission + platform_fee,
+        max(
+            combined_cap,
+            FUTU_HK_COMMISSION_MINIMUM + FUTU_HK_PLATFORM_FEE_MINIMUM,
+        ),
+    )
+    settlement_fee = shares * FUTU_HK_SETTLEMENT_FEE_PER_SHARE
+    sec_fee = 0.0
+    taf_fee = 0.0
+    if is_sell:
+        sec_fee = max(0.01, trade_value * 0.0000206)
+        taf_fee = min(9.79, max(0.01, shares * 0.000195))
+    return broker_and_platform + settlement_fee + sec_fee + taf_fee
+
+
+IBKR_FIXED_COMMISSION_PER_SHARE = 0.005
+IBKR_FIXED_COMMISSION_MINIMUM = 1.00
+IBKR_FIXED_MAXIMUM_TRADE_VALUE_FRACTION = 0.01
+IBKR_MARGIN_INTEREST_ANNUAL_RATE = 0.0513
+
+
+def calculate_ibkr_fixed_commission(
+    shares: float, price: float, is_sell: bool = False
+) -> float:
+    """Return Interactive Brokers (HK) Fixed-plan fees for one trade side.
+
+    The Fixed per-share rate already bundles exchange and clearing fees, so
+    unlike Futu there is no separate settlement charge. Only the regulatory
+    pass-through is added on top.
+    """
+    trade_value = shares * price
+    commission = min(
+        max(
+            IBKR_FIXED_COMMISSION_MINIMUM,
+            shares * IBKR_FIXED_COMMISSION_PER_SHARE,
+        ),
+        IBKR_FIXED_MAXIMUM_TRADE_VALUE_FRACTION * trade_value,
+    )
+    return commission + calculate_us_regulatory_fees(shares, price, is_sell)
+
+
+IBKR_TIERED_COMMISSION_PER_SHARE = 0.0035
+"""Tiered rate for the first 300,000 US shares per month.
+
+This system trades far below that break, so the higher-volume tiers are not
+modelled.
+"""
+
+IBKR_TIERED_COMMISSION_MINIMUM = 0.35
+IBKR_TIERED_MAXIMUM_TRADE_VALUE_FRACTION = 0.005
+IBKR_TIERED_CLEARING_FEE_PER_SHARE = 0.00020
+IBKR_TIERED_LIQUIDITY_REMOVING_FEE_PER_SHARE = 0.0030
+"""Assumed exchange fee for taking liquidity, per share.
+
+Unlike every other constant in this module this one is an estimate, not a
+published rate: the actual charge varies by execution venue. It is applied to
+every fill because this system submits market orders, which always execute
+against a resting bid or offer and therefore always remove liquidity.
+"""
+
+
+def calculate_ibkr_tiered_commission(
+    shares: float, price: float, is_sell: bool = False
+) -> float:
+    """Return Interactive Brokers (HK) Tiered-plan fees for one trade side.
+
+    Tiered quotes a lower commission but passes exchange and clearing fees
+    through separately. For a market-order system the liquidity-removing
+    exchange fee more than erases the commission saving, which makes Tiered
+    more expensive than Fixed here.
+    """
+    trade_value = shares * price
+    commission = min(
+        max(
+            IBKR_TIERED_COMMISSION_MINIMUM,
+            shares * IBKR_TIERED_COMMISSION_PER_SHARE,
+        ),
+        IBKR_TIERED_MAXIMUM_TRADE_VALUE_FRACTION * trade_value,
+    )
+    venue_fees = shares * (
+        IBKR_TIERED_LIQUIDITY_REMOVING_FEE_PER_SHARE
+        + IBKR_TIERED_CLEARING_FEE_PER_SHARE
+    )
+    return (
+        commission
+        + venue_fees
+        + calculate_us_regulatory_fees(shares, price, is_sell)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Broker cost model registry
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BrokerCostModel:
+    """A broker's trading cost schedule.
+
+    Attributes
+    ----------
+    name:
+        Identifier used by the ``broker_cost_model`` configuration field.
+    description:
+        Human-readable summary shown in simulation output.
+    commission_function:
+        Callable taking ``(shares, price, is_sell)`` and returning the total
+        fee for one side of a trade.
+    margin_interest_annual_rate:
+        Annual rate charged on a margin loan, as a decimal fraction.
+    """
+
+    name: str
+    description: str
+    commission_function: Callable[[float, float, bool], float]
+    margin_interest_annual_rate: float
+
+
+BROKER_COST_MODELS: Dict[str, BrokerCostModel] = {
+    "futu_hk": BrokerCostModel(
+        name="futu_hk",
+        description=(
+            "Futu Securities (HK): 0.0049/share commission (min 0.99) + "
+            "0.005/share platform fee (min 1.00) + 0.003/share settlement; "
+            "margin 4.80%"
+        ),
+        commission_function=calculate_futu_hk_commission,
+        margin_interest_annual_rate=FUTU_HK_MARGIN_INTEREST_ANNUAL_RATE,
+    ),
+    "futu_hk_legacy": BrokerCostModel(
+        name="futu_hk_legacy",
+        description=(
+            "Futu Securities (HK) with pre-2026-08-08 regulatory rates; "
+            "reproduces earlier result files only"
+        ),
+        commission_function=calculate_futu_hk_legacy_commission,
+        margin_interest_annual_rate=FUTU_HK_MARGIN_INTEREST_ANNUAL_RATE,
+    ),
+    "ibkr_fixed": BrokerCostModel(
+        name="ibkr_fixed",
+        description=(
+            "Interactive Brokers (HK) Fixed: 0.005/share (min 1.00, max 1% "
+            "of trade value), exchange and clearing included; margin 5.13%"
+        ),
+        commission_function=calculate_ibkr_fixed_commission,
+        margin_interest_annual_rate=IBKR_MARGIN_INTEREST_ANNUAL_RATE,
+    ),
+    "ibkr_tiered": BrokerCostModel(
+        name="ibkr_tiered",
+        description=(
+            "Interactive Brokers (HK) Tiered: 0.0035/share (min 0.35) plus "
+            "assumed 0.0030/share liquidity-removing exchange fee and "
+            "0.0002/share clearing; margin 5.13%"
+        ),
+        commission_function=calculate_ibkr_tiered_commission,
+        margin_interest_annual_rate=IBKR_MARGIN_INTEREST_ANNUAL_RATE,
+    ),
+}
+
+DEFAULT_BROKER_COST_MODEL_NAME = "futu_hk"
+
+_active_broker_cost_model: BrokerCostModel = BROKER_COST_MODELS[
+    DEFAULT_BROKER_COST_MODEL_NAME
+]
+
+
+def resolve_broker_cost_model(name: str) -> BrokerCostModel:
+    """Return the registered cost model for ``name``.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is not registered. Resolution fails closed so a typo in a
+        configuration file cannot silently price a run at the wrong broker.
+    """
+    try:
+        return BROKER_COST_MODELS[name]
+    except KeyError:
+        registered_names = ", ".join(sorted(BROKER_COST_MODELS))
+        raise ValueError(
+            f"Unknown broker_cost_model {name!r}. "
+            f"Registered models: {registered_names}"
+        ) from None
+
+
+def get_active_broker_cost_model() -> BrokerCostModel:
+    """Return the cost model currently applied to commission calculations."""
+    return _active_broker_cost_model
+
+
+@contextlib.contextmanager
+def override_broker_cost_model(name: str) -> Iterator[BrokerCostModel]:
+    """Apply the named broker cost model for the duration of the block.
+
+    Every commission in a simulation flows through :func:`calc_commission`, so
+    wrapping a run in this context manager is the single point that switches
+    which broker the run is priced at.
+    """
+    global _active_broker_cost_model
+    previous_model = _active_broker_cost_model
+    _active_broker_cost_model = resolve_broker_cost_model(name)
+    try:
+        yield _active_broker_cost_model
+    finally:
+        _active_broker_cost_model = previous_model
+
+
+def calc_commission(shares: float, price: float, is_sell: bool = False) -> float:
+    """Calculate trading fees for one side of a US stock trade.
+
+    The schedule applied is whichever broker cost model is active; see
+    :func:`override_broker_cost_model`.
+
+    Parameters
+    ----------
+    shares:
+        Number of shares traded.
+    price:
+        Price per share.
+    is_sell:
+        Whether this is a sell (exit) trade.
 
     Returns
     -------
     float
         Total fees charged for this trade side.
     """
-    trade_value = shares * price
-
-    # Broker commission: $0.0049/share, min $0.99
-    broker_commission = max(0.99, shares * 0.0049)
-    # Platform fee: $0.005/share, min $1
-    platform_fee = max(1.0, shares * 0.005)
-    # Combined cap: commission + platform fee capped at 0.5% of trade value,
-    # but minimum charges still apply.
-    combined_cap = 0.005 * trade_value
-    broker_and_platform = min(broker_commission + platform_fee, max(combined_cap, 0.99 + 1.0))
-
-    # Settlement fee: $0.003/share (always)
-    settlement_fee = shares * 0.003
-
-    # Sell-only fees
-    sec_fee = 0.0
-    taf_fee = 0.0
-    if is_sell:
-        # SEC regulatory fee: 0.00206% of trade value, min $0.01
-        sec_fee = max(0.01, trade_value * 0.0000206)
-        # FINRA trading activity fee: $0.000195/share, min $0.01, max $9.79
-        taf_fee = min(9.79, max(0.01, shares * 0.000195))
-
-    return broker_and_platform + settlement_fee + sec_fee + taf_fee
+    return _active_broker_cost_model.commission_function(shares, price, is_sell)
 
 @dataclass(eq=False)
 class Trade:
@@ -1053,26 +1377,40 @@ def calculate_annual_returns(
     settlement_lag_days: int = 1,
     margin_overrides: dict[str, float] | None = None,
     gated_trade_ids: set[int] | None = None,
+    daily_portfolio_returns_output: List[float] | None = None,
+    simulation_end: pandas.Timestamp | None = None,
 ) -> Dict[int, float]:
-    """Compute yearly portfolio returns with mark-to-market and margin interest.
+    """Compute portfolio returns with mark-to-market and margin interest.
 
     This routine simulates day-by-day portfolio value, including:
     - Slot allocation with margin (budget per position = equity * margin / slots)
     - Daily interest on negative cash at ``margin_interest_annual_rate / 365``
     - Proceeds credited on exit settlement day (``T+settlement_lag_days``)
     - Mark-to-market valuation of open positions using daily closes
+
+    When ``daily_portfolio_returns_output`` is supplied, the function appends
+    time-weighted returns for trading-day portfolio valuations. Weekend and
+    holiday interest is carried into the next trading-day return. External
+    year-end withdrawals are excluded from returns.
+
+    ``simulation_end`` optionally fixes the inclusive final valuation date.
+    This lets a bounded report include flat trading days after its last trade
+    without reading beyond the requested statistics period.
     """
     # Build event schedule
     events_by_day: Dict[pandas.Timestamp, List[tuple[int, Trade]]] = {}
     start_date = simulation_start
-    end_date = simulation_start
+    end_date = simulation_end if simulation_end is not None else simulation_start
     for trade in trades:
         events_by_day.setdefault(trade.entry_date, []).append((1, trade))
         events_by_day.setdefault(trade.exit_date, []).append((0, trade))
         # Ensure the simulation runs through settlement of the last exit
-        candidate_end = trade.exit_date + pandas.Timedelta(days=settlement_lag_days)
-        if candidate_end > end_date:
-            end_date = candidate_end
+        if simulation_end is None:
+            candidate_end = trade.exit_date + pandas.Timedelta(
+                days=settlement_lag_days
+            )
+            if candidate_end > end_date:
+                end_date = candidate_end
     if not trades:
         return {}
 
@@ -1081,6 +1419,7 @@ def calculate_annual_returns(
     annual_returns: Dict[int, float] = {}
     current_year = start_date.year
     year_start_value = starting_cash
+    previous_valuation_portfolio_value = starting_cash
     default_slot_weight = min(
         margin_multiplier / maximum_position_count, maximum_position_weight
     )
@@ -1101,8 +1440,32 @@ def calculate_annual_returns(
     # Pending cash credits scheduled for settlement
     pending_credits: Dict[pandas.Timestamp, float] = {}
 
+    portfolio_valuation_dates: set[pandas.Timestamp] = set()
+    if daily_portfolio_returns_output is not None:
+        available_closing_price_series = [
+            closing_price_series
+            for closing_price_series in (
+                closing_price_series_by_symbol or {}
+            ).values()
+            if not closing_price_series.empty
+        ]
+        if available_closing_price_series:
+            representative_closing_price_series = max(
+                available_closing_price_series,
+                key=lambda closing_price_series: len(
+                    closing_price_series.index
+                ),
+            )
+            portfolio_valuation_dates = {
+                pandas.Timestamp(valuation_date)
+                for valuation_date in representative_closing_price_series.index
+            }
+        else:
+            portfolio_valuation_dates = set(
+                pandas.date_range(start_date, end_date, freq="B")
+            )
+
     current_date = start_date
-    last_processed_date = start_date
     while current_date <= end_date:
         # Credit any settlements due today
         if current_date in pending_credits:
@@ -1151,24 +1514,59 @@ def calculate_annual_returns(
         # Year roll handling on Jan 1 or at end_date
         next_date = current_date + pandas.Timedelta(days=1)
         next_year = next_date.year
-        if next_year != current_year or current_date == end_date:
-            unsettled_proceeds_value = sum(pending_credits.values())
-            # Mark unsettled exit proceeds to market by including pending credits.
-            portfolio_value = cash_balance + unsettled_proceeds_value + sum(
-                pos.share_count * (pos.last_known_price or 0.0)
-                for pos in open_trades.values()
+        reached_year_end = next_year != current_year
+        reached_simulation_end = current_date == end_date
+        should_record_daily_return = (
+            daily_portfolio_returns_output is not None
+            and (
+                current_date in portfolio_valuation_dates
+                or reached_simulation_end
+                or (reached_year_end and withdraw_amount != 0.0)
             )
+        )
+        should_calculate_portfolio_value = (
+            should_record_daily_return
+            or reached_year_end
+            or reached_simulation_end
+        )
+        portfolio_value = 0.0
+        if should_calculate_portfolio_value:
+            unsettled_proceeds_value = sum(pending_credits.values())
+            # Unsettled exit proceeds remain an asset until cash settlement.
+            portfolio_value = (
+                cash_balance
+                + unsettled_proceeds_value
+                + sum(
+                    position_details.share_count
+                    * (position_details.last_known_price or 0.0)
+                    for position_details in open_trades.values()
+                )
+            )
+
+        if should_record_daily_return:
+            if previous_valuation_portfolio_value == 0.0:
+                daily_portfolio_return = 0.0
+            else:
+                daily_portfolio_return = (
+                    portfolio_value - previous_valuation_portfolio_value
+                ) / previous_valuation_portfolio_value
+            daily_portfolio_returns_output.append(daily_portfolio_return)
+            previous_valuation_portfolio_value = portfolio_value
+
+        if reached_year_end or reached_simulation_end:
             if year_start_value == 0:
                 annual_returns[current_year] = 0.0
             else:
                 annual_returns[current_year] = (portfolio_value - year_start_value) / year_start_value
             # Apply withdrawal at year end
             cash_balance -= withdraw_amount
-            # Carry the mark-to-market unsettled proceeds into the new year baseline.
-            year_start_value = cash_balance + unsettled_proceeds_value + sum(
-                pos.share_count * (pos.last_known_price or 0.0)
-                for pos in open_trades.values()
-            )
+            # Reset the return baseline after an external cash flow so the
+            # withdrawal is not misclassified as investment performance.
+            if withdraw_amount != 0.0:
+                previous_valuation_portfolio_value = (
+                    portfolio_value - withdraw_amount
+                )
+            year_start_value = portfolio_value - withdraw_amount
             current_year = next_year
 
         current_date = next_date
@@ -1197,3 +1595,99 @@ def calculate_annual_trade_counts(trades: Iterable[Trade]) -> Dict[int, int]:
         else:
             trade_counts[year_value] = 1
     return trade_counts
+
+
+# TODO: review
+def calculate_sharpe_ratio(
+    period_returns: Iterable[float],
+    risk_free_return: float = 0.0,
+    periods_per_year: float = TRADING_DAYS_PER_YEAR,
+) -> float:
+    """Calculate the Sharpe ratio for a sequence of equal-length periods.
+
+    Parameters
+    ----------
+    period_returns:
+        Portfolio returns for equal-length periods, expressed as decimal
+        fractions. Simulation metrics pass calendar-year returns here.
+    risk_free_return:
+        Risk-free return for one matching period. The simulation report uses
+        the default of zero because it does not currently model a cash yield.
+    periods_per_year:
+        Number of return observations in one year. Daily simulation returns
+        use 252 trading days.
+
+    Returns
+    -------
+    float
+        Annualized mean excess return divided by its sample standard
+        deviation. Returns ``0.0`` when fewer than two finite observations
+        exist, and positive or negative infinity when a non-zero mean has no
+        measurable volatility.
+    """
+    finite_excess_returns = [
+        float(period_return) - risk_free_return
+        for period_return in period_returns
+        if math.isfinite(float(period_return))
+    ]
+    if len(finite_excess_returns) < 2:
+        return 0.0
+
+    mean_excess_return = statistics.mean(finite_excess_returns)
+    excess_return_standard_deviation = statistics.stdev(finite_excess_returns)
+    if excess_return_standard_deviation == 0.0:
+        if mean_excess_return > 0.0:
+            return math.inf
+        if mean_excess_return < 0.0:
+            return -math.inf
+        return 0.0
+
+    return (
+        math.sqrt(periods_per_year)
+        * mean_excess_return
+        / excess_return_standard_deviation
+    )
+
+
+# TODO: review
+def calculate_sortino_ratio(
+    period_returns: Iterable[float],
+    minimum_acceptable_return: float = 0.0,
+    periods_per_year: float = TRADING_DAYS_PER_YEAR,
+) -> float:
+    """Calculate the Sortino ratio for a sequence of equal-length periods.
+
+    The downside deviation uses all finite observations, treating returns at
+    or above the minimum acceptable return as zero downside. Simulation
+    metrics use daily portfolio returns and a zero-percent target.
+
+    Returns ``0.0`` when no finite observations exist. A positive mean return
+    with no downside deviation returns positive infinity rather than being
+    misreported as zero.
+    """
+    finite_excess_returns = [
+        float(period_return) - minimum_acceptable_return
+        for period_return in period_returns
+        if math.isfinite(float(period_return))
+    ]
+    if not finite_excess_returns:
+        return 0.0
+
+    mean_excess_return = statistics.mean(finite_excess_returns)
+    mean_squared_downside_deviation = statistics.mean(
+        min(excess_return, 0.0) ** 2
+        for excess_return in finite_excess_returns
+    )
+    if mean_squared_downside_deviation == 0.0:
+        if mean_excess_return > 0.0:
+            return math.inf
+        if mean_excess_return < 0.0:
+            return -math.inf
+        return 0.0
+
+    downside_deviation = math.sqrt(mean_squared_downside_deviation)
+    return (
+        math.sqrt(periods_per_year)
+        * mean_excess_return
+        / downside_deviation
+    )

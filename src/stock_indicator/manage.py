@@ -13,8 +13,9 @@ import logging
 import re
 import shlex
 import sys  # TODO: review
+import tempfile
 import time  # TODO: review
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import mean, stdev
 from typing import Any, Dict, List
@@ -27,6 +28,7 @@ from . import (
     adaptive_tp_sl_virtual_trade_history,
     daily_job,
     data_loader,
+    live_expectancy_gate,
     multi_bucket_today,
     strategy,
     symbols,
@@ -36,7 +38,12 @@ from . import production_ff12_promotion
 from . import production_symbol_status
 from . import symbol_seasoning
 from . import universe_pipeline
-from .simulator import calc_commission
+from . import simulator
+from .simulator import (
+    DEFAULT_BROKER_COST_MODEL_NAME,
+    calc_commission,
+    resolve_broker_cost_model,
+)
 from .strategy_sets import load_strategy_set_mapping, load_strategy_entry_filters
 from .daily_job import determine_start_date
 from .symbols import SP500_SYMBOL
@@ -79,6 +86,130 @@ SYMBOL_LIST_PATHS: dict[str, Path] = {
 SYMBOL_EXCLUDE_LIST_PATHS: dict[str, Path] = {
     "crypto_proxy_blocked": DATA_DIRECTORY / "crypto_proxy_blocked_symbols.txt",
 }
+
+
+@dataclass(frozen=True)
+class DateBoundedCsvDatasetSummary:
+    """Describe one temporary date-bounded stock dataset."""
+
+    source_file_count: int
+    output_file_count: int
+    output_row_count: int
+
+
+def _parse_price_csv_date(date_text: str, csv_file_path: Path) -> datetime.date:
+    """Parse one price CSV date without imposing a new source schema."""
+    # TODO: review
+
+    normalized_date_text = date_text.strip()
+    try:
+        return datetime.date.fromisoformat(normalized_date_text[:10])
+    except ValueError:
+        try:
+            parsed_timestamp = pandas.Timestamp(normalized_date_text)
+        except (TypeError, ValueError) as parse_error:
+            raise ValueError(
+                f"invalid date {date_text!r} in {csv_file_path}"
+            ) from parse_error
+        if pandas.isna(parsed_timestamp):
+            raise ValueError(f"invalid date {date_text!r} in {csv_file_path}")
+        return parsed_timestamp.date()
+
+
+def create_date_bounded_csv_dataset(
+    source_directory: Path,
+    target_directory: Path,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    allowed_symbols: set[str] | None = None,
+) -> DateBoundedCsvDatasetSummary:
+    """Write CSV rows inside an inclusive date interval to a temporary set.
+
+    Files outside ``allowed_symbols`` are omitted before reading, except for
+    the market benchmark because cohort calculations may consume it. Empty
+    bounded files are omitted so downstream bucket scans do less filesystem
+    and CSV work.
+    """
+    # TODO: review
+
+    if start_date > end_date:
+        raise ValueError("temporary dataset start_date must not follow end_date")
+    target_directory.mkdir(parents=True, exist_ok=True)
+    normalized_allowed_symbols = (
+        {symbol_name.upper() for symbol_name in allowed_symbols}
+        if allowed_symbols is not None
+        else None
+    )
+    benchmark_symbol = SP500_SYMBOL.upper()
+    source_file_count = 0
+    output_file_count = 0
+    output_row_count = 0
+
+    for source_csv_path in sorted(source_directory.glob("*.csv")):
+        source_symbol = source_csv_path.stem.upper()
+        if (
+            normalized_allowed_symbols is not None
+            and source_symbol not in normalized_allowed_symbols
+            and source_symbol != benchmark_symbol
+        ):
+            continue
+        source_file_count += 1
+        target_csv_path = target_directory / source_csv_path.name
+        target_csv_file = None
+        target_csv_writer = None
+        try:
+            with source_csv_path.open(
+                "r",
+                encoding="utf-8-sig",
+                newline="",
+            ) as source_csv_file:
+                source_csv_reader = csv.reader(source_csv_file)
+                try:
+                    header_row = next(source_csv_reader)
+                except StopIteration:
+                    continue
+                normalized_header_names = [
+                    header_name.strip().lower() for header_name in header_row
+                ]
+                date_column_index = 0
+                for candidate_name in ("date", "datetime", "timestamp"):
+                    if candidate_name in normalized_header_names:
+                        date_column_index = normalized_header_names.index(
+                            candidate_name
+                        )
+                        break
+
+                for source_row in source_csv_reader:
+                    if date_column_index >= len(source_row):
+                        raise ValueError(
+                            f"missing date value in {source_csv_path}"
+                        )
+                    row_date = _parse_price_csv_date(
+                        source_row[date_column_index],
+                        source_csv_path,
+                    )
+                    if row_date < start_date or row_date > end_date:
+                        continue
+                    if target_csv_file is None:
+                        target_csv_file = target_csv_path.open(
+                            "w",
+                            encoding="utf-8",
+                            newline="",
+                        )
+                        target_csv_writer = csv.writer(target_csv_file)
+                        target_csv_writer.writerow(header_row)
+                        output_file_count += 1
+                    target_csv_writer.writerow(source_row)
+                    output_row_count += 1
+        finally:
+            if target_csv_file is not None:
+                target_csv_file.close()
+
+    return DateBoundedCsvDatasetSummary(
+        source_file_count=source_file_count,
+        output_file_count=output_file_count,
+        output_row_count=output_row_count,
+    )
 
 
 def resolve_data_source(source_name: str | None) -> Path:
@@ -241,12 +372,12 @@ class MultiBucketDailyContext:
     config: multi_bucket_today.MultiBucketRunConfig
     data_directory: Path
     allowed_symbols: set[str] | None
-    symbols_blocked_for_new_entries: set[str]
     ff12_data_path: Path | None
     state_path: Path
     state: Dict[str, Any]
     symbol_first_eligible_trade_dates: Dict[str, datetime.date] | None
     setup_messages: List[str]
+    symbols_blocked_for_new_entries: set[str] = field(default_factory=set)
 
 
 def load_multi_bucket_daily_context(
@@ -1514,7 +1645,10 @@ class StockShell(cmd.Cmd):
                 withdraw_amount=withdraw_amount,
                 start_date=start_timestamp,
                 margin_multiplier=margin_multiplier,
-                margin_interest_annual_rate=0.048,
+                margin_interest_annual_rate=(
+                    simulator.get_active_broker_cost_model()
+                    .margin_interest_annual_rate
+                ),
                 use_confirmation_angle=use_confirmation_angle,
                 confirmation_entry_mode=confirmation_entry_mode,
                 minimum_holding_bars=minimum_holding_bars,
@@ -1542,7 +1676,9 @@ class StockShell(cmd.Cmd):
                 f"Max concurrent positions: {metrics.maximum_concurrent_positions}, "
                 f"Final balance: {metrics.final_balance:.2f}, "
                 f"CAGR: {metrics.compound_annual_growth_rate:.2%}, "
-                f"Max drawdown: {metrics.maximum_drawdown:.2%}\n"
+                f"Max drawdown: {metrics.maximum_drawdown:.2%}, "
+                f"Sharpe: {metrics.sharpe_ratio:.2f}, "
+                f"Sortino: {metrics.sortino_ratio:.2f}\n"
             )
 
         def format_trade_detail(detail: strategy.TradeDetail) -> str:
@@ -1816,8 +1952,19 @@ class StockShell(cmd.Cmd):
         )
 
     def do_multi_bucket_simulation(self, argument_line: str) -> None:  # noqa: D401
-        """multi_bucket_simulation CONFIG_PATH [--export-state-on-date YYYY-MM-DD --export-state-out PATH]
+        """Run ``multi_bucket_simulation CONFIG [START_DATE END_DATE]``.
+
         Run a simulation over N parallel strategy buckets defined in a JSON file.
+
+        When START_DATE and END_DATE are supplied, the strategy is simulated
+        from one calendar year before START_DATE through END_DATE. The earlier
+        year warms stateful strategy components, while metrics and trade output
+        include only trades entered from START_DATE through END_DATE.
+
+        The config's optional `broker_cost_model` field selects the fee
+        schedule the run is priced at (`futu_hk`, `futu_hk_legacy`,
+        `ibkr_fixed`, `ibkr_tiered`); it defaults to `futu_hk` and an
+        unrecognised name aborts the run.
 
         --export-state-on-date / --export-state-out: cold-start helper for
         the production multi_bucket_today command. Snapshots the namespaced
@@ -1832,13 +1979,14 @@ class StockShell(cmd.Cmd):
             return
         if not tokens:
             self.stdout.write(
-                "usage: multi_bucket_simulation CONFIG_PATH "
+                "usage: multi_bucket_simulation CONFIG_PATH [START_DATE END_DATE] "
                 "[--export-state-on-date YYYY-MM-DD --export-state-out PATH]\n"
                 "See help multi_bucket_simulation for the JSON format.\n"
             )
             return
 
         config_path_text = tokens[0]
+        date_range_tokens: list[str] = []
         export_state_on_date_str: str | None = None
         export_state_out_path_text: str | None = None
         index_position = 1
@@ -1850,9 +1998,43 @@ class StockShell(cmd.Cmd):
             elif current_token == "--export-state-out" and index_position + 1 < len(tokens):
                 export_state_out_path_text = tokens[index_position + 1]
                 index_position += 2
+            elif not current_token.startswith("--"):
+                date_range_tokens.append(current_token)
+                index_position += 1
             else:
                 self.stdout.write(f"unknown argument: {current_token}\n")
                 return
+
+        if len(date_range_tokens) not in (0, 2):
+            self.stdout.write(
+                "date range requires both START_DATE and END_DATE in "
+                "YYYY-MM-DD format\n"
+            )
+            return
+
+        statistics_start_timestamp: pandas.Timestamp | None = None
+        statistics_end_timestamp: pandas.Timestamp | None = None
+        simulation_end_timestamp: pandas.Timestamp | None = None
+        if date_range_tokens:
+            statistics_start_date_text, statistics_end_date_text = date_range_tokens
+            try:
+                statistics_start_date = datetime.date.fromisoformat(
+                    statistics_start_date_text
+                )
+                statistics_end_date = datetime.date.fromisoformat(
+                    statistics_end_date_text
+                )
+            except ValueError:
+                self.stdout.write(
+                    "START_DATE and END_DATE must be YYYY-MM-DD\n"
+                )
+                return
+            if statistics_start_date > statistics_end_date:
+                self.stdout.write("START_DATE must be on or before END_DATE\n")
+                return
+            statistics_start_timestamp = pandas.Timestamp(statistics_start_date)
+            statistics_end_timestamp = pandas.Timestamp(statistics_end_date)
+            simulation_end_timestamp = statistics_end_timestamp
 
         if export_state_on_date_str is not None:
             try:
@@ -1883,6 +2065,35 @@ class StockShell(cmd.Cmd):
             self.stdout.write("config must contain a non-empty 'buckets' array\n")
             return
 
+        # TODO: review
+        try:
+            expectancy_gate_config = strategy.parse_expectancy_gate_config(
+                config_document.get("expectancy_gate")
+            )
+        except ValueError as expectancy_gate_error:
+            self.stdout.write(f"{expectancy_gate_error}\n")
+            return
+        if expectancy_gate_config is not None:
+            self.stdout.write(
+                "Expectancy gate: "
+                f"window={expectancy_gate_config.window} "
+                f"baseline_mean={expectancy_gate_config.baseline_mean:.6f} "
+                f"baseline_sigma={expectancy_gate_config.baseline_sigma:.6f} "
+                f"sigma_multiplier={expectancy_gate_config.sigma_multiplier:.6f} "
+                f"threshold={expectancy_gate_config.threshold:.6f}\n"
+            )
+        if (
+            expectancy_gate_config is not None
+            and expectancy_gate_config.priority_override is not None
+        ):
+            self.stdout.write(
+                "Expectancy priority override: "
+                "sigma_multiplier="
+                f"{expectancy_gate_config.priority_override.sigma_multiplier:.6f} "
+                "soft_threshold="
+                f"{expectancy_gate_config.priority_override_threshold:.6f}\n"
+            )
+
         try:
             maximum_position_count = int(
                 config_document.get("max_position_count", 0)
@@ -1906,10 +2117,28 @@ class StockShell(cmd.Cmd):
             return
         show_trade_details = bool(config_document.get("show_trade_details", False))
 
-        start_date_string = config_document.get("start_date")
-        if start_date_string is not None:
+        # Broker cost model. Switching this reprices commissions and the
+        # margin interest rate together, so a run is priced end to end at one
+        # broker. Unknown names fail closed rather than silently defaulting.
+        broker_cost_model_name = str(
+            config_document.get(
+                "broker_cost_model", DEFAULT_BROKER_COST_MODEL_NAME
+            )
+        )
+        try:
+            broker_cost_model = resolve_broker_cost_model(broker_cost_model_name)
+        except ValueError as broker_error:
+            self.stdout.write(f"{broker_error}\n")
+            return
+        self.stdout.write(
+            f"Broker cost model: {broker_cost_model.name} "
+            f"({broker_cost_model.description})\n"
+        )
+
+        configured_start_date_string = config_document.get("start_date")
+        if configured_start_date_string is not None and not date_range_tokens:
             try:
-                datetime.date.fromisoformat(start_date_string)
+                datetime.date.fromisoformat(configured_start_date_string)
             except ValueError:
                 self.stdout.write("invalid start_date; expected YYYY-MM-DD\n")
                 return
@@ -2336,9 +2565,48 @@ class StockShell(cmd.Cmd):
                 cohort_co_movement_gate=cohort_co_movement_gate_config,
             )
 
-        if start_date_string is None:
-            start_date_string = determine_start_date(DATA_DIRECTORY)
-        start_timestamp = pandas.Timestamp(start_date_string)
+        if (
+            expectancy_gate_config is not None
+            and expectancy_gate_config.priority_override is not None
+        ):
+            configured_bucket_labels = set(bucket_definitions)
+            override_bucket_labels = set(
+                expectancy_gate_config.priority_override.priorities
+            )
+            unknown_override_labels = sorted(
+                override_bucket_labels - configured_bucket_labels
+            )
+            missing_override_labels = sorted(
+                configured_bucket_labels - override_bucket_labels
+            )
+            if unknown_override_labels or missing_override_labels:
+                problem_parts = []
+                if unknown_override_labels:
+                    problem_parts.append(
+                        "unknown bucket label(s): "
+                        + ", ".join(unknown_override_labels)
+                    )
+                if missing_override_labels:
+                    problem_parts.append(
+                        "missing bucket label(s): "
+                        + ", ".join(missing_override_labels)
+                    )
+                self.stdout.write(
+                    "expectancy_gate.priority_override.priorities must cover "
+                    "every configured bucket exactly; "
+                    + "; ".join(problem_parts)
+                    + "\n"
+                )
+                return
+
+        if statistics_start_timestamp is not None:
+            start_timestamp = statistics_start_timestamp - pandas.DateOffset(years=1)
+            start_date_string = start_timestamp.date().isoformat()
+        else:
+            start_date_string = configured_start_date_string
+            if start_date_string is None:
+                start_date_string = determine_start_date(DATA_DIRECTORY)
+            start_timestamp = pandas.Timestamp(start_date_string)
         data_source_name = config_document.get("data_source")
         if data_source_name == "daily":
             self.stdout.write(
@@ -2678,17 +2946,58 @@ class StockShell(cmd.Cmd):
                 f"{sorted_priorities_text}\n"
             )
 
-        try:
-            with strategy.override_ff12_group_source_path(ff12_data_path):
-                simulation_metrics = strategy.run_complex_simulation(
+        simulation_data_directory = data_directory
+        temporary_data_directory: tempfile.TemporaryDirectory | None = None
+        if (
+            statistics_start_timestamp is not None
+            and statistics_end_timestamp is not None
+        ):
+            temporary_data_directory = tempfile.TemporaryDirectory(
+                prefix="stock_indicator_multi_bucket_"
+            )
+            simulation_data_directory = Path(temporary_data_directory.name)
+            try:
+                temporary_dataset_summary = create_date_bounded_csv_dataset(
                     data_directory,
+                    simulation_data_directory,
+                    start_timestamp.date(),
+                    statistics_end_timestamp.date(),
+                    allowed_symbols,
+                )
+            except (OSError, ValueError) as temporary_dataset_error:
+                temporary_data_directory.cleanup()
+                self.stdout.write(
+                    "failed to create temporary date-bounded dataset: "
+                    f"{temporary_dataset_error}\n"
+                )
+                return
+            self.stdout.write(
+                "Temporary date-bounded dataset: "
+                f"{temporary_dataset_summary.output_file_count} non-empty CSVs, "
+                f"{temporary_dataset_summary.output_row_count} rows from "
+                f"{temporary_dataset_summary.source_file_count} selected source "
+                f"CSVs ({start_timestamp.date().isoformat()} to "
+                f"{statistics_end_timestamp.date().isoformat()})\n"
+            )
+
+        try:
+            with simulator.override_broker_cost_model(
+                broker_cost_model.name
+            ), strategy.override_ff12_group_source_path(ff12_data_path):
+                simulation_metrics = strategy.run_complex_simulation(
+                    simulation_data_directory,
                     bucket_definitions,
                     maximum_position_count=maximum_position_count,
                     starting_cash=starting_cash_value,
                     withdraw_amount=withdraw_amount,
                     start_date=start_timestamp,
+                    end_date=simulation_end_timestamp,
+                    statistics_start_date=statistics_start_timestamp,
+                    statistics_end_date=statistics_end_timestamp,
                     margin_multiplier=margin_multiplier,
-                    margin_interest_annual_rate=0.048,
+                    margin_interest_annual_rate=(
+                        broker_cost_model.margin_interest_annual_rate
+                    ),
                     use_confirmation_angle=use_confirmation_angle,
                     confirmation_entry_mode=confirmation_entry_mode,
                     minimum_holding_bars=minimum_holding_bars,
@@ -2714,10 +3023,14 @@ class StockShell(cmd.Cmd):
                         if wr_gate_active_months
                         else None
                     ),
+                    expectancy_gate=expectancy_gate_config,
                 )
         except ValueError as error:
             self.stdout.write(f"{error}\n")
             return
+        finally:
+            if temporary_data_directory is not None:
+                temporary_data_directory.cleanup()
 
         if exported_state_holder is not None:
             exported_state_holder.pop("_captured", None)
@@ -2743,6 +3056,15 @@ class StockShell(cmd.Cmd):
             f"Simulation start date: {start_date_string}\n"
             f"Buckets: {', '.join(bucket_definitions.keys())}\n"
         )
+        if (
+            statistics_start_timestamp is not None
+            and statistics_end_timestamp is not None
+        ):
+            self.stdout.write(
+                "Statistics date range: "
+                f"{statistics_start_timestamp.date().isoformat()} to "
+                f"{statistics_end_timestamp.date().isoformat()} (inclusive)\n"
+            )
         skipped_group_descriptions = [
             f"{bucket_label}={sorted(bucket_definition.skipped_fama_french_groups)}"
             for bucket_label, bucket_definition in bucket_definitions.items()
@@ -2774,11 +3096,59 @@ class StockShell(cmd.Cmd):
                 f"Max concurrent positions: {metrics.maximum_concurrent_positions}, "
                 f"Final balance: {metrics.final_balance:.2f}, "
                 f"CAGR: {metrics.compound_annual_growth_rate:.2%}, "
-                f"Max drawdown: {metrics.maximum_drawdown:.2%}\n"
+                f"Max drawdown: {metrics.maximum_drawdown:.2%}, "
+                f"Sharpe: {metrics.sharpe_ratio:.2f}, "
+                f"Sortino: {metrics.sortino_ratio:.2f}\n"
             )
 
         total_metrics = simulation_metrics.overall_metrics
         self.stdout.write(format_summary_line("Total", total_metrics))
+        if expectancy_gate_config is not None:
+            expectancy_episode_descriptions = [
+                (
+                    f"{episode.first_entry_date.date().isoformat()} to "
+                    f"{episode.last_entry_date.date().isoformat()}"
+                )
+                for episode in (
+                    simulation_metrics.expectancy_gate_closed_episodes
+                )
+            ]
+            episode_dates_text = (
+                "; ".join(expectancy_episode_descriptions)
+                if expectancy_episode_descriptions
+                else "none"
+            )
+            self.stdout.write(
+                "Expectancy gate summary: "
+                f"closed_episodes={len(expectancy_episode_descriptions)} "
+                f"({episode_dates_text}), "
+                "expectancy_gated_trades="
+                f"{simulation_metrics.expectancy_gated_trade_count}\n"
+            )
+        if (
+            expectancy_gate_config is not None
+            and expectancy_gate_config.priority_override is not None
+        ):
+            override_days_by_month = (
+                simulation_metrics.expectancy_priority_override_days_by_month
+            )
+            override_month_histogram_text = (
+                "  ".join(
+                    f"{month}:{day_count}"
+                    for month, day_count in sorted(
+                        override_days_by_month.items()
+                    )
+                )
+                if override_days_by_month
+                else "none"
+            )
+            self.stdout.write(
+                "Expectancy priority override summary: "
+                f"active_days={sum(override_days_by_month.values())} "
+                f"({override_month_histogram_text}), "
+                "override_entries="
+                f"{simulation_metrics.expectancy_priority_override_trade_count}\n"
+            )
         for year, annual_return in sorted(total_metrics.annual_returns.items()):
             total_trade_count = total_metrics.annual_trade_counts.get(year, 0)
             self.stdout.write(
@@ -2823,68 +3193,75 @@ class StockShell(cmd.Cmd):
                         commission_pct = detail.total_commission / position_value
                     else:
                         commission_pct = None
-                    trade_records.append(
-                        {
-                            "bucket": label,
-                            "year": detail.date.year,
-                            "entry_date": entry_detail.date.date(),
-                            "concurrent_position_index": (
-                                entry_detail.global_concurrent_position_count
-                                if entry_detail.global_concurrent_position_count is not None
-                                else entry_detail.concurrent_position_count
-                            ),
-                            "symbol": entry_detail.symbol,
-                            "price_concentration_score": entry_detail.price_concentration_score,
-                            "near_price_volume_ratio": entry_detail.near_price_volume_ratio,
-                            "above_price_volume_ratio": entry_detail.above_price_volume_ratio,
-                            "below_price_volume_ratio": entry_detail.below_price_volume_ratio,
-                            "near_delta": entry_detail.near_delta,
-                            "price_tightness": entry_detail.price_tightness,
-                            "histogram_node_count": entry_detail.histogram_node_count,
-                            "sma_angle": entry_detail.sma_angle,
-                            "sma_angle_confirmation": entry_detail.sma_angle_confirmation,
-                            "d_sma_angle": entry_detail.d_sma_angle,
-                            "ema_angle": entry_detail.ema_angle,
-                            "d_ema_angle": entry_detail.d_ema_angle,
-                            "slope_60": entry_detail.slope_60,
-                            "fuel_drawdown": entry_detail.fuel_drawdown,
-                            "cohort_symbol_lookback_return": entry_detail.cohort_symbol_lookback_return,
-                            "cohort_median_lookback_return": entry_detail.cohort_median_lookback_return,
-                            "cohort_market_lookback_return": entry_detail.cohort_market_lookback_return,
-                            "cohort_idiosyncratic_gap": entry_detail.cohort_idiosyncratic_gap,
-                            "cohort_negative_peer_share": entry_detail.cohort_negative_peer_share,
-                            "cohort_peer_count": entry_detail.cohort_peer_count,
-                            "phantom": entry_detail.phantom,
-                            "signal_bar_open": entry_detail.signal_bar_open,
-                            "entry_price": entry_detail.price,
-                            "exit_date": detail.date.date(),
-                            "exit_price": detail.price,
-                            "result": detail.result,
-                            "percentage_change": detail.percentage_change,
-                            "max_favorable_excursion_pct": detail.max_favorable_excursion_pct,
-                            "max_adverse_excursion_pct": detail.max_adverse_excursion_pct,
-                            "max_favorable_excursion_date": (
-                                detail.max_favorable_excursion_date.date()
-                                if detail.max_favorable_excursion_date is not None
-                                else None
-                            ),
-                            "max_adverse_excursion_date": (
-                                detail.max_adverse_excursion_date.date()
-                                if detail.max_adverse_excursion_date is not None
-                                else None
-                            ),
-                            "commission_pct": commission_pct,
-                            "exit_reason": detail.exit_reason,
-                            "holding_bars": max(1, (detail.date - entry_detail.date).days * 5 // 7),
-                            "profit_per_bar": (
-                                detail.percentage_change / max(1, (detail.date - entry_detail.date).days * 5 // 7)
-                                if detail.percentage_change is not None
-                                else None
-                            ),
-                            "adaptive_tp_pct": detail.adaptive_tp_pct,
-                            "adaptive_sl_pct": detail.adaptive_sl_pct,
-                        }
-                    )
+                    trade_record: Dict[str, object] = {
+                        "bucket": label,
+                        "year": detail.date.year,
+                        "entry_date": entry_detail.date.date(),
+                        "concurrent_position_index": (
+                            entry_detail.global_concurrent_position_count
+                            if entry_detail.global_concurrent_position_count is not None
+                            else entry_detail.concurrent_position_count
+                        ),
+                        "symbol": entry_detail.symbol,
+                        "price_concentration_score": entry_detail.price_concentration_score,
+                        "near_price_volume_ratio": entry_detail.near_price_volume_ratio,
+                        "above_price_volume_ratio": entry_detail.above_price_volume_ratio,
+                        "below_price_volume_ratio": entry_detail.below_price_volume_ratio,
+                        "near_delta": entry_detail.near_delta,
+                        "price_tightness": entry_detail.price_tightness,
+                        "histogram_node_count": entry_detail.histogram_node_count,
+                        "sma_angle": entry_detail.sma_angle,
+                        "sma_angle_confirmation": entry_detail.sma_angle_confirmation,
+                        "d_sma_angle": entry_detail.d_sma_angle,
+                        "ema_angle": entry_detail.ema_angle,
+                        "d_ema_angle": entry_detail.d_ema_angle,
+                        "slope_60": entry_detail.slope_60,
+                        "fuel_drawdown": entry_detail.fuel_drawdown,
+                        "cohort_symbol_lookback_return": entry_detail.cohort_symbol_lookback_return,
+                        "cohort_median_lookback_return": entry_detail.cohort_median_lookback_return,
+                        "cohort_market_lookback_return": entry_detail.cohort_market_lookback_return,
+                        "cohort_idiosyncratic_gap": entry_detail.cohort_idiosyncratic_gap,
+                        "cohort_negative_peer_share": entry_detail.cohort_negative_peer_share,
+                        "cohort_peer_count": entry_detail.cohort_peer_count,
+                        "phantom": entry_detail.phantom,
+                        "signal_bar_open": entry_detail.signal_bar_open,
+                        "entry_price": entry_detail.price,
+                        "exit_date": detail.date.date(),
+                        "exit_price": detail.price,
+                        "result": detail.result,
+                        "percentage_change": detail.percentage_change,
+                        "max_favorable_excursion_pct": detail.max_favorable_excursion_pct,
+                        "max_adverse_excursion_pct": detail.max_adverse_excursion_pct,
+                        "max_favorable_excursion_date": (
+                            detail.max_favorable_excursion_date.date()
+                            if detail.max_favorable_excursion_date is not None
+                            else None
+                        ),
+                        "max_adverse_excursion_date": (
+                            detail.max_adverse_excursion_date.date()
+                            if detail.max_adverse_excursion_date is not None
+                            else None
+                        ),
+                        "commission_pct": commission_pct,
+                        "exit_reason": detail.exit_reason,
+                        "holding_bars": max(1, (detail.date - entry_detail.date).days * 5 // 7),
+                        "profit_per_bar": (
+                            detail.percentage_change / max(1, (detail.date - entry_detail.date).days * 5 // 7)
+                            if detail.percentage_change is not None
+                            else None
+                        ),
+                        "adaptive_tp_pct": detail.adaptive_tp_pct,
+                        "adaptive_sl_pct": detail.adaptive_sl_pct,
+                    }
+                    if expectancy_gate_config is not None:
+                        trade_record["expectancy_gated"] = (
+                            entry_detail.expectancy_gated
+                        )
+                        if expectancy_gate_config.priority_override is not None:
+                            trade_record["expectancy_priority_override"] = (
+                                entry_detail.expectancy_priority_override
+                            )
+                    trade_records.append(trade_record)
         if trade_records:
             output_directory = Path("logs") / "multi_bucket_simulation_result"
             output_directory.mkdir(parents=True, exist_ok=True)
@@ -2892,52 +3269,64 @@ class StockShell(cmd.Cmd):
             output_file = (
                 output_directory / f"multi_bucket_simulation_{timestamp_string}.csv"
             )
+            trade_detail_columns = [
+                "bucket",
+                "year",
+                "entry_date",
+                "concurrent_position_index",
+                "symbol",
+                "price_concentration_score",
+                "near_price_volume_ratio",
+                "above_price_volume_ratio",
+                "below_price_volume_ratio",
+                "near_delta",
+                "price_tightness",
+                "histogram_node_count",
+                "sma_angle",
+                "sma_angle_confirmation",
+                "d_sma_angle",
+                "ema_angle",
+                "d_ema_angle",
+                "slope_60",
+                "fuel_drawdown",
+                "cohort_symbol_lookback_return",
+                "cohort_median_lookback_return",
+                "cohort_market_lookback_return",
+                "cohort_idiosyncratic_gap",
+                "cohort_negative_peer_share",
+                "cohort_peer_count",
+                "phantom",
+                "signal_bar_open",
+                "entry_price",
+                "exit_date",
+                "exit_price",
+                "result",
+                "percentage_change",
+                "max_favorable_excursion_pct",
+                "max_adverse_excursion_pct",
+                "max_favorable_excursion_date",
+                "max_adverse_excursion_date",
+                "commission_pct",
+                "exit_reason",
+                "holding_bars",
+                "profit_per_bar",
+                "adaptive_tp_pct",
+                "adaptive_sl_pct",
+            ]
+            if expectancy_gate_config is not None:
+                phantom_column_index = trade_detail_columns.index("phantom")
+                trade_detail_columns.insert(
+                    phantom_column_index + 1,
+                    "expectancy_gated",
+                )
+                if expectancy_gate_config.priority_override is not None:
+                    trade_detail_columns.insert(
+                        phantom_column_index + 2,
+                        "expectancy_priority_override",
+                    )
             pandas.DataFrame(
                 trade_records,
-                columns=[
-                    "bucket",
-                    "year",
-                    "entry_date",
-                    "concurrent_position_index",
-                    "symbol",
-                    "price_concentration_score",
-                    "near_price_volume_ratio",
-                    "above_price_volume_ratio",
-                    "below_price_volume_ratio",
-                    "near_delta",
-                    "price_tightness",
-                    "histogram_node_count",
-                    "sma_angle",
-                    "sma_angle_confirmation",
-                    "d_sma_angle",
-                    "ema_angle",
-                    "d_ema_angle",
-                    "slope_60",
-                    "fuel_drawdown",
-                    "cohort_symbol_lookback_return",
-                    "cohort_median_lookback_return",
-                    "cohort_market_lookback_return",
-                    "cohort_idiosyncratic_gap",
-                    "cohort_negative_peer_share",
-                    "cohort_peer_count",
-                    "phantom",
-                    "signal_bar_open",
-                    "entry_price",
-                    "exit_date",
-                    "exit_price",
-                    "result",
-                    "percentage_change",
-                    "max_favorable_excursion_pct",
-                    "max_adverse_excursion_pct",
-                    "max_favorable_excursion_date",
-                    "max_adverse_excursion_date",
-                    "commission_pct",
-                    "exit_reason",
-                    "holding_bars",
-                    "profit_per_bar",
-                    "adaptive_tp_pct",
-                    "adaptive_sl_pct",
-                ],
+                columns=trade_detail_columns,
             ).to_csv(output_file, index=False)
             self.stdout.write(f"Trade details saved to {output_file}\n")
 
@@ -2951,7 +3340,7 @@ class StockShell(cmd.Cmd):
         """Display help for the multi_bucket_simulation command."""
 
         self.stdout.write(
-            "multi_bucket_simulation CONFIG_PATH\n"
+            "multi_bucket_simulation CONFIG_PATH [START_DATE END_DATE]\n"
             "Run a portfolio simulation over N strategy buckets defined in a JSON file.\n"
             "Each bucket has its own SL/TP, dollar-volume filter, priority, and optional per-bucket cap.\n"
             "All buckets share a global max_position_count and compete for slots first-come-first-served,\n"
@@ -2982,6 +3371,14 @@ class StockShell(cmd.Cmd):
             '}\n'
             "\n"
             "Notes:\n"
+            "  - without START_DATE and END_DATE, the configured full dataset "
+            "is simulated\n"
+            "  - with a date range, simulation starts one calendar year before "
+            "START_DATE for warm-up\n"
+            "  - date-range runs first build a temporary bounded CSV dataset "
+            "and remove it after simulation\n"
+            "  - date-range metrics and CSV trades include entries from "
+            "START_DATE through END_DATE inclusive\n"
             "  - data_source='daily' is rejected; simulations must use a "
             "non-daily backtest cache such as '2010'\n"
             "  - confirmation_mode: 'market', 'limit', or null (no confirmation)\n"
@@ -3563,7 +3960,9 @@ class StockShell(cmd.Cmd):
                 f"Max concurrent positions: {evaluation_metrics.maximum_concurrent_positions}, "
                 f"Final balance: {evaluation_metrics.final_balance:.2f}, "
                 f"CAGR: {evaluation_metrics.compound_annual_growth_rate:.2%}, "
-                f"Max drawdown: {evaluation_metrics.maximum_drawdown:.2%}\n"
+                f"Max drawdown: {evaluation_metrics.maximum_drawdown:.2%}, "
+                f"Sharpe: {evaluation_metrics.sharpe_ratio:.2f}, "
+                f"Sortino: {evaluation_metrics.sortino_ratio:.2f}\n"
             )
         )
         for year, annual_return in sorted(
@@ -3860,7 +4259,9 @@ class StockShell(cmd.Cmd):
                 f"Max concurrent positions: {evaluation_metrics.maximum_concurrent_positions}, "
                 f"Final balance: {evaluation_metrics.final_balance:.2f}, "
                 f"CAGR: {evaluation_metrics.compound_annual_growth_rate:.2%}, "
-                f"Max drawdown: {evaluation_metrics.maximum_drawdown:.2%}\n"
+                f"Max drawdown: {evaluation_metrics.maximum_drawdown:.2%}, "
+                f"Sharpe: {evaluation_metrics.sharpe_ratio:.2f}, "
+                f"Sortino: {evaluation_metrics.sortino_ratio:.2f}\n"
             )
         )
         for year, annual_return in sorted(
@@ -4140,7 +4541,9 @@ class StockShell(cmd.Cmd):
                 f"Max concurrent positions: {evaluation_metrics.maximum_concurrent_positions}, "
                 f"Final balance: {evaluation_metrics.final_balance:.2f}, "
                 f"CAGR: {evaluation_metrics.compound_annual_growth_rate:.2%}, "
-                f"Max drawdown: {evaluation_metrics.maximum_drawdown:.2%}\n"
+                f"Max drawdown: {evaluation_metrics.maximum_drawdown:.2%}, "
+                f"Sharpe: {evaluation_metrics.sharpe_ratio:.2f}, "
+                f"Sortino: {evaluation_metrics.sortino_ratio:.2f}\n"
             )
         )
         for year, annual_return in sorted(
@@ -4782,6 +5185,45 @@ class StockShell(cmd.Cmd):
             state,
         )
 
+        # TODO: review
+        # The allocation sensor has its own state ownership boundary.  Advance
+        # it only after today's counterfactual history is durable, and publish
+        # one once-per-day regime heartbeat for the dashboard's single
+        # broker-aware selection pass.
+        if config.expectancy_gate is not None:
+            expectancy_state_path = (
+                live_expectancy_gate.live_expectancy_gate_state_path(
+                    LIVE_STATE_DIRECTORY,
+                    shadow_mode=shadow_mode,
+                )
+            )
+            adaptive_history_state = (
+                adaptive_tp_sl_virtual_trade_history.
+                get_adaptive_tp_sl_virtual_trade_history(state)
+            )
+            try:
+                expectancy_advance_result = (
+                    live_expectancy_gate.
+                    advance_expectancy_gate_state_at_path(
+                        state_path=expectancy_state_path,
+                        config_document=config.raw_document,
+                        adaptive_history_state=adaptive_history_state,
+                        evaluation_date=eval_date_timestamp,
+                        data_directory=data_directory,
+                    )
+                )
+            except (OSError, TypeError, ValueError) as expectancy_error:
+                self.stdout.write(
+                    "expectancy gate state advancement failed: "
+                    f"{expectancy_error}\n"
+                )
+                return
+            if expectancy_advance_result is not None:
+                _expectancy_sensor_state, expectancy_sensor_log = (
+                    expectancy_advance_result
+                )
+                result.log_lines.append(expectancy_sensor_log)
+
         self.stdout.write(
             f"[multi_bucket_daily_signal mode="
             f"{'shadow' if shadow_mode else 'live'} "
@@ -4810,7 +5252,9 @@ class StockShell(cmd.Cmd):
             "Honors optional ff12_data_path from the JSON config so live "
             "selection uses the same sector map as the matching simulation.\n"
             "Honors optional risk_score_priority_overrides for the evaluated "
-            "month.\n"
+            "month. When expectancy_gate is enabled, advances the separate\n"
+            "accepted-entry sensor state and emits [EXPECTANCY_GATE_SENSOR]\n"
+            "for the dashboard's stop and priority decisions.\n"
         )
 
     def do_data_revision_audit(self, argument_line: str) -> None:  # noqa: D401

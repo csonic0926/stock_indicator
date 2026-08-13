@@ -35,7 +35,7 @@ class FakeTradeContext:
         """Return deterministic live positions."""
         return 0, pandas.DataFrame(
             self.positions,
-            columns=["code", "qty", "cost_price"],
+            columns=["code", "qty", "can_sell_qty", "cost_price"],
         )
 
     def order_list_query(self, trd_env: Any = None) -> tuple[int, pandas.DataFrame]:
@@ -198,6 +198,103 @@ def test_place_tp_sl_does_not_duplicate_existing_orders(
     assert fake_context.placed_orders == []
 
 
+def test_place_tp_sl_skips_orders_while_market_exit_is_pending(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A queued market exit must suppress TP and SL reconciliation."""
+    (tmp_path / "2026-07-21.log").write_text(
+        "[FROZEN_TP_SL] entry_date=2026-07-21 "
+        "bucket=fish_tail_explore strategy_id=fish_tail_blow_off_top "
+        "symbol=CL tp_pct=0.0773 sl_pct=0.03 "
+        "min_hold_sl=1 disable_sl_trigger=False\n",
+        encoding="utf-8",
+    )
+    fake_context = FakeTradeContext(
+        positions=[
+            {
+                "code": "US.CL",
+                "qty": 51,
+                "can_sell_qty": 0,
+                "cost_price": 91.1,
+            }
+        ],
+        orders=[
+            {
+                "code": "US.CL",
+                "trd_side": "SELL",
+                "order_status": "SUBMITTED",
+                "order_type": "MARKET",
+                "qty": 51,
+                "dealt_qty": 0,
+            }
+        ],
+        historical_deals=[
+            {
+                "code": "US.CL",
+                "trd_side": "BUY",
+                "qty": 51,
+                "create_time": "2026-07-21 09:30:00",
+                "order_id": "cl_buy",
+            }
+        ],
+        historical_orders=[{"order_id": "cl_buy", "remark": ""}],
+    )
+    _install_fake_futu_module(monkeypatch, fake_context)
+    monkeypatch.setattr(place_tp_sl, "LOGS_DIRECTORY", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["place_tp_sl"])
+
+    place_tp_sl.main(require_complete_take_profit_coverage=True)
+
+    assert fake_context.placed_orders == []
+
+
+def test_terminal_market_exit_does_not_hide_open_position_from_tp(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A cancelled market exit must not suppress later TP protection."""
+    (tmp_path / "2026-07-21.log").write_text(
+        "[FROZEN_TP_SL] entry_date=2026-07-21 "
+        "bucket=fish_tail_explore strategy_id=fish_tail_blow_off_top "
+        "symbol=CL tp_pct=0.05 sl_pct=0.03 "
+        "min_hold_sl=1 disable_sl_trigger=True\n",
+        encoding="utf-8",
+    )
+    fake_context = FakeTradeContext(
+        positions=[{"code": "US.CL", "qty": 10, "cost_price": 100.0}],
+        orders=[
+            {
+                "code": "US.CL",
+                "trd_side": "SELL",
+                "order_status": "CANCELLED_ALL",
+                "order_type": "MARKET",
+                "qty": 10,
+                "dealt_qty": 0,
+            }
+        ],
+        historical_deals=[
+            {
+                "code": "US.CL",
+                "trd_side": "BUY",
+                "qty": 10,
+                "create_time": "2026-07-21 09:30:00",
+                "order_id": "cl_buy",
+            }
+        ],
+        historical_orders=[{"order_id": "cl_buy", "remark": ""}],
+    )
+    _install_fake_futu_module(monkeypatch, fake_context)
+    monkeypatch.setattr(place_tp_sl, "LOGS_DIRECTORY", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["place_tp_sl"])
+
+    place_tp_sl.main(require_complete_take_profit_coverage=True)
+
+    assert len(fake_context.placed_orders) == 1
+    assert fake_context.placed_orders[0]["order_type"] == "NORMAL"
+    assert fake_context.placed_orders[0]["qty"] == 10
+
+
 def test_place_tp_sl_covers_quantity_filled_after_first_partial_fill(
     tmp_path: Path,
     monkeypatch,
@@ -242,6 +339,48 @@ def test_place_tp_sl_covers_quantity_filled_after_first_partial_fill(
     assert len(fake_context.placed_orders) == 1
     assert fake_context.placed_orders[0]["qty"] == 6
     assert fake_context.placed_orders[0]["price"] == 105.0
+
+
+def test_take_profit_quantity_never_exceeds_futu_sellable_quantity(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """TP submission must respect shares not locked by another sell order."""
+    (tmp_path / "2026-05-18.log").write_text(
+        "[FROZEN_TP_SL] entry_date=2026-05-18 "
+        "bucket=fish_tail_explore strategy_id=fish_tail_blow_off_top "
+        "symbol=LOCKED tp_pct=0.05 sl_pct=0.03 "
+        "min_hold_sl=1 disable_sl_trigger=True\n",
+        encoding="utf-8",
+    )
+    fake_context = FakeTradeContext(
+        positions=[
+            {
+                "code": "US.LOCKED",
+                "qty": 10,
+                "can_sell_qty": 3,
+                "cost_price": 100.0,
+            }
+        ],
+        historical_deals=[
+            {
+                "code": "US.LOCKED",
+                "trd_side": "BUY",
+                "qty": 10,
+                "create_time": "2026-05-18 09:30:00",
+                "order_id": "locked_buy",
+            }
+        ],
+        historical_orders=[{"order_id": "locked_buy", "remark": ""}],
+    )
+    _install_fake_futu_module(monkeypatch, fake_context)
+    monkeypatch.setattr(place_tp_sl, "LOGS_DIRECTORY", tmp_path)
+    monkeypatch.setattr(sys, "argv", ["place_tp_sl"])
+
+    place_tp_sl.main()
+
+    assert len(fake_context.placed_orders) == 1
+    assert fake_context.placed_orders[0]["qty"] == 3
 
 
 def test_place_tp_sl_does_not_use_local_accepted_entries(

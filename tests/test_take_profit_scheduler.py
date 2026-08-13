@@ -15,10 +15,10 @@ from stock_indicator import take_profit_scheduler
 HONG_KONG_TIME_ZONE = ZoneInfo("Asia/Hong_Kong")
 
 
-def test_summer_time_runs_one_minute_after_new_york_open(
+def test_summer_time_runs_three_minutes_after_new_york_open(
     tmp_path: Path,
 ) -> None:
-    """HKT 21:31 maps to 09:31 New York while daylight saving is active."""
+    """HKT 21:33 maps to 09:33 New York while daylight saving is active."""
     placement_times: list[str] = []
 
     was_invoked = take_profit_scheduler.run_due_take_profit_reconciliation(
@@ -27,7 +27,7 @@ def test_summer_time_runs_one_minute_after_new_york_open(
             7,
             13,
             21,
-            31,
+            33,
             tzinfo=HONG_KONG_TIME_ZONE,
         ),
         state_path=tmp_path / "scheduler_state.json",
@@ -36,13 +36,13 @@ def test_summer_time_runs_one_minute_after_new_york_open(
 
     assert was_invoked is True
     assert placement_times == ["placed"]
-    assert "open_plus_1" in (tmp_path / "scheduler_state.json").read_text()
+    assert "open_plus_3" in (tmp_path / "scheduler_state.json").read_text()
 
 
-def test_winter_time_runs_one_minute_after_new_york_open(
+def test_winter_time_runs_three_minutes_after_new_york_open(
     tmp_path: Path,
 ) -> None:
-    """HKT 22:31 maps to 09:31 New York during standard time."""
+    """HKT 22:33 maps to 09:33 New York during standard time."""
     placement_times: list[str] = []
 
     was_invoked = take_profit_scheduler.run_due_take_profit_reconciliation(
@@ -51,7 +51,7 @@ def test_winter_time_runs_one_minute_after_new_york_open(
             12,
             14,
             22,
-            31,
+            33,
             tzinfo=HONG_KONG_TIME_ZONE,
         ),
         state_path=tmp_path / "scheduler_state.json",
@@ -60,7 +60,31 @@ def test_winter_time_runs_one_minute_after_new_york_open(
 
     assert was_invoked is True
     assert placement_times == ["placed"]
-    assert "open_plus_1" in (tmp_path / "scheduler_state.json").read_text()
+    assert "open_plus_3" in (tmp_path / "scheduler_state.json").read_text()
+
+
+def test_take_profit_never_runs_before_new_york_open(
+    tmp_path: Path,
+) -> None:
+    """Pre-open scheduler ticks must not place TP or SL orders."""
+    placement_times: list[str] = []
+
+    was_invoked = take_profit_scheduler.run_due_take_profit_reconciliation(
+        current_time=datetime(
+            2026,
+            7,
+            13,
+            9,
+            29,
+            tzinfo=take_profit_scheduler.NEW_YORK_TIME_ZONE,
+        ),
+        state_path=tmp_path / "scheduler_state.json",
+        placement_function=lambda: placement_times.append("placed"),
+    )
+
+    assert was_invoked is False
+    assert placement_times == []
+    assert (tmp_path / "scheduler_state.json").exists() is False
 
 
 def test_restart_catches_up_latest_missed_checkpoint(tmp_path: Path) -> None:
@@ -93,7 +117,7 @@ def test_same_checkpoint_is_not_executed_twice(tmp_path: Path) -> None:
         7,
         13,
         9,
-        31,
+        33,
         tzinfo=take_profit_scheduler.NEW_YORK_TIME_ZONE,
     )
     scheduler_state_path = tmp_path / "scheduler_state.json"
@@ -143,7 +167,7 @@ def test_failed_checkpoint_is_not_recorded_and_can_retry(tmp_path: Path) -> None
         7,
         13,
         9,
-        31,
+        33,
         tzinfo=take_profit_scheduler.NEW_YORK_TIME_ZONE,
     )
 

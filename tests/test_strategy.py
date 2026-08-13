@@ -4,6 +4,7 @@
 import os
 import sys
 import datetime
+import math
 from pathlib import Path
 from typing import Iterable
 
@@ -54,6 +55,29 @@ def test_evaluate_ema_sma_cross_strategy_computes_win_rate(tmp_path: Path) -> No
 
     assert result.total_trades == 1
     assert result.win_rate == 0.0
+
+
+def test_calculate_metrics_adds_sharpe_and_sortino_from_daily_returns() -> None:
+    """Risk-adjusted metrics should use annualized daily portfolio returns."""
+    # TODO: review
+    daily_portfolio_returns = [0.10, -0.05, 0.20]
+
+    metrics = strategy.calculate_metrics(
+        trade_profit_list=[1.0],
+        profit_percentage_list=[0.10],
+        loss_percentage_list=[],
+        holding_period_list=[5],
+        annual_returns={2024: 0.25},
+        daily_portfolio_returns=daily_portfolio_returns,
+    )
+
+    expected_annualization_factor = math.sqrt(252.0)
+    assert metrics.sharpe_ratio == pytest.approx(
+        0.6622661785 * expected_annualization_factor
+    )
+    assert metrics.sortino_ratio == pytest.approx(
+        2.8867513459 * expected_annualization_factor
+    )
 
 
 def test_evaluate_ema_sma_cross_strategy_normalizes_headers(tmp_path: Path) -> None:
@@ -456,11 +480,24 @@ def test_evaluate_combined_strategy_calculates_compound_annual_growth_rate(
     def fake_simulate_portfolio_balance(*args: object, **kwargs: object) -> float:
         return 3300.0
 
+    def fake_calculate_annual_returns(
+        *args: object,
+        **kwargs: object,
+    ) -> dict[int, float]:
+        daily_returns_output = kwargs.get("daily_portfolio_returns_output")
+        assert isinstance(daily_returns_output, list)
+        daily_returns_output.extend([0.01, -0.005, 0.02])
+        return {2020: 0.10}
+
     monkeypatch.setattr(strategy, "simulate_trades", fake_simulate_trades)
     monkeypatch.setattr(
         strategy, "simulate_portfolio_balance", fake_simulate_portfolio_balance
     )
-    monkeypatch.setattr(strategy, "calculate_annual_returns", lambda *a, **k: {})
+    monkeypatch.setattr(
+        strategy,
+        "calculate_annual_returns",
+        fake_calculate_annual_returns,
+    )
     monkeypatch.setattr(strategy, "calculate_annual_trade_counts", lambda *a, **k: {})
 
     result = evaluate_combined_strategy(tmp_path, "ema_sma_cross", "ema_sma_cross")
@@ -469,6 +506,12 @@ def test_evaluate_combined_strategy_calculates_compound_annual_growth_rate(
     expected_growth_rate = (3300.0 / 3000.0) ** (1 / duration_years) - 1
     assert result.compound_annual_growth_rate == pytest.approx(
         expected_growth_rate
+    )
+    assert result.sharpe_ratio == pytest.approx(
+        strategy.calculate_sharpe_ratio([0.01, -0.005, 0.02])
+    )
+    assert result.sortino_ratio == pytest.approx(
+        strategy.calculate_sortino_ratio([0.01, -0.005, 0.02])
     )
 
 
@@ -491,7 +534,7 @@ def test_evaluate_combined_strategy_reports_max_drawdown(
         exit_date=pandas.Timestamp("2020-01-03"),
         entry_price=10.0,
         exit_price=12.0,
-        profit=2.0 - calc_commission(1, 10.0) - calc_commission(1, 12.0),
+        profit=2.0 - calc_commission(1, 10.0) - calc_commission(1, 12.0, is_sell=True),
         holding_period=2,
     )
     simulation_result = SimulationResult(trades=[trade], total_profit=trade.profit)
