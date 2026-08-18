@@ -3,7 +3,7 @@
 This document records the current production JSON contract so the live config
 does not drift through accidental `.json` edits.
 
-Last aligned with `data/multi_bucket_production.json`: 2026-08-13.
+Last aligned with `data/multi_bucket_production.json`: 2026-08-18.
 
 ---
 
@@ -129,10 +129,10 @@ dollar_volume>0.02%,Top500,Pick5
 
 | Label | Strategy | Priority | Max positions | Fill remaining | Max hold | Sigma | Min SL | Reset hold on re-entry |
 |---|---|---:|---:|---|---:|---:|---:|---|
-| `fish_head_production` | `fish_head_vacuum_turn` | `1` | `6` | `false` | default engine behavior | `0.75` | `0.01` | `false` |
-| `fish_tail_squeeze` | `fish_tail_blow_off_top` | `1` | `2` | `false` | `7` | `0.75` | `0.01` | `false` |
-| `fish_tail_production` | `fish_tail_blow_off_top` | `2` | `6` | `false` | `7` | `0.0` | `0.01` | `false` |
-| `fish_head_b30_35` | `fish_head_b30_35` | `3` | `2` | `true` | `14` | `0.75` | `0.01` | `true` |
+| `fish_head_production` | `fish_head_vacuum_turn` | `1` | `7` | `false` | default engine behavior | `0.75` | `0.01` | `false` |
+| `fish_tail_squeeze` | `fish_tail_blow_off_top` | `2` | `2` | `false` | `7` | `0.75` | `0.01` | `false` |
+| `fish_tail_production` | `fish_tail_blow_off_top` | `3` | `4` | `false` | `7` | `0.0` | `0.01` | `false` |
+| `fish_head_b30_35` | `fish_head_b30_35` | `4` | `2` | `true` | `14` | `0.75` | `0.01` | `true` |
 
 Additional bucket-level settings:
 
@@ -154,6 +154,14 @@ Additional bucket-level settings:
 | `fish_head_b30_35` | `free_fall_near_delta` | `-0.05` |
 | `fish_head_b30_35` | `pre_cross_signal_lookback` | `true` |
 
+Buckets may also set a per-bucket `min_hold` (signal-exit minimum holding
+bars). Omitted, a bucket inherits the top-level `min_hold`; when set, it
+governs that bucket's signal-exit lockout window (signals firing inside the
+window are permanently invalidated), the slot-eviction gate, and the
+dashboard's SELL `min_hold_block` check (entry bucket recovered from the Futu
+remark), and serves as the inherit base for the bucket's TP/SL min-hold
+gates. Production currently sets none — all buckets inherit `min_hold: 5`.
+
 The `fish_tail_production` label is an active production bucket label. Do not
 interpret older `fish_tail_explore` log/state entries as permission to use
 candidate symbol files in live production.
@@ -164,8 +172,8 @@ candidate symbol files in live production.
 
 The live cron advances `data/live_state/expectancy_gate_state.json` from
 dashboard-confirmed allocations. The dashboard validates the cron heartbeat,
-uses the stop tier for zero-capital phantom allocation, and applies the soft
-tier once to the whole day's candidate ranking.
+then uses the stop for zero-capital phantom allocation. It never changes the
+fixed bucket order.
 
 | Field | Production value |
 |---|---:|
@@ -175,13 +183,10 @@ tier once to the whole day's candidate ranking.
 | `expectancy_gate.baseline_sigma` | `0.0130` |
 | `expectancy_gate.sigma_multiplier` | `3.0` |
 | `expectancy_gate.cold_start` | `open` |
-| `expectancy_gate.priority_override.enabled` | `true` |
-| `expectancy_gate.priority_override.sigma_multiplier` | `1.5` |
 
-The stop threshold is `-0.0303`; equality is open. The soft threshold is
-`-0.0108` and remains inactive until the deque is full.
+The stop threshold is `-0.0303`; equality is open.
 
-| Bucket label | Soft-tier priority |
+| Bucket label | Fixed priority |
 |---|---:|
 | `fish_head_production` | `1` |
 | `fish_tail_squeeze` | `2` |
@@ -193,20 +198,20 @@ fail-closed rules.
 
 ---
 
-## Runtime risk-score retirement
+## Active gates and fixed allocation
 
-The live config omits all three runtime LLM risk-score hooks:
+The live LLM risk-score CSV has no causal path to BUY blocking or bucket order.
 
-- `risk_score_gate`
-- `risk_score_priority_overrides`
-- `ft_family_wr_gate.risk_score_activation_threshold`
+The FT-WR gate is **not configured** in production. The cron does not advance
+its sensor, and the dashboard cannot create an FT-WR phantom. Current
+production-equivalent simulation configs omit it as well, so FT-family changes
+are measured without this protection while FT performance is still under
+research.
 
-Consequently `data/historical_risk_scores.csv` has no causal path to live BUY
-blocking, daily priority, or WR phantom activation. The WR gate remains active
-as a mechanical sensor: a `wr_degrading=True` flag on one of its configured
-buckets directly creates a zero-capital phantom. Historical and research
-configs may retain the optional risk-score fields; they are not the live
-contract.
+The only active dynamic gate is the global expectancy hard stop described
+above. Bucket allocation remains FH=1, squeeze=2, FT=3 and B30=4 in every
+regime. The caps are FH=7, squeeze=2, FT=4 and B30=2; this is the tested
+Calmar-above-1 allocation promoted on 2026-08-18.
 
 ---
 
@@ -214,10 +219,14 @@ contract.
 
 | Config | Status |
 |---|---|
-| `data/multi_bucket_production_test.json` | Test/backtest helper. It uses `data_source=2010`, the production symbol list, and only the first two buckets. |
+| `data/multi_bucket_production_2010_baseline.json` | Full production-equivalent baseline. It differs only by `data_source=2010_yf_clean` and explicit `broker_cost_model=futu_hk`. Run this for the current 2010 baseline. |
 | `data/multi_bucket_triple_explore.json` | Candidate-universe exploration config. It uses `symbol_list=production_candidate` and candidate sector rows. Do not use it for live signals. |
-| `data/multi_bucket_triple_explore_old_universe_risk_priority_ft_maxhold_7.json` | Research source promoted into the live production contract on 2026-06-03, with `data_source` kept as `daily` for live cron. |
-| Other historical max-hold variant configs | Scenario files only. Inspect their JSON fields before use; the filename alone is not a production contract. |
+
+Current baseline command:
+
+```bash
+multi_bucket_simulation data/multi_bucket_production_2010_baseline.json
+```
 
 ---
 
@@ -243,7 +252,6 @@ venv/bin/python -m pytest \
   tests/test_symbol_seasoning.py \
   tests/test_live_expectancy_gate.py \
   tests/test_expectancy_gate.py \
-  tests/test_expectancy_priority_override.py \
   tests/test_multi_bucket_today_cron.py \
   tests/test_dashboard_risk_gate.py \
   tests/test_cron.py

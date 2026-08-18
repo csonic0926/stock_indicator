@@ -13,26 +13,7 @@
     "baseline_mean": 0.0087,
     "baseline_sigma": 0.013,
     "sigma_multiplier": 3.0,
-    "cold_start": "open",
-    "priority_override": {
-      "enabled": true,
-      "sigma_multiplier": 1.5,
-      "priorities": {
-        "fish_head_production": 1,
-        "fish_tail_squeeze": 2,
-        "fish_tail_production": 3,
-        "fish_head_b30_35": 4
-      }
-    }
-  },
-  "ft_family_wr_gate": {
-    "sensor_bucket": "fish_tail_production",
-    "gated_buckets": [
-      "fish_tail_production",
-      "fish_tail_squeeze"
-    ],
-    "window": 12,
-    "curve": "wr_cross"
+    "cold_start": "open"
   },
   "adaptive_tp_sl": {
     "window": 20,
@@ -56,7 +37,7 @@
       "strategy_id": "fish_head_vacuum_turn",
       "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
       "priority": 1,
-      "max_positions": 6,
+      "max_positions": 7,
       "exit_alpha_factor": 3,
       "sigma": 0.75,
       "min_sl": 0.01,
@@ -77,7 +58,7 @@
       "label": "fish_tail_squeeze",
       "strategy_id": "fish_tail_blow_off_top",
       "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
-      "priority": 1,
+      "priority": 2,
       "max_positions": 2,
       "exit_alpha_factor": 3,
       "sigma": 0.75,
@@ -98,8 +79,8 @@
       "label": "fish_tail_production",
       "strategy_id": "fish_tail_blow_off_top",
       "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
-      "priority": 2,
-      "max_positions": 6,
+      "priority": 3,
+      "max_positions": 4,
       "exit_alpha_factor": 3,
       "sigma": 0.0,
       "min_sl": 0.01,
@@ -118,7 +99,7 @@
       "label": "fish_head_b30_35",
       "strategy_id": "fish_head_b30_35",
       "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
-      "priority": 3,
+      "priority": 4,
       "max_positions": 2,
       "fill_remaining": true,
       "exit_alpha_factor": 3,

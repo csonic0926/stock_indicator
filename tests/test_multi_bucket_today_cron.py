@@ -890,3 +890,102 @@ def test_compute_fuel_drawdown_for_today_matches_simulator_window(
         )
         is None
     )
+
+
+def test_load_multi_bucket_config_per_bucket_min_hold(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Per-bucket `min_hold` parses; omitted buckets inherit (None)."""
+    config_path = tmp_path / "multi_bucket_config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 6,
+                "starting_cash": 60_000,
+                "margin": 1.5,
+                "withdraw": 0,
+                "min_hold": 5,
+                "buckets": [
+                    {
+                        "label": "fish_tail_production",
+                        "strategy_id": "fish_tail_blow_off_top",
+                        "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                        "min_hold": 3,
+                    },
+                    {
+                        "label": "fish_head_production",
+                        "strategy_id": "fish_head_vacuum_turn",
+                        "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        multi_bucket_today,
+        "load_strategy_set_mapping",
+        lambda: {
+            "fish_head_vacuum_turn": ("fish_head_buy", "fish_head_sell"),
+            "fish_tail_blow_off_top": ("fish_tail_buy", "fish_tail_sell"),
+        },
+    )
+    monkeypatch.setattr(
+        multi_bucket_today,
+        "load_strategy_entry_filters",
+        lambda: {},
+    )
+
+    loaded_config = multi_bucket_today.load_multi_bucket_config(config_path)
+
+    assert (
+        loaded_config.bucket_definitions["fish_tail_production"].min_hold == 3
+    )
+    assert (
+        loaded_config.bucket_definitions["fish_head_production"].min_hold
+        is None
+    )
+    assert loaded_config.minimum_holding_bars == 5
+
+
+def test_load_multi_bucket_config_rejects_negative_bucket_min_hold(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config_path = tmp_path / "multi_bucket_config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 6,
+                "starting_cash": 60_000,
+                "margin": 1.5,
+                "withdraw": 0,
+                "min_hold": 5,
+                "buckets": [
+                    {
+                        "label": "fish_tail_production",
+                        "strategy_id": "fish_tail_blow_off_top",
+                        "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
+                        "min_hold": -1,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        multi_bucket_today,
+        "load_strategy_set_mapping",
+        lambda: {
+            "fish_tail_blow_off_top": ("fish_tail_buy", "fish_tail_sell"),
+        },
+    )
+    monkeypatch.setattr(
+        multi_bucket_today,
+        "load_strategy_entry_filters",
+        lambda: {},
+    )
+
+    with pytest.raises(ValueError, match="bucket min_hold"):
+        multi_bucket_today.load_multi_bucket_config(config_path)

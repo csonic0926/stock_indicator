@@ -266,6 +266,17 @@ def test_expectancy_sensor_uses_exit_entry_and_stable_ordering() -> None:
     assert sensor.is_alarmed_before_entry(pandas.Timestamp("2024-01-06")) is False
     assert sensor.rolling_returns == pytest.approx((0.30, 0.20, 0.10))
     assert sensor.rolling_mean == pytest.approx(0.20)
+    assert [
+        outcome.entry_date for outcome in sensor.consumed_outcomes
+    ] == [
+        pandas.Timestamp("2024-01-01"),
+        pandas.Timestamp("2024-01-01"),
+        pandas.Timestamp("2024-01-02"),
+    ]
+    assert all(
+        outcome.exit_date == pandas.Timestamp("2024-01-05")
+        for outcome in sensor.consumed_outcomes
+    )
 
 
 def test_expectancy_sensor_is_open_at_threshold_equality() -> None:
@@ -791,6 +802,94 @@ def test_multi_bucket_csv_reports_expectancy_gate_separately(
     assert "closed_episodes=1 (2024-01-04 to 2024-01-04)" in output_text
 
 
+def test_multi_bucket_exports_ft_all_signal_counterfactual_outcomes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The research export should preserve both entry and causal exit dates."""
+
+    data_directory = tmp_path / "prices"
+    data_directory.mkdir()
+    config_path = tmp_path / "ft_expectancy_gate.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "max_position_count": 10,
+                "starting_cash": 1000,
+                "start_date": "2024-01-01",
+                "data_source": "test",
+                "buckets": [
+                    {
+                        "label": "fish_tail_production",
+                        "strategy_id": "fixture",
+                        "dollar_volume_filter": "dollar_volume>1",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifacts = _build_artifacts(
+        [
+            _build_trade("2024-01-01", "2024-01-03", -0.10, "LOSS"),
+            _build_trade("2024-01-02", "2024-01-04", 0.20, "WIN"),
+        ]
+    )
+    monkeypatch.setattr(manage, "DATA_SOURCE_PATHS", {"test": data_directory})
+    monkeypatch.setattr(
+        manage,
+        "load_strategy_set_mapping",
+        lambda: {"fixture": ("fixture", "fixture")},
+    )
+    monkeypatch.setattr(manage, "load_strategy_entry_filters", lambda: {})
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        lambda *arguments, **keyword_arguments: artifacts,
+    )
+    _stub_money_simulations(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    export_path = tmp_path / "research" / "ft_signal_outcomes.csv"
+    output_buffer = io.StringIO()
+
+    shell = manage.StockShell(stdout=output_buffer)
+    shell.onecmd(
+        f"multi_bucket_simulation {config_path} "
+        f"--export-ft-signal-outcomes {export_path}"
+    )
+
+    exported_frame = pandas.read_csv(export_path)
+    assert exported_frame[
+        [
+            "entry_date",
+            "exit_date",
+            "percentage_change",
+            "exit_reason",
+            "holding_bars",
+        ]
+    ].to_dict(orient="records") == [
+        {
+            "entry_date": "2024-01-01",
+            "exit_date": "2024-01-03",
+            "percentage_change": pytest.approx(-0.10),
+            "exit_reason": "signal",
+            "holding_bars": 2,
+        },
+        {
+            "entry_date": "2024-01-02",
+            "exit_date": "2024-01-04",
+            "percentage_change": pytest.approx(0.20),
+            "exit_reason": "signal",
+            "holding_bars": 2,
+        },
+    ]
+    assert exported_frame["max_favorable_excursion_pct"].isna().all()
+    assert exported_frame["max_adverse_excursion_pct"].isna().all()
+    assert "FT all-signal counterfactual outcomes saved" in (
+        output_buffer.getvalue()
+    )
+
+
 @pytest.mark.parametrize(
     ("invalid_override", "expected_message"),
     [
@@ -836,3 +935,390 @@ def test_multi_bucket_expectancy_config_validation_aborts_run(
     shell.onecmd(f"multi_bucket_simulation {config_path}")
 
     assert expected_message in output_buffer.getvalue()
+
+
+def test_parse_ft_family_expectancy_gate_config_validation() -> None:
+    parse = strategy.parse_ft_family_expectancy_gate_config
+    assert parse(None) is None
+    assert parse({"enabled": False, "window": 2}) is None
+    gate_config = parse(
+        {
+            "enabled": True,
+            "window": 12,
+            "baseline_mean": 0.0043,
+            "baseline_sigma": 0.011,
+            "sigma_multiplier": 1.5,
+        }
+    )
+    assert gate_config is not None
+    assert gate_config.sensor_buckets == (
+        "fish_tail_production",
+        "fish_tail_squeeze",
+    )
+    assert gate_config.decision_mode == "rolling_trades"
+    assert gate_config.threshold == pytest.approx(0.0043 - 1.5 * 0.011)
+    period_gate_config = parse(
+        {
+            "enabled": True,
+            "window": 12,
+            "baseline_mean": 0.0043,
+            "baseline_sigma": 0.011,
+            "sigma_multiplier": 1.5,
+            "decision_mode": "previous_calendar_period",
+            "period_months": 6,
+            "period_decision_threshold": 0.0,
+            "period_minimum_samples": 20,
+        }
+    )
+    assert period_gate_config is not None
+    assert period_gate_config.period_months == 6
+    assert period_gate_config.period_minimum_samples == 20
+    assert period_gate_config.threshold == 0.0
+    with pytest.raises(ValueError, match="unknown key"):
+        parse({"window": 12, "baseline_mean": 0.0, "baseline_sigma": 0.01,
+               "sigma_multiplier": 1.0, "extra": 1})
+    with pytest.raises(ValueError, match="baseline_sigma"):
+        parse({"window": 12, "baseline_mean": 0.0, "baseline_sigma": 0,
+               "sigma_multiplier": 1.0})
+    with pytest.raises(ValueError, match="is required"):
+        parse({"window": 12, "baseline_mean": 0.0, "baseline_sigma": 0.01})
+    with pytest.raises(ValueError, match="non-empty list"):
+        parse({"window": 12, "baseline_mean": 0.0, "baseline_sigma": 0.01,
+               "sigma_multiplier": 1.0, "gated_buckets": []})
+    with pytest.raises(ValueError, match="positive integer divisor of 12"):
+        parse({"window": 12, "baseline_mean": 0.0, "baseline_sigma": 0.01,
+               "sigma_multiplier": 1.0,
+               "decision_mode": "previous_calendar_period",
+               "period_months": 5, "period_decision_threshold": 0.0})
+    with pytest.raises(ValueError, match="period fields require"):
+        parse({"window": 12, "baseline_mean": 0.0, "baseline_sigma": 0.01,
+               "sigma_multiplier": 1.0, "period_months": 6})
+
+
+def _ft_gate_config_for_fixture() -> strategy.FTFamilyExpectancyGateConfig:
+    """window 2, threshold -0.05, scoped to the fixture's only set."""
+
+    return strategy.FTFamilyExpectancyGateConfig(
+        window=2,
+        baseline_mean=0.0,
+        baseline_sigma=0.05,
+        sigma_multiplier=1.0,
+        sensor_buckets=("all_trades",),
+        gated_buckets=("all_trades",),
+    )
+
+
+def test_previous_calendar_period_gate_freezes_decision_and_exit_sample(
+) -> None:
+    """The prior half's exit returns must set one fixed next-half decision."""
+
+    gate_config = strategy.FTFamilyExpectancyGateConfig(
+        window=2,
+        baseline_mean=0.0,
+        baseline_sigma=0.05,
+        sigma_multiplier=1.0,
+        decision_mode="previous_calendar_period",
+        period_months=6,
+        period_decision_threshold=0.0,
+        period_minimum_samples=2,
+        sensor_buckets=("all_trades",),
+        gated_buckets=("all_trades",),
+    )
+    gate = strategy.PreviousCalendarPeriodExpectancyGate(gate_config)
+    outcomes = [
+        _build_trade("2024-01-02", "2024-02-01", -0.10, "H1_LOSS_ONE")[0],
+        _build_trade("2024-06-01", "2024-06-30", -0.10, "H1_LOSS_TWO")[0],
+        _build_trade("2024-06-02", "2024-07-01", 0.50, "BOUNDARY_WIN")[0],
+        _build_trade("2024-07-02", "2024-08-01", 0.10, "H2_WIN_ONE")[0],
+        _build_trade("2024-08-02", "2024-09-01", 0.10, "H2_WIN_TWO")[0],
+    ]
+    for stable_outcome_order, completed_trade in enumerate(outcomes):
+        gate.sensor.schedule_outcome(
+            id(completed_trade),
+            completed_trade,
+            stable_outcome_order,
+        )
+
+    assert gate.evaluate_accepted_entry(pandas.Timestamp("2024-07-01")) is True
+    assert gate.evaluate_accepted_entry(pandas.Timestamp("2024-12-01")) is True
+    assert gate.evaluate_accepted_entry(pandas.Timestamp("2025-01-01")) is False
+    assert gate.expectancy_gated_trade_count == 2
+
+
+def test_previous_calendar_period_gate_stays_open_without_minimum_sample(
+) -> None:
+    """A sparse prior period must not close the next period."""
+
+    gate_config = strategy.FTFamilyExpectancyGateConfig(
+        window=2,
+        baseline_mean=0.0,
+        baseline_sigma=0.05,
+        sigma_multiplier=1.0,
+        decision_mode="previous_calendar_period",
+        period_months=6,
+        period_decision_threshold=0.0,
+        period_minimum_samples=2,
+        sensor_buckets=("all_trades",),
+        gated_buckets=("all_trades",),
+    )
+    gate = strategy.PreviousCalendarPeriodExpectancyGate(gate_config)
+    completed_trade = _build_trade(
+        "2024-01-02",
+        "2024-06-30",
+        -0.10,
+        "ONLY_SAMPLE",
+    )[0]
+    gate.sensor.schedule_outcome(id(completed_trade), completed_trade, 0)
+
+    assert gate.evaluate_accepted_entry(pandas.Timestamp("2024-07-01")) is False
+
+
+def test_ft_expectancy_gate_phantoms_gated_entry_with_zero_capital(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two ft losses below the band phantom the next gated entry only."""
+
+    trades_with_details = [
+        _build_trade("2024-01-01", "2024-01-02", -0.10, "LOSS_ONE"),
+        _build_trade("2024-01-01", "2024-01-03", -0.10, "LOSS_TWO"),
+        _build_trade("2024-01-08", "2024-01-09", 0.10, "GATED"),
+        _build_trade("2024-01-16", "2024-01-17", 0.10, "REOPENED"),
+    ]
+    completed_trades = [
+        completed_trade
+        for completed_trade, _detail_pair in trades_with_details
+    ]
+    artifacts = _build_artifacts(trades_with_details)
+    call_records = _stub_money_simulations(monkeypatch)
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        lambda *arguments, **keyword_arguments: artifacts,
+    )
+    definitions = {
+        "all_trades": strategy.ComplexStrategySetDefinition(
+            label="all_trades",
+            buy_strategy_name="fixture",
+            sell_strategy_name="fixture",
+        )
+    }
+    simulation_metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=10,
+        multi_bucket_mode=True,
+        ft_expectancy_gate=_ft_gate_config_for_fixture(),
+    )
+
+    entry_details_by_symbol = {
+        entry_detail.symbol: entry_detail
+        for entry_detail in _entry_details(simulation_metrics)
+    }
+    # Two -10% closes drag the 2-trade mean to -0.10 < -0.05: the next
+    # gated entry phantoms. Its own +10% close then lifts the mean back
+    # to 0.0, so the following entry deploys capital normally.
+    assert entry_details_by_symbol["LOSS_ONE"].ft_expectancy_gated is False
+    assert entry_details_by_symbol["LOSS_TWO"].ft_expectancy_gated is False
+    assert entry_details_by_symbol["GATED"].ft_expectancy_gated is True
+    assert entry_details_by_symbol["REOPENED"].ft_expectancy_gated is False
+    assert simulation_metrics.ft_expectancy_gated_trade_count == 1
+    assert len(simulation_metrics.ft_expectancy_gate_closed_episodes) == 1
+    expected_zero_capital_identifiers = {id(completed_trades[2])}
+    for money_simulation_calls in call_records.values():
+        for _passed_trades, keyword_arguments in money_simulation_calls:
+            assert keyword_arguments["gated_trade_ids"] == (
+                expected_zero_capital_identifiers
+            )
+
+
+def test_ft_previous_period_gate_phantoms_next_half_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Simulation dispatch must apply H1's mean throughout H2."""
+
+    trades_with_details = [
+        _build_trade("2024-01-02", "2024-02-01", -0.10, "H1_LOSS_ONE"),
+        _build_trade("2024-05-01", "2024-06-01", -0.10, "H1_LOSS_TWO"),
+        _build_trade("2024-07-02", "2024-08-01", 0.10, "H2_GATED"),
+    ]
+    artifacts = _build_artifacts(trades_with_details)
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        lambda *arguments, **keyword_arguments: artifacts,
+    )
+    _stub_money_simulations(monkeypatch)
+    definitions = {
+        "all_trades": strategy.ComplexStrategySetDefinition(
+            label="all_trades",
+            buy_strategy_name="fixture",
+            sell_strategy_name="fixture",
+        )
+    }
+    gate_config = strategy.FTFamilyExpectancyGateConfig(
+        window=2,
+        baseline_mean=0.0,
+        baseline_sigma=0.05,
+        sigma_multiplier=1.0,
+        decision_mode="previous_calendar_period",
+        period_months=6,
+        period_decision_threshold=0.0,
+        period_minimum_samples=2,
+        sensor_buckets=("all_trades",),
+        gated_buckets=("all_trades",),
+    )
+
+    simulation_metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=10,
+        multi_bucket_mode=True,
+        ft_expectancy_gate=gate_config,
+    )
+
+    entry_details_by_symbol = {
+        entry_detail.symbol: entry_detail
+        for entry_detail in _entry_details(simulation_metrics)
+    }
+    assert entry_details_by_symbol["H2_GATED"].ft_expectancy_gated is True
+    assert simulation_metrics.ft_expectancy_gated_trade_count == 1
+
+
+@pytest.mark.parametrize(
+    "adaptive_tp_sl_config",
+    [None, strategy.AdaptiveTPSLConfig()],
+    ids=("non_adaptive", "adaptive"),
+)
+def test_ft_expectancy_sensor_includes_signals_blocked_by_fh_allocation(
+    monkeypatch: pytest.MonkeyPatch,
+    adaptive_tp_sl_config: strategy.AdaptiveTPSLConfig | None,
+) -> None:
+    """FH slot occupancy must not remove FT signals from the sensor."""
+
+    fish_head_artifacts = _build_artifacts(
+        [
+            _build_trade(
+                "2024-01-01",
+                "2024-01-10",
+                0.0,
+                "FH_BLOCKER",
+            )
+        ]
+    )
+    fish_tail_artifacts = _build_artifacts(
+        [
+            _build_trade(
+                "2024-01-02",
+                "2024-01-03",
+                -0.10,
+                "FT_BLOCKED_LOSS_ONE",
+            ),
+            _build_trade(
+                "2024-01-04",
+                "2024-01-05",
+                -0.10,
+                "FT_BLOCKED_LOSS_TWO",
+            ),
+            _build_trade(
+                "2024-01-11",
+                "2024-01-12",
+                0.10,
+                "FT_CANDIDATE",
+            ),
+        ]
+    )
+    artifacts_by_buy_strategy = {
+        "fish_head_fixture": fish_head_artifacts,
+        "fish_tail_fixture": fish_tail_artifacts,
+    }
+
+    def fake_generate_strategy_evaluation_artifacts(
+        data_directory: Path,
+        buy_strategy_name: str,
+        *unused_arguments: object,
+        **unused_keyword_arguments: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        """Return the fixture selected by its configured buy strategy."""
+
+        del data_directory, unused_arguments, unused_keyword_arguments
+        return artifacts_by_buy_strategy[buy_strategy_name]
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate_strategy_evaluation_artifacts,
+    )
+    _stub_money_simulations(monkeypatch)
+    definitions = {
+        "fish_head": strategy.ComplexStrategySetDefinition(
+            label="fish_head",
+            buy_strategy_name="fish_head_fixture",
+            sell_strategy_name="fixture",
+            entry_priority=1,
+        ),
+        "fish_tail": strategy.ComplexStrategySetDefinition(
+            label="fish_tail",
+            buy_strategy_name="fish_tail_fixture",
+            sell_strategy_name="fixture",
+            entry_priority=2,
+        ),
+    }
+    gate_config = strategy.FTFamilyExpectancyGateConfig(
+        window=2,
+        baseline_mean=0.0,
+        baseline_sigma=0.05,
+        sigma_multiplier=1.0,
+        sensor_buckets=("fish_tail",),
+        gated_buckets=("fish_tail",),
+    )
+
+    simulation_metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=1,
+        multi_bucket_mode=True,
+        adaptive_tp_sl=adaptive_tp_sl_config,
+        ft_expectancy_gate=gate_config,
+    )
+
+    entry_details_by_symbol = {
+        entry_detail.symbol: entry_detail
+        for entry_detail in _entry_details(simulation_metrics)
+    }
+    assert set(entry_details_by_symbol) == {"FH_BLOCKER", "FT_CANDIDATE"}
+    assert entry_details_by_symbol["FT_CANDIDATE"].ft_expectancy_gated is True
+    assert simulation_metrics.ft_expectancy_gated_trade_count == 1
+    assert [
+        outcome.entry_date
+        for outcome in simulation_metrics.ft_expectancy_sensor_outcomes
+    ] == [
+        pandas.Timestamp("2024-01-02"),
+        pandas.Timestamp("2024-01-04"),
+        pandas.Timestamp("2024-01-11"),
+    ]
+
+
+def test_ft_expectancy_gate_rejects_unknown_bucket_label() -> None:
+    definitions = {
+        "all_trades": strategy.ComplexStrategySetDefinition(
+            label="all_trades",
+            buy_strategy_name="fixture",
+            sell_strategy_name="fixture",
+        )
+    }
+    bad_gate = strategy.FTFamilyExpectancyGateConfig(
+        window=2,
+        baseline_mean=0.0,
+        baseline_sigma=0.05,
+        sigma_multiplier=1.0,
+        sensor_buckets=("missing_bucket",),
+        gated_buckets=("all_trades",),
+    )
+    with pytest.raises(ValueError, match="unknown bucket label"):
+        strategy.run_complex_simulation(
+            Path("/tmp"),
+            definitions,
+            maximum_position_count=10,
+            multi_bucket_mode=True,
+            ft_expectancy_gate=bad_gate,
+        )

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas
+import pytest
 
 from stock_indicator import (
     adaptive_tp_sl_virtual_trade_history,
@@ -1034,82 +1035,6 @@ def test_preview_orders_resolves_same_symbol_competition_by_bucket_priority(
     )["bucket"] == "fish_tail_squeeze"
 
 
-def test_preview_orders_applies_risk_score_priority_override_in_dashboard(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    """Current risk-score settings, not log order, should choose the slot."""
-    signal_date = "2026-07-10"
-    config_path = tmp_path / "multi_bucket_production.json"
-    risk_score_path = tmp_path / "historical_risk_scores.csv"
-    log_directory = tmp_path / "logs"
-    log_directory.mkdir()
-    config_path.write_text(
-        json.dumps({
-            "max_position_count": 1,
-            "risk_score_gate": {
-                "csv_path": "historical_risk_scores.csv",
-                "stop_threshold": 75,
-            },
-            "risk_score_priority_overrides": {
-                "scores": [25],
-                "priorities": {
-                    "fish_head_production": 2,
-                    "fish_tail_production": 1,
-                },
-            },
-            "buckets": [
-                {
-                    "label": "fish_head_production",
-                    "strategy_id": "fish_head_vacuum_turn",
-                    "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
-                    "priority": 1,
-                },
-                {
-                    "label": "fish_tail_production",
-                    "strategy_id": "fish_tail_blow_off_top",
-                    "dollar_volume_filter": "dollar_volume>0.02%,Top500,Pick5",
-                    "priority": 2,
-                },
-            ],
-        }),
-        encoding="utf-8",
-    )
-    risk_score_path.write_text(
-        "year_month,risk_score\n2026-07,25\n",
-        encoding="utf-8",
-    )
-    (log_directory / f"{signal_date}.log").write_text(
-        "[FROZEN_TP_SL] entry_date=2026-07-10 "
-        "bucket=fish_head_production strategy_id=fish_head_vacuum_turn "
-        "symbol=HEAD dollar_volume_rank=0 tp_pct=0.050000 sl_pct=0.030000 "
-        "min_hold_sl=1 disable_sl_trigger=True "
-        "reset_hold_on_reentry_signal=False\n"
-        "[FROZEN_TP_SL] entry_date=2026-07-10 "
-        "bucket=fish_tail_production strategy_id=fish_tail_blow_off_top "
-        "symbol=TAIL dollar_volume_rank=9 tp_pct=0.060000 sl_pct=0.030000 "
-        "min_hold_sl=1 disable_sl_trigger=True max_hold=7 "
-        "reset_hold_on_reentry_signal=False\n",
-        encoding="utf-8",
-    )
-    _patch_dashboard_paths(
-        monkeypatch,
-        config_path=config_path,
-        log_directory=log_directory,
-        repository_root=tmp_path,
-    )
-
-    preview = dashboard.api_preview_orders()
-    buy_orders = [
-        order for order in preview["orders"] if order["side"] == "BUY"
-    ]
-
-    assert buy_orders[0]["symbol"] == "TAIL"
-    assert "status" not in buy_orders[0]
-    assert buy_orders[1]["symbol"] == "HEAD"
-    assert buy_orders[1]["status"] == "slot_full"
-
-
 def test_dashboard_contract_names_virtual_history_as_statistical_state() -> None:
     """The UI contract must not describe adaptive history as a portfolio."""
 
@@ -1949,13 +1874,11 @@ def _write_phantom_fixture(
     tmp_path: Path,
     *,
     signal_date: str,
-    risk_score: int,
     wr_degrading: bool,
     symbol: str = "PHX",
     max_position_count: int = 6,
 ) -> tuple[Path, Path]:
-    """Write a config WITH ft_family_wr_gate (activation 25) and a log
-    whose single gated-bucket FROZEN entry carries the wr_degrading flag."""
+    """Write an FT-WR config and a log carrying its degrading flag."""
     config_path = tmp_path / "multi_bucket_production.json"
     risk_score_path = tmp_path / "historical_risk_scores.csv"
     log_directory = tmp_path / "logs"
@@ -1970,6 +1893,7 @@ def _write_phantom_fixture(
                     "stop_threshold": 75,
                 },
                 "ft_family_wr_gate": {
+                    "enabled": True,
                     "sensor_bucket": "fish_tail_production",
                     "gated_buckets": [
                         "fish_tail_production",
@@ -1977,15 +1901,22 @@ def _write_phantom_fixture(
                     ],
                     "window": 12,
                     "curve": "wr_cross",
-                    "risk_score_activation_threshold": 25,
                 },
+                "buckets": [
+                    {
+                        "label": "fish_tail_production",
+                        "strategy_id": "fish_tail_blow_off_top",
+                        "dollar_volume_filter": "dollar_volume=Top5",
+                        "priority": 3,
+                    }
+                ],
             }
         ),
         encoding="utf-8",
     )
     risk_score_path.write_text(
         "year_month,duration_score,breadth_score,risk_score,recommendation,key_event,confidence\n"
-        f"{signal_date[:7]},50,50,{risk_score},hold,test,H\n",
+        f"{signal_date[:7]},50,50,30,hold,test,H\n",
         encoding="utf-8",
     )
     (log_directory / f"{signal_date}.log").write_text(
@@ -2031,13 +1962,12 @@ def _patch_phantom_paths(monkeypatch, repository_root: Path) -> Path:
     return data_directory
 
 
-def test_preview_marks_gated_entry_phantom_when_rs_active(
+def test_preview_marks_degrading_ft_entry_as_wr_gate_phantom(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """wr_degrading + risk_score >= activation -> phantom: zero qty, slot
-    held, phantom_record carried for execute persistence."""
+    """A degrading FT entry becomes a zero-capital slot-holding phantom."""
     config_path, log_directory = _write_phantom_fixture(
-        tmp_path, signal_date="2026-05-15", risk_score=30, wr_degrading=True
+        tmp_path, signal_date="2026-05-15", wr_degrading=True
     )
     _patch_dashboard_paths(
         monkeypatch,
@@ -2067,9 +1997,6 @@ def test_preview_marks_gated_entry_phantom_when_rs_active(
     # sensor heartbeat + today's phantom decision.
     wr_gate = preview["wr_gate"]
     assert wr_gate["configured"] is True
-    assert wr_gate["active"] is True
-    assert wr_gate["risk_score"] == 30
-    assert wr_gate["activation_threshold"] == 25
     assert wr_gate["sensor"]["degrading"] is True
     assert wr_gate["sensor"]["ema"] == 0.48
     assert wr_gate["phantomed_today"] == ["PHX"]
@@ -2092,34 +2019,12 @@ def test_parse_log_extracts_wr_gate_sensor_heartbeat(tmp_path: Path) -> None:
     assert sensor["window"] == "12/12"
 
 
-def test_preview_no_phantom_when_rs_below_activation(
-    tmp_path: Path, monkeypatch
-) -> None:
-    """Below the activation threshold the gate is OFF; a degrading entry
-    funds normally."""
-    config_path, log_directory = _write_phantom_fixture(
-        tmp_path, signal_date="2026-05-15", risk_score=20, wr_degrading=True
-    )
-    _patch_dashboard_paths(
-        monkeypatch,
-        config_path=config_path,
-        log_directory=log_directory,
-        repository_root=tmp_path,
-    )
-    _patch_phantom_paths(monkeypatch, tmp_path)
-
-    order = dashboard.api_preview_orders()["orders"][0]
-    assert order["symbol"] == "PHX"
-    assert order["qty"] > 0
-    assert order.get("status") != "wr_gate_phantom"
-
-
 def test_preview_no_phantom_when_not_degrading(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Active month but a non-degrading entry funds normally."""
+    """A non-degrading FT entry funds normally."""
     config_path, log_directory = _write_phantom_fixture(
-        tmp_path, signal_date="2026-05-15", risk_score=30, wr_degrading=False
+        tmp_path, signal_date="2026-05-15", wr_degrading=False
     )
     _patch_dashboard_paths(
         monkeypatch,
@@ -2143,14 +2048,10 @@ def test_preview_wr_gate_uses_sensor_without_risk_score(
     config_path, log_directory = _write_phantom_fixture(
         tmp_path,
         signal_date="2026-05-15",
-        risk_score=30,
         wr_degrading=True,
     )
     config_document = json.loads(config_path.read_text(encoding="utf-8"))
     config_document.pop("risk_score_gate")
-    config_document["ft_family_wr_gate"].pop(
-        "risk_score_activation_threshold"
-    )
     config_path.write_text(
         json.dumps(config_document),
         encoding="utf-8",
@@ -2170,13 +2071,9 @@ def test_preview_wr_gate_uses_sensor_without_risk_score(
     order = preview["orders"][0]
     assert order["status"] == "wr_gate_phantom"
     assert order["qty"] == 0
-    assert "sensor-only" in order["skip_reason"]
+    assert "WR-gate phantom" in order["skip_reason"]
     assert preview["wr_gate"] == {
         "configured": True,
-        "active": True,
-        "activation_mode": "sensor_only",
-        "risk_score": None,
-        "activation_threshold": None,
         "sensor": {
             "ema": 0.48,
             "sma": 0.6,
@@ -2197,131 +2094,10 @@ def test_dashboard_html_renders_mechanical_gate_status() -> None:
 
     assert "<strong>Expectancy gate</strong>" in dashboard.HTML_PAGE
     assert "WARMING" in dashboard.HTML_PAGE
-    assert "PRIORITY OVERRIDE" in dashboard.HTML_PAGE
-    assert "(sensor-only)" in dashboard.HTML_PAGE
+    assert "<strong>WR-gate</strong>" in dashboard.HTML_PAGE
     assert "expectancy_gate_phantom" in dashboard.HTML_PAGE
     assert "await previewOrders();" in dashboard.HTML_PAGE
     assert "initializeDashboard();" in dashboard.HTML_PAGE
-
-
-def test_preview_applies_expectancy_priority_and_zero_capital_phantom(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    """The cron heartbeat reorders one daily contest and Tier 1 preserves
-    the winning slot as a zero-capital phantom."""
-
-    signal_date = "2026-05-15"
-    config_path = tmp_path / "multi_bucket_production.json"
-    config_path.write_text(
-        json.dumps({
-            "max_position_count": 1,
-            "starting_cash": 10_000,
-            "margin": 1.0,
-            "withdraw": 0,
-            "expectancy_gate": {
-                "enabled": True,
-                "window": 2,
-                "baseline_mean": 0.0,
-                "baseline_sigma": 0.1,
-                "sigma_multiplier": 1.0,
-                "cold_start": "open",
-                "priority_override": {
-                    "enabled": True,
-                    "sigma_multiplier": 0.5,
-                    "priorities": {
-                        "fish_head_production": 2,
-                        "fish_tail_production": 1,
-                    },
-                },
-            },
-            "adaptive_tp_sl": {"window": 2},
-            "buckets": [
-                {
-                    "label": "fish_head_production",
-                    "strategy_id": "fish_head_vacuum_turn",
-                    "dollar_volume_filter": "dollar_volume=Top5",
-                    "priority": 1,
-                },
-                {
-                    "label": "fish_tail_production",
-                    "strategy_id": "fish_tail_blow_off_top",
-                    "dollar_volume_filter": "dollar_volume=Top5",
-                    "priority": 2,
-                },
-            ],
-        }),
-        encoding="utf-8",
-    )
-    log_directory = tmp_path / "logs"
-    log_directory.mkdir()
-    (log_directory / f"{signal_date}.log").write_text(
-        "[EXPECTANCY_GATE_SENSOR] status=ready mean=-0.200000 "
-        "stop_threshold=-0.100000 soft_threshold=-0.050000 "
-        "gate_closed=True priority_override_active=True window=2/2 "
-        "window_full=True open_pending=0 fed_this_run=0 "
-        "closed_episodes=0 expectancy_gated_trades=0 "
-        "priority_override_entries=0\n"
-        "[FROZEN_TP_SL] entry_date=2026-05-15 "
-        "bucket=fish_head_production strategy_id=fish_head_vacuum_turn "
-        "symbol=HEAD dollar_volume_rank=0 tp_pct=0.050000 sl_pct=0.000000 "
-        "rolling_mp=0.040000 slope_60=0.1 near_delta=0.1 "
-        "fuel_drawdown=None min_hold_tp=1 disable_sl_trigger=True "
-        "max_hold=7 wr_degrading=False\n"
-        "[FROZEN_TP_SL] entry_date=2026-05-15 "
-        "bucket=fish_tail_production strategy_id=fish_tail_blow_off_top "
-        "symbol=TAIL dollar_volume_rank=0 tp_pct=0.050000 sl_pct=0.000000 "
-        "rolling_mp=0.040000 slope_60=0.1 near_delta=0.1 "
-        "fuel_drawdown=None min_hold_tp=1 disable_sl_trigger=True "
-        "max_hold=7 wr_degrading=False\n",
-        encoding="utf-8",
-    )
-    _patch_dashboard_paths(
-        monkeypatch,
-        config_path=config_path,
-        log_directory=log_directory,
-        repository_root=tmp_path,
-    )
-    _patch_phantom_paths(monkeypatch, tmp_path)
-    expectancy_state_path = (
-        tmp_path / "live_state" / "expectancy_gate_state.json"
-    )
-    expectancy_gate_config = (
-        live_expectancy_gate.parse_live_expectancy_gate_config(
-            json.loads(config_path.read_text(encoding="utf-8"))
-        )
-    )
-    assert expectancy_gate_config is not None
-    expectancy_state_document = (
-        live_expectancy_gate.empty_expectancy_gate_state_document(
-            expectancy_gate_config
-        )
-    )
-    expectancy_state_document["rolling_outcomes"] = [
-        {"percentage_change": -0.2},
-        {"percentage_change": -0.2},
-    ]
-    expectancy_state_document["last_evaluation_date"] = signal_date
-    live_expectancy_gate.save_expectancy_gate_state_atomically(
-        expectancy_state_path,
-        expectancy_state_document,
-        expectancy_gate_config,
-    )
-    monkeypatch.setattr(
-        dashboard,
-        "EXPECTANCY_GATE_STATE_PATH",
-        expectancy_state_path,
-    )
-
-    preview = dashboard.api_preview_orders()
-
-    assert preview["expectancy_gate"]["status"] == "closed"
-    assert preview["orders"][0]["symbol"] == "TAIL"
-    assert preview["orders"][0]["status"] == "expectancy_gate_phantom"
-    assert preview["orders"][0]["qty"] == 0
-    assert preview["orders"][0]["expectancy_priority_override"] is True
-    assert preview["orders"][1]["symbol"] == "HEAD"
-    assert preview["orders"][1]["status"] == "slot_full"
 
 
 def test_phantom_still_open_detects_tp_close_and_open_hold(
@@ -2368,7 +2144,6 @@ def test_open_phantom_consumes_a_slot(tmp_path: Path, monkeypatch) -> None:
     config_path, log_directory = _write_phantom_fixture(
         tmp_path,
         signal_date="2026-05-15",
-        risk_score=20,  # gate OFF so AAA candidate is a normal BUY...
         wr_degrading=False,
         symbol="AAA",
         max_position_count=1,
@@ -2562,7 +2337,6 @@ def test_execute_records_funded_buy_in_expectancy_sensor_before_broker(
         "disable_sl_trigger": True,
         "max_hold": 7,
         "expectancy_gated": False,
-        "expectancy_priority_override": False,
     }
     monkeypatch.setattr(
         dashboard,
@@ -2806,3 +2580,49 @@ def test_execute_rejects_order_not_in_fresh_server_preview(monkeypatch) -> None:
             "reason": "order is not present in the current server preview",
         }
     ]
+
+
+def _write_production_config_for_wr_gate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ft_family_wr_gate: dict,
+) -> None:
+    """Point the dashboard at a minimal production config for the loader."""
+
+    config_document: dict = {
+        "max_position_count": 1,
+        "ft_family_wr_gate": ft_family_wr_gate,
+        "buckets": [
+            {
+                "label": "fish_tail_production",
+                "strategy_id": "fish_tail_blow_off_top",
+                "dollar_volume_filter": "dollar_volume=Top5",
+                "priority": 3,
+            }
+        ],
+    }
+    config_path = tmp_path / "production_config.json"
+    config_path.write_text(json.dumps(config_document))
+    monkeypatch.setattr(dashboard, "PRODUCTION_CONFIG_PATH", config_path)
+
+
+def test_wr_gate_enabled_false_is_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_production_config_for_wr_gate(
+        tmp_path,
+        monkeypatch,
+        {"enabled": False, "curve": "wr_cross"},
+    )
+    assert dashboard._load_wr_gate_enabled() is False
+
+
+def test_wr_gate_enabled_requires_explicit_research_opt_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_production_config_for_wr_gate(
+        tmp_path,
+        monkeypatch,
+        {"enabled": True, "curve": "wr_cross"},
+    )
+    assert dashboard._load_wr_gate_enabled() is True

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
@@ -82,14 +83,12 @@ class MultiBucketRunConfig:
     # entries; they remain observable so existing positions can still exit.
     production_symbol_status_path_text: str | None = None
     symbol_seasoning: symbol_seasoning.SymbolSeasoningConfig | None = None
-    # WR-gate (phantom) sensor config. The cron only maintains the sensor
-    # and emits the per-entry degrading flag; the RS-combine + phantom
-    # execution (slot occupancy, exit) live entirely in the order layer
-    # (dashboard). None means the gate is unconfigured (cron stays inert).
+    # Research-only WR-gate sensor config. An explicit opt-in makes the cron
+    # emit its per-entry degrading flag; None is the production/default state.
     wr_gate: "strategy.WRGateConfig | None" = None
-    # Global accepted-trade expectancy sensor.  Cron advances its separate
-    # order-allocation ledger; dashboard applies both tiers once per signal
-    # day.  None keeps every live path inert.
+    # Global accepted-trade expectancy sensor. Cron advances its separate
+    # order-allocation ledger; dashboard applies the stop once per signal day.
+    # None keeps every live path inert.
     expectancy_gate: "strategy.ExpectancyGateConfig | None" = None
 
 
@@ -243,6 +242,13 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
     minimum_holding_bars = int(document.get("min_hold", 0))
     if minimum_holding_bars < 0:
         raise ValueError("min_hold must be >= 0")
+    for raw_bucket_document in document.get("buckets", []):
+        if (
+            isinstance(raw_bucket_document, dict)
+            and raw_bucket_document.get("min_hold") is not None
+            and int(raw_bucket_document["min_hold"]) < 0
+        ):
+            raise ValueError("bucket min_hold must be >= 0")
     show_trade_details = bool(document.get("show_trade_details", False))
 
     start_date_string = document.get("start_date")
@@ -636,6 +642,12 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
                 and raw_bucket["min_hold_sl"] is not None
                 else None
             ),
+            min_hold=(
+                int(raw_bucket["min_hold"])
+                if "min_hold" in raw_bucket
+                and raw_bucket["min_hold"] is not None
+                else None
+            ),
             cohort_co_movement_gate=cohort_co_movement_gate_config,
         )
 
@@ -705,16 +717,37 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
         document.get("symbol_seasoning")
     )
 
-    # WR-gate sensor config. The cron consumes only the sensor-facing
-    # fields (sensor_bucket / gated_buckets / window / curve) to maintain
-    # the win-rate cross and stamp the per-entry degrading flag. The
-    # The optional risk_score_activation_threshold is not applied to sensor
-    # state. The dashboard owns that legacy order-layer condition; omitting
-    # it makes the configured production gate sensor-only. Mirrors the
-    # simulator parse in manage.py so both still read the same JSON key.
+    # Optional research WR-gate config. Production omits this block.
     wr_gate_config: strategy.WRGateConfig | None = None
     raw_wr_gate = document.get("ft_family_wr_gate")
     if raw_wr_gate is not None:
+        raw_wr_gate_enabled = raw_wr_gate.get("enabled", False)
+        if not isinstance(raw_wr_gate_enabled, bool):
+            raise ValueError(
+                "ft_family_wr_gate.enabled must be true or false"
+            )
+        if not raw_wr_gate_enabled:
+            raw_wr_gate = None
+    if raw_wr_gate is not None:
+        supported_wr_gate_keys = {
+            "enabled",
+            "sensor_bucket",
+            "gated_buckets",
+            "window",
+            "score_threshold",
+            "weight_wr",
+            "weight_no_tp",
+            "weight_max_hold",
+            "curve",
+        }
+        unknown_wr_gate_keys = sorted(
+            set(raw_wr_gate) - supported_wr_gate_keys
+        )
+        if unknown_wr_gate_keys:
+            raise ValueError(
+                "ft_family_wr_gate contains unknown key(s): "
+                + ", ".join(unknown_wr_gate_keys)
+            )
         wr_gate_config = strategy.WRGateConfig(
             sensor_bucket=str(
                 raw_wr_gate.get("sensor_bucket", "fish_tail_production")
@@ -731,12 +764,6 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
             weight_no_tp=float(raw_wr_gate.get("weight_no_tp", 0.5)),
             weight_max_hold=float(raw_wr_gate.get("weight_max_hold", 0.0)),
             curve=str(raw_wr_gate.get("curve", "score")),
-            risk_score_activation_threshold=(
-                int(raw_wr_gate["risk_score_activation_threshold"])
-                if raw_wr_gate.get("risk_score_activation_threshold")
-                is not None
-                else None
-            ),
         )
 
     # TODO: review
@@ -747,7 +774,6 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
     expectancy_gate_config = (
         live_expectancy_gate.parse_live_expectancy_gate_config(document)
     )
-
     return MultiBucketRunConfig(
         bucket_definitions=bucket_definitions,
         adaptive_tp_sl=adaptive_tp_sl_config,
@@ -2439,9 +2465,8 @@ def compute_today_signals_and_advance_adaptive_tp_sl_virtual_trade_history(
     # WR-gate degrading flag. The sensor is identical for every entry on
     # this run (it advanced once, before any entry decision), so evaluate
     # it once. The dashboard owns phantom execution (slot occupancy + exit)
-    # and consumes this endogenous flag directly in production. Historical
-    # configs may additionally condition it on a monthly risk score. The flag
-    # is stamped only on gated buckets; non-gated entries always read
+    # and consumes this endogenous flag directly in production. The flag is
+    # stamped only on gated buckets; non-gated entries always read
     # wr_degrading=False.
     wr_gate_degrading = False
     if config.wr_gate is not None:

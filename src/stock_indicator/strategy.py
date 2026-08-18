@@ -593,16 +593,18 @@ class TradeDetail:
     slope_60: float | None = None
     # Phantom-gate flag (action 2): this entry occupied its slot and ran to
     # exit normally, but deployed zero capital because the ft-family sensor
-    # was degrading and any configured activation condition was satisfied.
+    # was degrading.
     phantom: bool = False
     # Rolling-expectancy circuit-breaker flag. This is deliberately separate
     # from ``phantom`` so reports can distinguish the global expectancy gate
     # from the ft-family WR gate while both reuse the same zero-capital slot
     # accounting path.
     expectancy_gated: bool = False
-    # True when the entry day's candidate ranking ran under the soft-tier
-    # expectancy priority override (sensor below the soft threshold).
-    expectancy_priority_override: bool = False
+    # ft-scoped rolling-expectancy phantom flag. Separate from both flags
+    # above so research slices can attribute each zero-capital decision to
+    # its mechanism (WR cross / global expectancy / ft expectancy) while
+    # all three share the same zero-capital slot accounting path.
+    ft_expectancy_gated: bool = False
     # Squeeze-fuel context: maximum drawdown (running-max basis, negative
     # fraction) over the pre-surge window [T-60, T-11] bars before the
     # signal date. Deep values (e.g. <= -0.15) mean the surge was preceded
@@ -825,6 +827,13 @@ class ComplexStrategySetDefinition:
     min_hold_tp: int | None = None
     override_min_hold_sl_only: bool | None = None
     min_hold_sl: int | None = None
+    # Per-bucket signal-exit min_hold. None = inherit top-level `min_hold`.
+    # Sets how many bars the bucket's sell signal is locked out after entry
+    # (signals firing inside the window are permanently invalidated), and
+    # serves as the inherit base for the TP/SL min-hold gates above. Needed
+    # because the window/max_hold ratio differs per narrative — ft's
+    # max_hold 7 leaves a global min_hold 5 only a 3-bar signal window.
+    min_hold: int | None = None
     # Multi-bucket extensions (ignored by run_complex_simulation A/B path):
     # - entry_priority: lower number = wins entry contention first (used by
     #   run_multi_bucket_simulation as a tiebreaker in the event sort key).
@@ -1056,10 +1065,11 @@ class ComplexSimulationMetrics:
         default_factory=list
     )
     expectancy_gated_trade_count: int = 0
-    expectancy_priority_override_days_by_month: Dict[str, int] = field(
-        default_factory=dict
+    ft_expectancy_gate_closed_episodes: List["ExpectancyGateClosedEpisode"] = (
+        field(default_factory=list)
     )
-    expectancy_priority_override_trade_count: int = 0
+    ft_expectancy_gated_trade_count: int = 0
+    ft_expectancy_sensor_outcomes: tuple[ExpectancySensorOutcome, ...] = ()
 
 
 @dataclass
@@ -1077,6 +1087,18 @@ class StrategyEvaluationArtifacts:
     # signal union consumed by re-fire reset (per-bucket
     # reset_hold_on_reentry_signal flag).
     entry_signal_by_symbol: Dict[str, pandas.Series] = field(default_factory=dict)
+
+
+# TODO: review
+@dataclass(frozen=True)
+class AdaptiveEntryReplay:
+    """One signal replayed with the adaptive exit state frozen at entry."""
+
+    completed_trade: Trade
+    take_profit_percentage: float
+    stop_loss_percentage: float
+    rolling_mean_profit: float
+    rolling_median_loss: float
 
 
 def _calculate_bar_excursion_extremes(
@@ -1254,6 +1276,7 @@ def _replay_trade_with_adaptive_tp_sl(
     *tp_pct_late* once holding >= *minimum_holding_bars*.  This allows
     a wider (sector) TP during the catalyst window and a tighter
     (uniform) TP after min_hold.
+
     """
     if trade.bar_excursions is None or not trade.bar_excursions:
         return trade
@@ -1536,32 +1559,6 @@ def compute_frozen_tp_sl_for_bucket(
     return tp_pct, sl_pct, rolling_mp, rolling_ml
 
 
-def _resolve_bucket_entry_priority(
-    bucket_label: str,
-    entry_date: pandas.Timestamp,
-    default_priority: int,
-    bucket_priority_overrides_by_month: dict[str, dict[str, int]] | None,
-) -> int:
-    """Return the bucket priority for an entry event.
-
-    The configured static priority remains the default. Monthly overrides are
-    keyed by ``YYYY-MM`` and only affect labels explicitly present for that
-    month, allowing experiments to change cross-bucket slot contention during
-    selected risk-score regimes without mutating the baseline bucket
-    definitions.
-    """
-
-    if not bucket_priority_overrides_by_month:
-        return default_priority
-    year_month_text = pandas.Timestamp(entry_date).strftime("%Y-%m")
-    priority_overrides_for_month = bucket_priority_overrides_by_month.get(
-        year_month_text
-    )
-    if not priority_overrides_for_month:
-        return default_priority
-    return priority_overrides_for_month.get(bucket_label, default_priority)
-
-
 @dataclass
 class WRSyncedSizingConfig:
     """Continuously sync position sizing with the portfolio's rolling win rate.
@@ -1740,23 +1737,6 @@ def compute_wr_synced_margin_overrides(
     return overrides
 
 
-# TODO: review
-@dataclass(frozen=True)
-class ExpectancyPriorityOverrideConfig:
-    """Soft-tier config: sensor-driven bucket priority reordering.
-
-    Sits between healthy and the stop threshold. When the rolling
-    expectancy falls below ``baseline_mean − sigma_multiplier × sigma``
-    (with the outer gate's baselines), the day's candidate ranking uses
-    ``priorities`` instead of the buckets' default priorities — the same
-    defensive reordering ``risk_score_priority_overrides`` performs on
-    LLM-scored months, but day-granular and mechanical.
-    """
-
-    sigma_multiplier: float
-    priorities: dict[str, int]
-
-
 @dataclass(frozen=True)
 class ExpectancyGateConfig:
     """Configuration for the global rolling-expectancy circuit breaker."""
@@ -1766,24 +1746,12 @@ class ExpectancyGateConfig:
     baseline_sigma: float
     sigma_multiplier: float
     cold_start: str = "open"
-    priority_override: ExpectancyPriorityOverrideConfig | None = None
 
     @property
     def threshold(self) -> float:
         """Return the fixed alarm threshold resolved from the run config."""
 
         return self.baseline_mean - self.sigma_multiplier * self.baseline_sigma
-
-    @property
-    def priority_override_threshold(self) -> float | None:
-        """Return the soft-tier threshold, or ``None`` when not configured."""
-
-        if self.priority_override is None:
-            return None
-        return (
-            self.baseline_mean
-            - self.priority_override.sigma_multiplier * self.baseline_sigma
-        )
 
 
 @dataclass
@@ -1814,11 +1782,6 @@ def parse_expectancy_gate_config(
     if not isinstance(enabled_value, bool):
         raise ValueError("expectancy_gate.enabled must be true or false")
     if not enabled_value:
-        if raw_config.get("priority_override") is not None:
-            raise ValueError(
-                "expectancy_gate.priority_override requires "
-                "expectancy_gate.enabled to be true"
-            )
         return None
 
     supported_keys = {
@@ -1828,7 +1791,6 @@ def parse_expectancy_gate_config(
         "baseline_sigma",
         "sigma_multiplier",
         "cold_start",
-        "priority_override",
     }
     unknown_keys = sorted(set(raw_config) - supported_keys)
     if unknown_keys:
@@ -1880,110 +1842,303 @@ def parse_expectancy_gate_config(
             "expectancy_gate.cold_start must be 'open' or 'closed'"
         )
 
-    priority_override_config = _parse_expectancy_priority_override_config(
-        raw_config.get("priority_override"), sigma_multiplier_value
-    )
-
     return ExpectancyGateConfig(
         window=window_value,
         baseline_mean=baseline_mean_value,
         baseline_sigma=baseline_sigma_value,
         sigma_multiplier=sigma_multiplier_value,
         cold_start=cold_start_value,
-        priority_override=priority_override_config,
     )
 
 
-def _parse_expectancy_priority_override_config(
-    raw_override: Any,
-    stop_sigma_multiplier: float,
-) -> ExpectancyPriorityOverrideConfig | None:
-    """Validate the optional soft-tier priority override sub-block."""
+@dataclass(frozen=True)
+class FTFamilyExpectancyGateConfig:
+    """FT-signal rolling-expectancy phantom gate (coexists with the WR gate).
 
-    if raw_override is None:
-        return None
-    if not isinstance(raw_override, dict):
-        raise ValueError(
-            "expectancy_gate.priority_override must be a JSON object"
+    Same sensor machinery and causality rules as the global expectancy gate,
+    but the deque holds reference outcomes for every eligible signal from the
+    ``sensor_buckets``, including signals later rejected by shared allocation.
+    The decision phantoms only the ``gated_buckets``' accepted entries — slot
+    taken, zero capital. Sensor membership is therefore independent of FH slot
+    occupancy and every gate decision. Anchors are hard-coded fingerprints
+    from config, mirroring the global gate's baseline discipline. Cold start
+    is always open: an unfilled deque never gates.
+    """
+
+    window: int
+    baseline_mean: float
+    baseline_sigma: float
+    sigma_multiplier: float
+    decision_mode: str = "rolling_trades"
+    period_months: int | None = None
+    period_decision_threshold: float | None = None
+    period_minimum_samples: int = 1
+    sensor_buckets: tuple[str, ...] = (
+        "fish_tail_production",
+        "fish_tail_squeeze",
+    )
+    gated_buckets: tuple[str, ...] = (
+        "fish_tail_production",
+        "fish_tail_squeeze",
+    )
+
+    @property
+    def threshold(self) -> float:
+        """Return the fixed alarm threshold resolved from the run config."""
+
+        if self.decision_mode == "previous_calendar_period":
+            if self.period_decision_threshold is None:
+                raise ValueError(
+                    "previous-calendar-period FT gate requires a threshold"
+                )
+            return self.period_decision_threshold
+        return self.baseline_mean - self.sigma_multiplier * self.baseline_sigma
+
+    def to_sensor_gate_config(self) -> ExpectancyGateConfig:
+        """Build the inner rolling sensor config with an open cold start."""
+
+        return ExpectancyGateConfig(
+            window=self.window,
+            baseline_mean=self.baseline_mean,
+            baseline_sigma=self.baseline_sigma,
+            sigma_multiplier=self.sigma_multiplier,
+            cold_start="open",
         )
 
-    enabled_value = raw_override.get("enabled", False)
+
+# TODO: review
+@dataclass(frozen=True)
+class ExpectancySensorOutcome:
+    """Record one counterfactual signal outcome observed by a sensor.
+
+    Entry dates identify the opportunity period that produced the signal.
+    Exit dates identify when the completed result became causally observable.
+    Keeping both dates prevents research exports from silently treating an
+    outcome as known when only its entry signal existed.
+    """
+
+    entry_date: pandas.Timestamp
+    exit_date: pandas.Timestamp
+    percentage_change: float
+    exit_reason: str
+    holding_bars: int
+    max_favorable_excursion_pct: float | None
+    max_adverse_excursion_pct: float | None
+
+
+def _build_expectancy_sensor_outcome(
+    completed_trade: Trade,
+) -> ExpectancySensorOutcome:
+    """Build the typed observation shared by gate and research sensors."""
+
+    percentage_change = (
+        completed_trade.profit / completed_trade.entry_price
+        if completed_trade.entry_price > 0
+        else 0.0
+    )
+    return ExpectancySensorOutcome(
+        entry_date=completed_trade.entry_date,
+        exit_date=completed_trade.exit_date,
+        percentage_change=percentage_change,
+        exit_reason=completed_trade.exit_reason,
+        holding_bars=completed_trade.holding_period,
+        max_favorable_excursion_pct=(
+            completed_trade.max_favorable_excursion_pct
+        ),
+        max_adverse_excursion_pct=(
+            completed_trade.max_adverse_excursion_pct
+        ),
+    )
+
+
+def parse_ft_family_expectancy_gate_config(
+    raw_config: Any,
+) -> FTFamilyExpectancyGateConfig | None:
+    """Parse and validate the ``ft_family_expectancy_gate`` config block."""
+
+    if raw_config is None:
+        return None
+    if not isinstance(raw_config, dict):
+        raise ValueError("ft_family_expectancy_gate must be a JSON object")
+    enabled_value = raw_config.get("enabled", True)
     if not isinstance(enabled_value, bool):
         raise ValueError(
-            "expectancy_gate.priority_override.enabled must be true or false"
+            "ft_family_expectancy_gate.enabled must be true or false"
         )
     if not enabled_value:
         return None
-
-    supported_keys = {"enabled", "sigma_multiplier", "priorities"}
-    unknown_keys = sorted(set(raw_override) - supported_keys)
+    allowed_keys = {
+        "enabled",
+        "window",
+        "baseline_mean",
+        "baseline_sigma",
+        "sigma_multiplier",
+        "decision_mode",
+        "period_months",
+        "period_decision_threshold",
+        "period_minimum_samples",
+        "sensor_buckets",
+        "gated_buckets",
+    }
+    unknown_keys = set(raw_config) - allowed_keys
     if unknown_keys:
         raise ValueError(
-            "expectancy_gate.priority_override contains unknown key(s): "
-            + ", ".join(unknown_keys)
+            "ft_family_expectancy_gate contains unknown key(s): "
+            + ", ".join(sorted(unknown_keys))
         )
-
-    raw_sigma_multiplier = raw_override.get("sigma_multiplier")
-    if raw_sigma_multiplier is None:
+    raw_window = raw_config.get("window")
+    if not isinstance(raw_window, int) or isinstance(raw_window, bool):
         raise ValueError(
-            "expectancy_gate.priority_override.sigma_multiplier is required"
+            "ft_family_expectancy_gate.window must be an integer >= 2"
         )
-    if isinstance(raw_sigma_multiplier, bool):
+    if raw_window < 2:
         raise ValueError(
-            "expectancy_gate.priority_override.sigma_multiplier must be "
-            "a number"
+            "ft_family_expectancy_gate.window must be an integer >= 2"
         )
-    try:
-        sigma_multiplier_value = float(raw_sigma_multiplier)
-    except (TypeError, ValueError) as parse_error:
-        raise ValueError(
-            "expectancy_gate.priority_override.sigma_multiplier must be "
-            "a number"
-        ) from parse_error
-    if not math.isfinite(sigma_multiplier_value) or not sigma_multiplier_value > 0:
-        raise ValueError(
-            "expectancy_gate.priority_override.sigma_multiplier must be > 0"
-        )
-    if not sigma_multiplier_value < stop_sigma_multiplier:
-        raise ValueError(
-            "expectancy_gate.priority_override.sigma_multiplier must be "
-            "smaller than expectancy_gate.sigma_multiplier so the soft "
-            "threshold sits above the stop threshold"
-        )
-
-    raw_priorities = raw_override.get("priorities")
-    if not isinstance(raw_priorities, dict) or not raw_priorities:
-        raise ValueError(
-            "expectancy_gate.priority_override.priorities must be a "
-            "non-empty JSON object"
-        )
-    priorities_by_bucket_label: dict[str, int] = {}
-    for raw_bucket_label, raw_priority in raw_priorities.items():
-        if not isinstance(raw_bucket_label, str):
+    numeric_values: dict[str, float] = {}
+    for required_key in ("baseline_mean", "baseline_sigma", "sigma_multiplier"):
+        raw_value = raw_config.get(required_key)
+        if raw_value is None:
             raise ValueError(
-                "expectancy_gate.priority_override.priorities keys must be "
-                "bucket labels"
+                f"ft_family_expectancy_gate.{required_key} is required"
             )
-        if isinstance(raw_priority, bool) or not isinstance(raw_priority, int):
+        if isinstance(raw_value, bool) or not isinstance(
+            raw_value, (int, float)
+        ):
             raise ValueError(
-                "expectancy_gate.priority_override.priorities values must "
-                "be integers"
+                f"ft_family_expectancy_gate.{required_key} must be a number"
             )
-        priorities_by_bucket_label[raw_bucket_label] = raw_priority
-
-    return ExpectancyPriorityOverrideConfig(
-        sigma_multiplier=sigma_multiplier_value,
-        priorities=priorities_by_bucket_label,
+        numeric_values[required_key] = float(raw_value)
+    if not all(math.isfinite(value) for value in numeric_values.values()):
+        raise ValueError(
+            "ft_family_expectancy_gate baseline_mean, baseline_sigma, and "
+            "sigma_multiplier must be finite"
+        )
+    if numeric_values["baseline_sigma"] <= 0:
+        raise ValueError(
+            "ft_family_expectancy_gate.baseline_sigma must be > 0"
+        )
+    if numeric_values["sigma_multiplier"] <= 0:
+        raise ValueError(
+            "ft_family_expectancy_gate.sigma_multiplier must be > 0"
+        )
+    decision_mode_value = raw_config.get("decision_mode", "rolling_trades")
+    if (
+        not isinstance(decision_mode_value, str)
+        or decision_mode_value not in {
+            "rolling_trades",
+            "previous_calendar_period",
+        }
+    ):
+        raise ValueError(
+            "ft_family_expectancy_gate.decision_mode must be "
+            "'rolling_trades' or 'previous_calendar_period'"
+        )
+    period_months_value: int | None = None
+    period_decision_threshold_value: float | None = None
+    period_minimum_samples_value = 1
+    if decision_mode_value == "previous_calendar_period":
+        raw_period_months = raw_config.get("period_months")
+        if (
+            isinstance(raw_period_months, bool)
+            or not isinstance(raw_period_months, int)
+            or raw_period_months <= 0
+            or 12 % raw_period_months != 0
+        ):
+            raise ValueError(
+                "ft_family_expectancy_gate.period_months must be a positive "
+                "integer divisor of 12"
+            )
+        period_months_value = raw_period_months
+        raw_period_decision_threshold = raw_config.get(
+            "period_decision_threshold"
+        )
+        if isinstance(raw_period_decision_threshold, bool) or not isinstance(
+            raw_period_decision_threshold,
+            (int, float),
+        ):
+            raise ValueError(
+                "ft_family_expectancy_gate.period_decision_threshold must "
+                "be a finite number"
+            )
+        period_decision_threshold_value = float(
+            raw_period_decision_threshold
+        )
+        if not math.isfinite(period_decision_threshold_value):
+            raise ValueError(
+                "ft_family_expectancy_gate.period_decision_threshold must "
+                "be a finite number"
+            )
+        raw_period_minimum_samples = raw_config.get(
+            "period_minimum_samples",
+            1,
+        )
+        if (
+            isinstance(raw_period_minimum_samples, bool)
+            or not isinstance(raw_period_minimum_samples, int)
+            or raw_period_minimum_samples < 1
+        ):
+            raise ValueError(
+                "ft_family_expectancy_gate.period_minimum_samples must be "
+                "an integer >= 1"
+            )
+        period_minimum_samples_value = raw_period_minimum_samples
+    elif any(
+        period_key in raw_config
+        for period_key in (
+            "period_months",
+            "period_decision_threshold",
+            "period_minimum_samples",
+        )
+    ):
+        raise ValueError(
+            "ft_family_expectancy_gate period fields require "
+            "decision_mode='previous_calendar_period'"
+        )
+    bucket_lists: dict[str, tuple[str, ...]] = {}
+    for bucket_key, default_buckets in (
+        ("sensor_buckets", FTFamilyExpectancyGateConfig.sensor_buckets),
+        ("gated_buckets", FTFamilyExpectancyGateConfig.gated_buckets),
+    ):
+        raw_buckets = raw_config.get(bucket_key)
+        if raw_buckets is None:
+            bucket_lists[bucket_key] = tuple(default_buckets)
+            continue
+        if (
+            not isinstance(raw_buckets, list)
+            or not raw_buckets
+            or not all(
+                isinstance(bucket_label, str) and bucket_label
+                for bucket_label in raw_buckets
+            )
+        ):
+            raise ValueError(
+                f"ft_family_expectancy_gate.{bucket_key} must be a "
+                "non-empty list of bucket labels"
+            )
+        bucket_lists[bucket_key] = tuple(raw_buckets)
+    return FTFamilyExpectancyGateConfig(
+        window=raw_window,
+        baseline_mean=numeric_values["baseline_mean"],
+        baseline_sigma=numeric_values["baseline_sigma"],
+        sigma_multiplier=numeric_values["sigma_multiplier"],
+        decision_mode=decision_mode_value,
+        period_months=period_months_value,
+        period_decision_threshold=period_decision_threshold_value,
+        period_minimum_samples=period_minimum_samples_value,
+        sensor_buckets=bucket_lists["sensor_buckets"],
+        gated_buckets=bucket_lists["gated_buckets"],
     )
 
 
 class ExpectancyGateSensor:
-    """Maintain the causal global deque of accepted-trade returns.
+    """Maintain a causal rolling deque of scheduled outcome returns.
 
-    Accepted outcomes are scheduled immediately but become observable only
-    for candidate entries strictly later than their exit dates. A heap makes
-    the consumption order explicit: exit date, entry date, then the stable
-    trade-detail ordering assigned by the simulation.
+    Outcomes are scheduled immediately but become observable only for
+    candidate entries strictly later than their exit dates. A heap makes the
+    consumption order explicit: exit date, entry date, then the stable order
+    assigned by the caller. The global gate schedules accepted trades; the FT
+    family gate schedules eligible reference signals.
     """
 
     def __init__(self, gate_config: ExpectancyGateConfig) -> None:
@@ -2002,7 +2157,11 @@ class ExpectancyGateSensor:
             ]
         ] = []
         self._scheduled_versions_by_trade_identifier: dict[int, int] = {}
+        self._outcomes_by_schedule_version: dict[
+            tuple[int, int], ExpectancySensorOutcome
+        ] = {}
         self._consumed_trade_identifiers: set[int] = set()
+        self._consumed_outcomes: list[ExpectancySensorOutcome] = []
 
     @property
     def rolling_returns(self) -> tuple[float, ...]:
@@ -2018,13 +2177,20 @@ class ExpectancyGateSensor:
             return None
         return sum(self._rolling_returns) / len(self._rolling_returns)
 
-    def schedule_accepted_trade(
+    @property
+    def consumed_outcomes(self) -> tuple[ExpectancySensorOutcome, ...]:
+        """Return completed outcomes in their causal observation order."""
+
+        return tuple(self._consumed_outcomes)
+
+    # TODO: review
+    def schedule_outcome(
         self,
         trade_identifier: int,
         completed_trade: Trade,
         stable_trade_detail_order: int,
     ) -> None:
-        """Schedule one accepted outcome or replace its pending schedule."""
+        """Schedule one causal outcome or replace its pending schedule."""
 
         if trade_identifier in self._consumed_trade_identifiers:
             return
@@ -2037,11 +2203,11 @@ class ExpectancyGateSensor:
         self._scheduled_versions_by_trade_identifier[
             trade_identifier
         ] = schedule_version
-        percentage_change = (
-            completed_trade.profit / completed_trade.entry_price
-            if completed_trade.entry_price > 0
-            else 0.0
-        )
+        sensor_outcome = _build_expectancy_sensor_outcome(completed_trade)
+        percentage_change = sensor_outcome.percentage_change
+        self._outcomes_by_schedule_version[
+            (trade_identifier, schedule_version)
+        ] = sensor_outcome
         heapq.heappush(
             self._pending_outcomes,
             (
@@ -2054,6 +2220,20 @@ class ExpectancyGateSensor:
             ),
         )
 
+    def schedule_accepted_trade(
+        self,
+        trade_identifier: int,
+        completed_trade: Trade,
+        stable_trade_detail_order: int,
+    ) -> None:
+        """Schedule an accepted outcome through the generic sensor API."""
+
+        self.schedule_outcome(
+            trade_identifier,
+            completed_trade,
+            stable_trade_detail_order,
+        )
+
     def consume_trades_exited_before(
         self, candidate_entry_date: pandas.Timestamp
     ) -> None:
@@ -2064,13 +2244,16 @@ class ExpectancyGateSensor:
             and self._pending_outcomes[0][0] < candidate_entry_date
         ):
             (
-                _exit_date,
-                _entry_date,
+                exit_date,
+                entry_date,
                 _stable_trade_detail_order,
                 trade_identifier,
                 schedule_version,
                 percentage_change,
             ) = heapq.heappop(self._pending_outcomes)
+            scheduled_outcome = self._outcomes_by_schedule_version.pop(
+                (trade_identifier, schedule_version)
+            )
             current_schedule_version = (
                 self._scheduled_versions_by_trade_identifier.get(
                     trade_identifier
@@ -2081,7 +2264,22 @@ class ExpectancyGateSensor:
             if trade_identifier in self._consumed_trade_identifiers:
                 continue
             self._rolling_returns.append(percentage_change)
+            self._consumed_outcomes.append(scheduled_outcome)
             self._consumed_trade_identifiers.add(trade_identifier)
+
+    # TODO: review
+    def outcome_returns_exited_between(
+        self,
+        period_start: pandas.Timestamp,
+        period_end: pandas.Timestamp,
+    ) -> tuple[float, ...]:
+        """Return consumed outcomes whose exits fall in ``[start, end)``."""
+
+        return tuple(
+            outcome.percentage_change
+            for outcome in self._consumed_outcomes
+            if period_start <= outcome.exit_date < period_end
+        )
 
     def consume_all_scheduled_trades(self) -> None:
         """Consume every remaining accepted outcome after entry processing."""
@@ -2105,27 +2303,6 @@ class ExpectancyGateSensor:
         )
         return rolling_mean_value < self.gate_config.threshold
 
-    def is_priority_override_active_before_entry(
-        self, candidate_entry_date: pandas.Timestamp
-    ) -> bool:
-        """Return the soft-tier decision using only strictly earlier exits.
-
-        The soft tier stays inactive until the deque is full: a defensive
-        reordering needs evidence, so cold start is always open here.
-        """
-
-        soft_threshold = self.gate_config.priority_override_threshold
-        if soft_threshold is None:
-            return False
-        self.consume_trades_exited_before(candidate_entry_date)
-        if len(self._rolling_returns) < self.gate_config.window:
-            return False
-        rolling_mean_value = sum(self._rolling_returns) / len(
-            self._rolling_returns
-        )
-        return rolling_mean_value < soft_threshold
-
-
 class RollingExpectancyGate:
     """Apply sensor decisions and track contiguous gate-closed episodes."""
 
@@ -2134,41 +2311,6 @@ class RollingExpectancyGate:
         self.closed_episodes: List[ExpectancyGateClosedEpisode] = []
         self.expectancy_gated_trade_count = 0
         self._previous_entry_was_alarmed = False
-        self.priority_override_active_days_by_month: dict[str, int] = {}
-        self.priority_override_entry_count = 0
-        self._priority_override_decision_by_day: dict[
-            pandas.Timestamp, bool
-        ] = {}
-
-    def priority_override_active_for_entry_day(
-        self, entry_date: pandas.Timestamp
-    ) -> bool:
-        """Evaluate the soft tier once per entry day and cache the result.
-
-        The sensor only consumes exits strictly before the entry day, so
-        every candidate on that day sees one regime. Caching per day keeps
-        the ranking decision and the reported day counts consistent no
-        matter how many times a day is queried.
-        """
-
-        if self.gate_config.priority_override is None:
-            return False
-        cached_decision = self._priority_override_decision_by_day.get(
-            entry_date
-        )
-        if cached_decision is not None:
-            return cached_decision
-        is_active = self.sensor.is_priority_override_active_before_entry(
-            entry_date
-        )
-        self._priority_override_decision_by_day[entry_date] = is_active
-        if is_active:
-            month_key = entry_date.strftime("%Y-%m")
-            self.priority_override_active_days_by_month[month_key] = (
-                self.priority_override_active_days_by_month.get(month_key, 0)
-                + 1
-            )
-        return is_active
 
     def evaluate_accepted_entry(
         self, candidate_entry_date: pandas.Timestamp
@@ -2199,81 +2341,124 @@ class RollingExpectancyGate:
         return self.sensor.gate_config
 
 
-def _resort_front_day_entries_for_expectancy_override(
-    entry_events: deque,
-    rolling_expectancy_gate: "RollingExpectancyGate",
-) -> None:
-    """Re-rank the front same-day run of entry events under the soft tier.
+# TODO: review
+class PreviousCalendarPeriodExpectancyGate:
+    """Freeze each period's gate decision from the preceding period.
 
-    Entry events are globally date-sorted, so the override regime for one
-    day only needs the contiguous front run re-ordered by the override
-    bucket priority (tuple field 7) before any of that day's entries are
-    consumed. Idempotent within a day.
+    The reference sample is selected by outcome exit date. A candidate in
+    the current period can therefore see only signals whose counterfactual
+    trades finished before the period boundary. The decision is cached for
+    the whole current period so recent outcomes cannot alter it mid-period.
     """
 
-    if not entry_events:
-        return
-    front_date = entry_events[0][0]
-    if not rolling_expectancy_gate.priority_override_active_for_entry_day(
-        front_date
-    ):
-        return
-    same_day_entry_events = []
-    while entry_events and entry_events[0][0] == front_date:
-        same_day_entry_events.append(entry_events.popleft())
-    same_day_entry_events.sort(
-        key=lambda event: (event[7], event[3], event[4])
-    )
-    for event in reversed(same_day_entry_events):
-        entry_events.appendleft(event)
-
-
-def _iter_events_with_expectancy_priority_override(
-    events: list,
-    rolling_expectancy_gate: "RollingExpectancyGate",
-):
-    """Yield events, re-ranking same-day entry runs under the soft tier.
-
-    Non-adaptive counterpart of the deque re-sort: entry events (type 1)
-    for one date are contiguous in the sorted event list, so each run is
-    re-ordered by the override bucket priority when the sensor reading for
-    that day (exits strictly before it) sits below the soft threshold.
-    """
-
-    index = 0
-    total_event_count = len(events)
-    while index < total_event_count:
-        event = events[index]
-        if event[1] != 1:
-            yield event
-            index += 1
-            continue
-        run_end_index = index
-        while (
-            run_end_index < total_event_count
-            and events[run_end_index][1] == 1
-            and events[run_end_index][0] == event[0]
-        ):
-            run_end_index += 1
-        same_day_entry_events = events[index:run_end_index]
-        if rolling_expectancy_gate.priority_override_active_for_entry_day(
-            event[0]
-        ):
-            same_day_entry_events = sorted(
-                same_day_entry_events,
-                key=lambda run_event: (
-                    run_event[7],
-                    run_event[3],
-                    run_event[4],
-                ),
+    def __init__(self, gate_config: FTFamilyExpectancyGateConfig) -> None:
+        if gate_config.decision_mode != "previous_calendar_period":
+            raise ValueError(
+                "previous-calendar-period gate requires its matching mode"
             )
-        yield from same_day_entry_events
-        index = run_end_index
+        if gate_config.period_months is None:
+            raise ValueError(
+                "previous-calendar-period gate requires period_months"
+            )
+        self.gate_config = gate_config
+        self.sensor = ExpectancyGateSensor(
+            gate_config.to_sensor_gate_config()
+        )
+        self.closed_episodes: List[ExpectancyGateClosedEpisode] = []
+        self.expectancy_gated_trade_count = 0
+        self._previous_entry_was_alarmed = False
+        self._decision_by_period_start: dict[pandas.Timestamp, bool] = {}
+
+    def _calendar_period_start(
+        self,
+        candidate_entry_date: pandas.Timestamp,
+    ) -> pandas.Timestamp:
+        """Return the start of the configured calendar-aligned period."""
+
+        period_months = self.gate_config.period_months
+        if period_months is None:
+            raise ValueError("period_months must be configured")
+        zero_based_month = candidate_entry_date.month - 1
+        first_month = (
+            zero_based_month // period_months
+        ) * period_months + 1
+        return pandas.Timestamp(
+            year=candidate_entry_date.year,
+            month=first_month,
+            day=1,
+        )
+
+    def _is_alarmed_for_entry(
+        self,
+        candidate_entry_date: pandas.Timestamp,
+    ) -> bool:
+        """Resolve the frozen decision using the previous period's exits."""
+
+        self.sensor.consume_trades_exited_before(candidate_entry_date)
+        current_period_start = self._calendar_period_start(
+            candidate_entry_date
+        )
+        cached_decision = self._decision_by_period_start.get(
+            current_period_start
+        )
+        if cached_decision is not None:
+            return cached_decision
+
+        period_months = self.gate_config.period_months
+        if period_months is None:
+            raise ValueError("period_months must be configured")
+        previous_period_start = current_period_start - pandas.DateOffset(
+            months=period_months
+        )
+        previous_period_returns = (
+            self.sensor.outcome_returns_exited_between(
+                previous_period_start,
+                current_period_start,
+            )
+        )
+        sample_count_is_sufficient = len(previous_period_returns) >= (
+            self.gate_config.period_minimum_samples
+        )
+        previous_period_mean = (
+            sum(previous_period_returns) / len(previous_period_returns)
+            if previous_period_returns
+            else None
+        )
+        is_alarmed = bool(
+            sample_count_is_sufficient
+            and previous_period_mean is not None
+            and previous_period_mean < self.gate_config.threshold
+        )
+        self._decision_by_period_start[current_period_start] = is_alarmed
+        return is_alarmed
+
+    def evaluate_accepted_entry(
+        self,
+        candidate_entry_date: pandas.Timestamp,
+    ) -> bool:
+        """Evaluate and record the frozen decision for an accepted entry."""
+
+        is_alarmed = self._is_alarmed_for_entry(candidate_entry_date)
+        if is_alarmed:
+            self.expectancy_gated_trade_count += 1
+            if not self._previous_entry_was_alarmed:
+                self.closed_episodes.append(
+                    ExpectancyGateClosedEpisode(
+                        first_entry_date=candidate_entry_date,
+                        last_entry_date=candidate_entry_date,
+                    )
+                )
+            else:
+                current_episode = self.closed_episodes[-1]
+                current_episode.last_entry_date = candidate_entry_date
+                current_episode.gated_trade_count += 1
+        self._previous_entry_was_alarmed = is_alarmed
+        return is_alarmed
 
 
 @dataclass
 class WRGateConfig:
-    """Regime phantom gate for the fish_tail family (action 2, 2026-06-12).
+    """Research-only regime phantom gate for the fish_tail family.
 
     A fuzzy score over the sensor bucket's last `window` closed trades
     (real AND phantom — the phantom stream keeps the sensor alive so the
@@ -2319,18 +2504,6 @@ class WRGateConfig:
     # (N-response showed a plateau at 8-12; 10 = plateau middle).
     # score_threshold/weights are ignored in wr_cross mode.
     curve: str = "score"
-    # Risk-score activation: when set, the WR-gate only fires (marks
-    # phantom) in months whose risk score is >= this threshold. The gate
-    # is fully OFF in calmer months — entries deploy capital normally.
-    # Motivation: the full-time gate pays a bull-market false-kill tax
-    # because the WR cross (an endogenous edge-death detector) cannot
-    # tell a bull-market WR dip from a grind. Risk score (an exogenous
-    # macro-regime indicator) is consulted monthly — same mechanism as
-    # the system-wide stop — so the gate only operates when a crisis is
-    # actually present. None = always active (original behaviour). The
-    # activation months are resolved by manage.py from the same risk
-    # CSV and passed to run_complex_simulation.
-    risk_score_activation_threshold: int | None = None
 
 
 def compute_wr_gate_score(
@@ -2491,8 +2664,8 @@ def evaluate_wr_gate_phantom(
     update_wr_gate_sensor_state) and applies the same wr_cross logic as
     the simulator entry gate: EMA_N < SMA_N (degrading) OR SMA_N below
     the dynamic greedy breakeven floor. Returns False until the SMA
-    window is full (warm-up). Does NOT apply the risk-score activation —
-    that exogenous AND is layered by the caller.
+    window is full (warm-up). Configured gated buckets consume the result
+    directly.
     """
 
     if gate_config.curve != "wr_cross":
@@ -2597,12 +2770,12 @@ def run_complex_simulation(
     exported_state: Dict[str, Any] | None = None,
     risk_score_stop_months: set[str] | None = None,
     margin_overrides: dict[str, float] | None = None,
-    bucket_priority_overrides_by_month: dict[str, dict[str, int]] | None = None,
     symbol_first_eligible_trade_dates: dict[str, datetime.date] | None = None,
     wr_synced_sizing: WRSyncedSizingConfig | None = None,
     wr_gate: WRGateConfig | None = None,
-    wr_gate_active_months: set[str] | None = None,
     expectancy_gate: ExpectancyGateConfig | None = None,
+    ft_expectancy_gate: FTFamilyExpectancyGateConfig | None = None,
+    ft_signal_outcome_sensor_buckets: tuple[str, ...] | None = None,
 ) -> ComplexSimulationMetrics:
     """Evaluate multiple strategy sets under a shared configuration.
 
@@ -2618,11 +2791,6 @@ def run_complex_simulation(
     the event sort order. The B-specific hardcoding is disabled so any number
     of buckets can share a global slot pool on a first-come-first-served
     basis, with priority as the secondary ordering key.
-
-    ``bucket_priority_overrides_by_month`` optionally replaces a bucket's
-    configured priority for entry events in selected ``YYYY-MM`` months. It is
-    intended for risk-regime experiments where slot contention should favor
-    one bucket family without changing the baseline bucket definitions.
 
     ``start_date`` and ``end_date`` bound the causal simulation. When the
     statistics dates are supplied, trades before ``statistics_start_date``
@@ -2687,12 +2855,47 @@ def run_complex_simulation(
             "wr_gate.curve must be 'score' or 'wr_cross', "
             f"got {wr_gate.curve!r}"
         )
-
+    for _set_definition in set_definitions.values():
+        if (
+            _set_definition.min_hold is not None
+            and _set_definition.min_hold < 0
+        ):
+            raise ValueError("bucket min_hold must be >= 0")
+    if ft_expectancy_gate is not None:
+        for _gate_bucket_label in (
+            *ft_expectancy_gate.sensor_buckets,
+            *ft_expectancy_gate.gated_buckets,
+        ):
+            if _gate_bucket_label not in set_definitions:
+                raise ValueError(
+                    "ft_family_expectancy_gate references unknown bucket "
+                    f"label: {_gate_bucket_label}"
+                )
+    if ft_signal_outcome_sensor_buckets is not None:
+        for sensor_bucket_label in ft_signal_outcome_sensor_buckets:
+            if sensor_bucket_label not in set_definitions:
+                raise ValueError(
+                    "FT signal outcome sensor references unknown bucket "
+                    f"label: {sensor_bucket_label}"
+                )
     effective_interest_rate = (
         margin_interest_annual_rate if margin_multiplier != 1.0 else 0.0
     )
     artifacts_by_set: Dict[str, StrategyEvaluationArtifacts] = {}
     position_limits_by_set: Dict[str, int] = {}
+    # Per-set signal-exit min_hold (None on the definition = inherit the
+    # top-level value). Consumed by the artifact generation call, the
+    # slot-eviction gate, the same-symbol refresh SL check and the
+    # adaptive replay so one bucket can widen its signal-exit window
+    # without moving the others.
+    min_hold_bars_by_set: Dict[str, int] = {
+        set_label: (
+            set_definition.min_hold
+            if set_definition.min_hold is not None
+            else minimum_holding_bars
+        )
+        for set_label, set_definition in set_definitions.items()
+    }
     priority_mode_by_set: Dict[str, str] = {}
     for label, definition in set_definitions.items():
         if multi_bucket_mode:
@@ -2739,7 +2942,11 @@ def run_complex_simulation(
                 0.0 if adaptive_tp_sl is not None
                 else definition.take_profit_percentage
             ),
-            minimum_holding_bars=minimum_holding_bars,
+            minimum_holding_bars=(
+                definition.min_hold
+                if definition.min_hold is not None
+                else minimum_holding_bars
+            ),
             use_confirmation_angle=use_confirmation_angle,
             confirmation_entry_mode=confirmation_entry_mode,
             margin_multiplier=margin_multiplier,
@@ -2839,33 +3046,11 @@ def run_complex_simulation(
         label: 0 for label in set_definitions
     }
     event_insertion_counter = 0
-    # Soft-tier expectancy priority override: every entry event carries a
-    # second bucket priority resolved from the override map, so day batches
-    # can be re-ranked at processing time when the sensor is degraded.
-    expectancy_override_priorities = (
-        expectancy_gate.priority_override.priorities
-        if expectancy_gate is not None
-        and expectancy_gate.priority_override is not None
-        else None
-    )
     for label, artifacts in artifacts_by_set.items():
         priority_mode = priority_mode_by_set.get(label)
         for trade in artifacts.trades:
-            default_bucket_priority = (
+            bucket_priority_value = (
                 set_definitions[label].entry_priority if multi_bucket_mode else 0
-            )
-            bucket_priority_value = _resolve_bucket_entry_priority(
-                label,
-                trade.entry_date,
-                default_bucket_priority,
-                bucket_priority_overrides_by_month,
-            )
-            override_bucket_priority_value = (
-                expectancy_override_priorities.get(
-                    label, default_bucket_priority
-                )
-                if expectancy_override_priorities is not None
-                else bucket_priority_value
             )
             entry_priority = 0.0
             trade_detail_pair = artifacts.trade_detail_pairs.get(trade)
@@ -2880,7 +3065,6 @@ def run_complex_simulation(
                     <= set_definitions[label].fuel_priority_threshold
                 ):
                     bucket_priority_value -= 1
-                    override_bucket_priority_value -= 1
                 if priority_mode == "s4":
                     ratio_value = (
                         entry_detail.above_price_volume_ratio
@@ -2908,7 +3092,6 @@ def run_complex_simulation(
                     event_insertion_counter,
                     label,
                     trade,
-                    override_bucket_priority_value,
                 )
             )
             event_insertion_counter += 1
@@ -2923,7 +3106,6 @@ def run_complex_simulation(
                         event_insertion_counter,
                         label,
                         trade,
-                        0,
                     )
                 )
                 event_insertion_counter += 1
@@ -2987,12 +3169,39 @@ def run_complex_simulation(
         if expectancy_gate is not None
         else None
     )
-
-    def _schedule_expectancy_gate_outcome(
+    ft_family_expectancy_gate: (
+        RollingExpectancyGate | PreviousCalendarPeriodExpectancyGate | None
+    ) = None
+    if ft_expectancy_gate is not None:
+        if ft_expectancy_gate.decision_mode == "previous_calendar_period":
+            ft_family_expectancy_gate = (
+                PreviousCalendarPeriodExpectancyGate(ft_expectancy_gate)
+            )
+        else:
+            ft_family_expectancy_gate = RollingExpectancyGate(
+                ft_expectancy_gate.to_sensor_gate_config()
+            )
+    ft_signal_outcome_records: list[
+        tuple[
+            pandas.Timestamp,
+            pandas.Timestamp,
+            int,
+            ExpectancySensorOutcome,
+        ]
+    ] = []
+    ft_signal_sensor_bucket_labels = set(
+        ft_signal_outcome_sensor_buckets or ()
+    )
+    if ft_expectancy_gate is not None:
+        ft_signal_sensor_bucket_labels.update(
+            ft_expectancy_gate.sensor_buckets
+        )
+    # TODO: review
+    def _schedule_global_expectancy_gate_outcome(
         original_trade_identifier: int,
         completed_trade: Trade,
     ) -> None:
-        """Schedule one accepted trade's current adjusted outcome."""
+        """Schedule one accepted trade for the global allocation sensor."""
 
         if rolling_expectancy_gate is None:
             return
@@ -3006,6 +3215,39 @@ def run_complex_simulation(
             completed_trade,
             stable_trade_detail_order,
         )
+
+    def _schedule_ft_expectancy_signal_outcome(
+        bucket_label: str,
+        original_trade: Trade,
+        completed_reference_trade: Trade,
+        stable_signal_order: int,
+    ) -> None:
+        """Schedule every eligible FT signal, independent of allocation."""
+
+        if (
+            ft_signal_outcome_sensor_buckets is not None
+            and bucket_label in ft_signal_outcome_sensor_buckets
+        ):
+            signal_outcome = _build_expectancy_sensor_outcome(
+                completed_reference_trade
+            )
+            ft_signal_outcome_records.append(
+                (
+                    signal_outcome.exit_date,
+                    signal_outcome.entry_date,
+                    stable_signal_order,
+                    signal_outcome,
+                )
+            )
+        if (
+            ft_family_expectancy_gate is not None
+            and bucket_label in ft_expectancy_gate.sensor_buckets
+        ):
+            ft_family_expectancy_gate.sensor.schedule_outcome(
+                id(original_trade),
+                completed_reference_trade,
+                stable_signal_order,
+            )
 
     def _apply_expectancy_gate_to_accepted_entry(
         label: str,
@@ -3023,22 +3265,25 @@ def run_complex_simulation(
             + accepted_trade_count_by_label[label]
         )
         accepted_trade_count_by_label[label] += 1
+        detail_pair = artifacts_by_set[label].trade_detail_pairs.get(
+            original_trade
+        )
         if rolling_expectancy_gate is not None:
-            detail_pair = artifacts_by_set[label].trade_detail_pairs.get(
-                original_trade
-            )
             is_expectancy_gated = (
                 rolling_expectancy_gate.evaluate_accepted_entry(entry_date)
             )
             if is_expectancy_gated and detail_pair is not None:
                 detail_pair[0].expectancy_gated = True
-            if rolling_expectancy_gate.priority_override_active_for_entry_day(
-                entry_date
-            ):
-                rolling_expectancy_gate.priority_override_entry_count += 1
-                if detail_pair is not None:
-                    detail_pair[0].expectancy_priority_override = True
-        _schedule_expectancy_gate_outcome(
+        if (
+            ft_family_expectancy_gate is not None
+            and label in ft_expectancy_gate.gated_buckets
+        ):
+            is_ft_expectancy_gated = (
+                ft_family_expectancy_gate.evaluate_accepted_entry(entry_date)
+            )
+            if is_ft_expectancy_gated and detail_pair is not None:
+                detail_pair[0].ft_expectancy_gated = True
+        _schedule_global_expectancy_gate_outcome(
             original_trade_identifier,
             accepted_trade,
         )
@@ -3062,6 +3307,116 @@ def run_complex_simulation(
         last_close_date: pandas.Timestamp | None = None
 
         _far_future = pandas.Timestamp("2099-12-31")
+
+        # TODO: review
+        def _replay_adaptive_entry_signal(
+            bucket_label: str,
+            original_trade: Trade,
+        ) -> AdaptiveEntryReplay:
+            """Replay one signal using adaptive state visible at entry."""
+
+            bucket_definition = set_definitions[bucket_label]
+            detail_pair = artifacts_by_set[
+                bucket_label
+            ].trade_detail_pairs.get(original_trade)
+            entry_slope = (
+                detail_pair[0].slope_60
+                if detail_pair is not None
+                else None
+            )
+            (
+                take_profit_percentage,
+                stop_loss_percentage,
+                rolling_mean_profit,
+                rolling_median_loss,
+            ) = compute_frozen_tp_sl_for_bucket(
+                bucket_def=bucket_definition,
+                adaptive_tp_sl=adaptive_tp_sl,
+                closed_winners=(
+                    adaptive_tp_sl_virtual_trade_winner_returns
+                ),
+                closed_losers=(
+                    adaptive_tp_sl_virtual_trade_loser_returns
+                ),
+                entry_slope_60=entry_slope,
+            )
+            break_even_trigger_percentage = (
+                rolling_mean_profit
+                if adaptive_tp_sl.breakeven_at_mp
+                else 0.0
+            )
+            effective_minimum_holding_bars = (
+                0
+                if adaptive_tp_sl.override_min_hold
+                else min_hold_bars_by_set.get(
+                    bucket_label,
+                    minimum_holding_bars,
+                )
+            )
+            override_take_profit_minimum_holding = (
+                bucket_definition.override_min_hold_tp_only
+                if bucket_definition.override_min_hold_tp_only is not None
+                else adaptive_tp_sl.override_min_hold_tp_only
+            )
+            take_profit_minimum_holding_value = (
+                bucket_definition.min_hold_tp
+                if bucket_definition.min_hold_tp is not None
+                else adaptive_tp_sl.min_hold_tp
+            )
+            override_stop_loss_minimum_holding = (
+                bucket_definition.override_min_hold_sl_only
+                if bucket_definition.override_min_hold_sl_only is not None
+                else adaptive_tp_sl.override_min_hold_sl_only
+            )
+            stop_loss_minimum_holding_value = (
+                bucket_definition.min_hold_sl
+                if bucket_definition.min_hold_sl is not None
+                else adaptive_tp_sl.min_hold_sl
+            )
+            take_profit_minimum_holding_bars = (
+                take_profit_minimum_holding_value
+                if override_take_profit_minimum_holding
+                else None
+            )
+            stop_loss_minimum_holding_bars = (
+                stop_loss_minimum_holding_value
+                if override_stop_loss_minimum_holding
+                else None
+            )
+            reentry_signal_dates: set[pandas.Timestamp] | None = None
+            if bucket_definition.reset_hold_on_reentry_signal:
+                trade_symbol = artifacts_by_set[
+                    bucket_label
+                ].trade_symbol_lookup.get(original_trade, "")
+                reentry_signal_dates = any_bucket_entry_dates_by_symbol.get(
+                    trade_symbol
+                )
+            completed_trade = _replay_trade_with_adaptive_tp_sl(
+                original_trade,
+                take_profit_percentage,
+                stop_loss_percentage,
+                effective_minimum_holding_bars,
+                minimum_holding_bars_tp=(
+                    take_profit_minimum_holding_bars
+                ),
+                minimum_holding_bars_sl=stop_loss_minimum_holding_bars,
+                breakeven_trigger_pct=break_even_trigger_percentage,
+                tp_pct_late=None,
+                sl_only=use_evict_oldest,
+                disable_sl_trigger=adaptive_tp_sl.disable_sl_trigger,
+                max_hold_bars=bucket_definition.max_hold,
+                reset_hold_on_reentry_signal=(
+                    bucket_definition.reset_hold_on_reentry_signal
+                ),
+                re_fire_dates=reentry_signal_dates,
+            )
+            return AdaptiveEntryReplay(
+                completed_trade=completed_trade,
+                take_profit_percentage=take_profit_percentage,
+                stop_loss_percentage=stop_loss_percentage,
+                rolling_mean_profit=rolling_mean_profit,
+                rolling_median_loss=rolling_median_loss,
+            )
 
         if use_evict_oldest:
 
@@ -3189,6 +3544,15 @@ def run_complex_simulation(
                 active_stop_loss_percentage = applied_percentages[1]
 
                 replacement_trade = current_adjusted_trade
+                # The refreshed position belongs to a specific set; its SL
+                # bar gate follows that set's min_hold.
+                refresh_min_hold_bars = minimum_holding_bars
+                for open_key_label, open_key_identifier in open_trade_keys:
+                    if open_key_identifier == open_trade_identifier:
+                        refresh_min_hold_bars = min_hold_bars_by_set.get(
+                            open_key_label, minimum_holding_bars
+                        )
+                        break
                 for refresh_bar_index, refresh_excursion in enumerate(
                     converted_refresh_excursions,
                     start=1,
@@ -3196,7 +3560,7 @@ def run_complex_simulation(
                     bar_date = refresh_excursion[0]
                     bar_low_percentage = refresh_excursion[2]
                     if (
-                        refresh_bar_index >= minimum_holding_bars
+                        refresh_bar_index >= refresh_min_hold_bars
                         and bar_low_percentage <= -active_stop_loss_percentage
                     ):
                         stop_loss_exit_price = (
@@ -3269,7 +3633,7 @@ def run_complex_simulation(
                         applied_percentages,
                     )
                 )
-                _schedule_expectancy_gate_outcome(
+                _schedule_global_expectancy_gate_outcome(
                     open_trade_identifier,
                     replacement_trade,
                 )
@@ -3405,7 +3769,7 @@ def run_complex_simulation(
                         adaptive_tp_sl_applied[id(settled)] = adaptive_tp_sl_applied.pop(
                             id(adj), (0.0, 0.0)
                         )
-                        _schedule_expectancy_gate_outcome(tid, settled)
+                        _schedule_global_expectancy_gate_outcome(tid, settled)
                     break
                 process_close = True
             elif next_close is not None and next_entry is not None:
@@ -3570,15 +3934,6 @@ def run_complex_simulation(
                                 ):
                                     adaptive_tp_sl_virtual_trade_loser_returns.popleft()
             else:
-                if (
-                    rolling_expectancy_gate is not None
-                    and rolling_expectancy_gate.gate_config.priority_override
-                    is not None
-                ):
-                    _resort_front_day_entries_for_expectancy_override(
-                        entry_events,
-                        rolling_expectancy_gate,
-                    )
                 (
                     event_date,
                     event_type,
@@ -3587,7 +3942,6 @@ def run_complex_simulation(
                     _insertion_counter,
                     label,
                     trade,
-                    _override_bucket_priority,
                 ) = entry_events.popleft()
                 # Flush pending rolling updates from trades that closed
                 # strictly before this entry date (delayed_rolling_update).
@@ -3722,6 +4076,27 @@ def run_complex_simulation(
                             _bucket_def_slope.cohort_co_movement_gate,
                         ):
                             continue
+                symbol_is_trade_date_eligible = (
+                    _is_symbol_trade_date_eligible(
+                        symbol_first_eligible_trade_dates,
+                        trade_sym,
+                        event_date,
+                    )
+                )
+                if (
+                    symbol_is_trade_date_eligible
+                    and label in ft_signal_sensor_bucket_labels
+                ):
+                    ft_signal_replay = _replay_adaptive_entry_signal(
+                        label,
+                        trade,
+                    )
+                    _schedule_ft_expectancy_signal_outcome(
+                        label,
+                        trade,
+                        ft_signal_replay.completed_trade,
+                        _insertion_counter,
+                    )
                 if use_evict_oldest and trade_sym:
                     refreshed_trade_identifier: int | None = None
                     for open_identifier, open_symbol in open_trade_symbols.items():
@@ -3740,11 +4115,7 @@ def run_complex_simulation(
                         open_trade_entry_dates[refreshed_trade_identifier] = event_date
                         accepted_trade_keys.add(trade_key)
                         continue
-                if not _is_symbol_trade_date_eligible(
-                    symbol_first_eligible_trade_dates,
-                    trade_sym,
-                    event_date,
-                ):
+                if not symbol_is_trade_date_eligible:
                     continue
                 # Slot check: add back same-day closes to prevent lookahead.
                 # Entries cannot use slots freed by closes on the same date
@@ -3762,7 +4133,9 @@ def run_complex_simulation(
                             continue
                         # Count business days held.
                         held_days = len(pandas.bdate_range(e_date, event_date)) - 1
-                        if held_days < minimum_holding_bars:
+                        if held_days < min_hold_bars_by_set.get(
+                            ek_lbl, minimum_holding_bars
+                        ):
                             continue
                         if evict_candidate is None or e_date < evict_candidate[0]:
                             evict_candidate = (e_date, ek_tid, ek_label)
@@ -3826,7 +4199,10 @@ def run_complex_simulation(
                     adaptive_tp_sl_applied[id(evicted_new)] = adaptive_tp_sl_applied.pop(
                         id(evicted_adjusted), (0.0, 0.0)
                     )
-                    _schedule_expectancy_gate_outcome(evict_tid, evicted_new)
+                    _schedule_global_expectancy_gate_outcome(
+                        evict_tid,
+                        evicted_new,
+                    )
                     # Clean up open tracking.
                     open_trade_keys.pop(evict_key, None)
                     open_position_counts_by_set[evict_label] = max(
@@ -3889,94 +4265,18 @@ def run_complex_simulation(
                         continue
 
                 bucket_def = set_definitions[label]
-                _detail_pair_for_amplify = artifacts_by_set[label].trade_detail_pairs.get(
-                    trade
+                adaptive_entry_replay = _replay_adaptive_entry_signal(
+                    label,
+                    trade,
                 )
-                _entry_slope_60_for_amplify = (
-                    _detail_pair_for_amplify[0].slope_60
-                    if _detail_pair_for_amplify is not None
-                    else None
-                )
-                (
-                    tp_pct,
-                    sl_pct,
-                    rolling_mp,
-                    rolling_ml,
-                ) = compute_frozen_tp_sl_for_bucket(
-                    bucket_def=bucket_def,
-                    adaptive_tp_sl=adaptive_tp_sl,
-                    closed_winners=(
-                        adaptive_tp_sl_virtual_trade_winner_returns
-                    ),
-                    closed_losers=(
-                        adaptive_tp_sl_virtual_trade_loser_returns
-                    ),
-                    entry_slope_60=_entry_slope_60_for_amplify,
-                )
-                _tp_pct_late: float | None = None
-
-                # Break-even trigger: rolling MP (before sigma adjustment).
-                be_trigger = rolling_mp if adaptive_tp_sl.breakeven_at_mp else 0.0
-
-                # Replay trade with adaptive levels.
+                adjusted = adaptive_entry_replay.completed_trade
+                tp_pct = adaptive_entry_replay.take_profit_percentage
+                sl_pct = adaptive_entry_replay.stop_loss_percentage
+                rolling_mp = adaptive_entry_replay.rolling_mean_profit
+                rolling_ml = adaptive_entry_replay.rolling_median_loss
                 effective_min_hold = (
                     0 if adaptive_tp_sl.override_min_hold
-                    else minimum_holding_bars
-                )
-                # Per-bucket override for min_hold gates (None = inherit top-level).
-                effective_override_tp = (
-                    bucket_def.override_min_hold_tp_only
-                    if bucket_def.override_min_hold_tp_only is not None
-                    else adaptive_tp_sl.override_min_hold_tp_only
-                )
-                effective_min_hold_tp_value = (
-                    bucket_def.min_hold_tp
-                    if bucket_def.min_hold_tp is not None
-                    else adaptive_tp_sl.min_hold_tp
-                )
-                effective_override_sl = (
-                    bucket_def.override_min_hold_sl_only
-                    if bucket_def.override_min_hold_sl_only is not None
-                    else adaptive_tp_sl.override_min_hold_sl_only
-                )
-                effective_min_hold_sl_value = (
-                    bucket_def.min_hold_sl
-                    if bucket_def.min_hold_sl is not None
-                    else adaptive_tp_sl.min_hold_sl
-                )
-                effective_min_hold_tp: int | None = None
-                if effective_override_tp:
-                    effective_min_hold_tp = effective_min_hold_tp_value
-                effective_min_hold_sl: int | None = None
-                if effective_override_sl:
-                    effective_min_hold_sl = effective_min_hold_sl_value
-                # Cross-bucket re-fire dates for this trade (only used when
-                # bucket flag is set; otherwise pass None to skip the lookup).
-                re_fire_dates_for_trade: set[pandas.Timestamp] | None = None
-                if bucket_def.reset_hold_on_reentry_signal:
-                    trade_symbol_for_refire = (
-                        artifacts_by_set[label].trade_symbol_lookup.get(
-                            trade, ""
-                        )
-                    )
-                    re_fire_dates_for_trade = (
-                        any_bucket_entry_dates_by_symbol.get(
-                            trade_symbol_for_refire
-                        )
-                    )
-                adjusted = _replay_trade_with_adaptive_tp_sl(
-                    trade, tp_pct, sl_pct, effective_min_hold,
-                    minimum_holding_bars_tp=effective_min_hold_tp,
-                    minimum_holding_bars_sl=effective_min_hold_sl,
-                    breakeven_trigger_pct=be_trigger,
-                    tp_pct_late=_tp_pct_late,
-                    sl_only=use_evict_oldest,
-                    disable_sl_trigger=adaptive_tp_sl.disable_sl_trigger,
-                    max_hold_bars=bucket_def.max_hold,
-                    reset_hold_on_reentry_signal=(
-                        bucket_def.reset_hold_on_reentry_signal
-                    ),
-                    re_fire_dates=re_fire_dates_for_trade,
+                    else min_hold_bars_by_set.get(label, minimum_holding_bars)
                 )
                 # Dynamic min_hold throttle based on rolling regime sensors
                 # (rolling_ml / rolling_mp) — pure market signal with NO
@@ -4068,14 +4368,6 @@ def run_complex_simulation(
                 if (
                     wr_gate is not None
                     and label in wr_gate.gated_buckets
-                    # Risk-score activation: when the gate is conditioned
-                    # on macro regime, it is OFF in months below the
-                    # threshold (entry deploys capital normally).
-                    and (
-                        wr_gate.risk_score_activation_threshold is None
-                        or wr_gate_active_months is None
-                        or event_date.strftime("%Y-%m") in wr_gate_active_months
-                    )
                 ):
                     _gate_phantom = False
                     if wr_gate.curve == "wr_cross":
@@ -4198,18 +4490,6 @@ def run_complex_simulation(
             exported_state["_captured"] = True
     else:
         # Original non-adaptive event processing.
-        events_for_processing = events
-        if (
-            rolling_expectancy_gate is not None
-            and rolling_expectancy_gate.gate_config.priority_override
-            is not None
-        ):
-            events_for_processing = (
-                _iter_events_with_expectancy_priority_override(
-                    events,
-                    rolling_expectancy_gate,
-                )
-            )
         for (
             event_date,
             event_type,
@@ -4218,8 +4498,7 @@ def run_complex_simulation(
             _insertion_counter,
             label,
             trade,
-            _override_bucket_priority,
-        ) in events_for_processing:
+        ) in events:
             trade_identifier = id(trade)
             trade_key = (label, trade_identifier)
             normalized_label = label.upper()
@@ -4253,6 +4532,15 @@ def run_complex_simulation(
                     event_date,
                 ):
                     continue
+                if (
+                    label in ft_signal_sensor_bucket_labels
+                ):
+                    _schedule_ft_expectancy_signal_outcome(
+                        label,
+                        trade,
+                        trade,
+                        _insertion_counter,
+                    )
                 current_open_total = len(open_trade_keys)
                 if current_open_total >= maximum_position_count:
                     continue
@@ -4313,6 +4601,8 @@ def run_complex_simulation(
 
     if rolling_expectancy_gate is not None:
         rolling_expectancy_gate.sensor.consume_all_scheduled_trades()
+    if ft_family_expectancy_gate is not None:
+        ft_family_expectancy_gate.sensor.consume_all_scheduled_trades()
 
     # WR-synced sizing: trade SELECTION above is slot-count based and does
     # not read capital, so the accepted trade set and every outcome are
@@ -4392,7 +4682,11 @@ def run_complex_simulation(
                 original_trade, ""
             )
             entry_detail, exit_detail = artifacts.trade_detail_pairs[original_trade]
-            if entry_detail.phantom or entry_detail.expectancy_gated:
+            if (
+                entry_detail.phantom
+                or entry_detail.expectancy_gated
+                or entry_detail.ft_expectancy_gated
+            ):
                 zero_capital_slot_trade_ids_for_set.add(
                     id(adaptive_slot_trade_map.get(id(trade), trade))
                 )
@@ -4786,27 +5080,40 @@ def run_complex_simulation(
         if rolling_expectancy_gate is not None
         else 0
     )
-    expectancy_priority_override_days_by_month = (
-        dict(rolling_expectancy_gate.priority_override_active_days_by_month)
-        if rolling_expectancy_gate is not None
-        else {}
+    ft_expectancy_gate_closed_episodes = (
+        ft_family_expectancy_gate.closed_episodes
+        if ft_family_expectancy_gate is not None
+        else []
     )
-    expectancy_priority_override_trade_count = (
-        rolling_expectancy_gate.priority_override_entry_count
-        if rolling_expectancy_gate is not None
+    ft_expectancy_gated_trade_count = (
+        ft_family_expectancy_gate.expectancy_gated_trade_count
+        if ft_family_expectancy_gate is not None
         else 0
     )
+    if ft_signal_outcome_sensor_buckets is not None:
+        ft_expectancy_sensor_outcomes = tuple(
+            signal_outcome
+            for (
+                _exit_date,
+                _entry_date,
+                _stable_signal_order,
+                signal_outcome,
+            ) in sorted(ft_signal_outcome_records)
+        )
+    else:
+        ft_expectancy_sensor_outcomes = (
+            ft_family_expectancy_gate.sensor.consumed_outcomes
+            if ft_family_expectancy_gate is not None
+            else ()
+        )
     return ComplexSimulationMetrics(
         overall_metrics=overall_metrics,
         metrics_by_set=metrics_by_set,
         expectancy_gate_closed_episodes=expectancy_gate_closed_episodes,
         expectancy_gated_trade_count=expectancy_gated_trade_count,
-        expectancy_priority_override_days_by_month=(
-            expectancy_priority_override_days_by_month
-        ),
-        expectancy_priority_override_trade_count=(
-            expectancy_priority_override_trade_count
-        ),
+        ft_expectancy_gate_closed_episodes=ft_expectancy_gate_closed_episodes,
+        ft_expectancy_gated_trade_count=ft_expectancy_gated_trade_count,
+        ft_expectancy_sensor_outcomes=ft_expectancy_sensor_outcomes,
     )
 
 
