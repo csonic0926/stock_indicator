@@ -707,11 +707,10 @@ def test_adaptive_stop_loss_uses_gap_down_open_price(
     assert metrics.overall_metrics.mean_loss_percentage == pytest.approx(0.04)
 
 
-# TODO: review
-def test_early_stop_loss_uses_base_min_hold_without_rolling_state(
+def test_early_adaptive_stop_loss_keeps_old_min_hold_slot_rhythm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An empty rolling sensor must not invent a longer dynamic slot lock."""
+    """Early SL should affect P/L while slot timing follows min_hold replay."""
 
     stopped_trade, stopped_details = _build_trade(
         "2024-01-01",
@@ -773,9 +772,9 @@ def test_early_stop_loss_uses_base_min_hold_without_rolling_state(
         maximum_position_count=1,
         minimum_holding_bars=5,
         adaptive_tp_sl=strategy.AdaptiveTPSLConfig(
-            # No closed outcomes means no observed rolling regime. The
-            # configured min SL/TP values must not manufacture a dynamic
-            # extension beyond the base five-bar slot lock.
+            # Stress regime: SL > TP → R = TP/SL = 0.67 → dynamic lock = round(5 * 1.5) = 8 bars
+            # AAA bar 1 low = -0.03 ≤ -0.03 SL → SL fires bar 1.
+            # Shadow lock extends past BBB entry (Jan 9 = bar 6) → BBB blocked.
             min_sl=0.03,
             min_tp=0.02,
             override_min_hold_sl_only=True,
@@ -790,7 +789,7 @@ def test_early_stop_loss_uses_base_min_hold_without_rolling_state(
         if detail.action == "close"
     ]
 
-    assert [detail.symbol for detail in close_details] == ["AAA", "BBB"]
+    assert [detail.symbol for detail in close_details] == ["AAA"]
     assert close_details[0].date == pandas.Timestamp("2024-01-02")
     assert close_details[0].exit_reason == "adaptive_stop_loss"
 
@@ -1395,6 +1394,68 @@ def test_multi_bucket_preserves_independent_and_prefix_position_modes(
     assert metrics.metrics_by_set["head"].total_trades == 3
     assert metrics.metrics_by_set["independent"].total_trades == 1
     assert metrics.metrics_by_set["prefix"].total_trades == 0
+
+
+def test_run_complex_simulation_applies_monthly_bucket_priority_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Monthly priority overrides should decide same-day slot contention."""
+
+    trade_a = _build_trade("2024-01-02", "2024-01-10", symbol="AAA")
+    trade_b = _build_trade("2024-01-02", "2024-01-10", symbol="BBB")
+
+    artifacts_a = _build_artifacts([trade_a])
+    artifacts_b = _build_artifacts([trade_b])
+    artifact_map = {
+        "set_a": artifacts_a,
+        "set_b": artifacts_b,
+    }
+
+    def fake_generate(
+        *args: object,
+        **kwargs: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        buy_strategy_name = kwargs.get("buy_strategy_name") or args[1]
+        return artifact_map[str(buy_strategy_name)]
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "A": strategy.ComplexStrategySetDefinition(
+            label="A",
+            buy_strategy_name="set_a",
+            sell_strategy_name="set_a",
+            entry_priority=1,
+        ),
+        "B": strategy.ComplexStrategySetDefinition(
+            label="B",
+            buy_strategy_name="set_b",
+            sell_strategy_name="set_b",
+            entry_priority=1,
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=1,
+        multi_bucket_mode=True,
+        bucket_priority_overrides_by_month={
+            "2024-01": {
+                "A": 2,
+                "B": 1,
+            },
+        },
+    )
+
+    assert metrics.metrics_by_set["A"].total_trades == 0
+    assert metrics.metrics_by_set["B"].total_trades == 1
+    assert metrics.overall_metrics.total_trades == 1
 
 
 def test_evict_oldest_keeps_evicted_exit_from_far_future_settlement(

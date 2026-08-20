@@ -137,6 +137,14 @@ def test_dynamic_breakeven_moves_with_payoff_ratio() -> None:
     ) is None
 
 
+def test_risk_score_activation_threshold_field() -> None:
+    # Default is None (always-on); explicit threshold stored.
+    assert WRGateConfig().risk_score_activation_threshold is None
+    assert WRGateConfig(
+        risk_score_activation_threshold=50
+    ).risk_score_activation_threshold == 50
+
+
 def test_live_sensor_functions_match_simulator_close_handler() -> None:
     """update_wr_gate_sensor_state must reproduce the simulator's in-loop
     EMA/SMA/magnitude update byte-for-byte, so a live-path sensor seeded

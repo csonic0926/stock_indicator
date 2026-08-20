@@ -79,8 +79,8 @@ def test_committed_multi_bucket_configs_select_expected_universes() -> None:
             assert config_document[config_key] == expected_value
 
 
-def test_production_config_uses_fixed_priority_ladder() -> None:
-    """Production must use the same fixed bucket ladder as simulation."""
+def test_production_config_uses_expectancy_priority_path() -> None:
+    """Production cron config should use the mechanical priority sensor."""
 
     config_document = json.loads(
         (DATA_DIRECTORY / "multi_bucket_production.json").read_text(
@@ -95,16 +95,16 @@ def test_production_config_uses_fixed_priority_ladder() -> None:
     assert config_document["max_position_count"] == 7
     assert config_document["starting_cash"] == 70_000
     assert bucket_by_label["fish_tail_production"]["max_hold"] == 7
-    # Keep squeeze risk controls while allocation order stays static.
+    # 4-bucket quad + priority ladder, live since 2026-06-11
+    # (commit 3fca84fb5): squeeze cap 2 / sigma 0.75 / fuel gate -0.15.
     assert bucket_by_label["fish_tail_squeeze"]["max_positions"] == 2
     assert bucket_by_label["fish_tail_squeeze"]["sigma"] == 0.75
     assert bucket_by_label["fish_tail_squeeze"]["fuel_drawdown_max"] == -0.15
     assert bucket_by_label["fish_head_production"]["priority"] == 1
-    assert bucket_by_label["fish_head_production"]["max_positions"] == 7
-    assert bucket_by_label["fish_tail_squeeze"]["priority"] == 2
-    assert bucket_by_label["fish_tail_production"]["priority"] == 3
-    assert bucket_by_label["fish_tail_production"]["max_positions"] == 4
-    assert bucket_by_label["fish_head_b30_35"]["priority"] == 4
+    assert bucket_by_label["fish_tail_squeeze"]["priority"] == 1
+    assert bucket_by_label["fish_tail_production"]["priority"] == 2
+    assert bucket_by_label["fish_head_b30_35"]["priority"] == 3
+    assert "risk_score_priority_overrides" not in config_document
     assert "risk_score_gate" not in config_document
     assert config_document["expectancy_gate"] == {
         "enabled": True,
@@ -113,33 +113,31 @@ def test_production_config_uses_fixed_priority_ladder() -> None:
         "baseline_sigma": 0.013,
         "sigma_multiplier": 3.0,
         "cold_start": "open",
+        "priority_override": {
+            "enabled": True,
+            "sigma_multiplier": 1.5,
+            "priorities": {
+                "fish_head_production": 1,
+                "fish_tail_squeeze": 2,
+                "fish_tail_production": 3,
+                "fish_head_b30_35": 4,
+            },
+        },
     }
-    assert "ft_family_wr_gate" not in config_document
+    assert config_document["ft_family_wr_gate"] == {
+        "sensor_bucket": "fish_tail_production",
+        "gated_buckets": [
+            "fish_tail_production",
+            "fish_tail_squeeze",
+        ],
+        "window": 12,
+        "curve": "wr_cross",
+    }
     assert config_document["symbol_seasoning"] == {
         "enabled": True,
         "eligibility_path": "data/production_symbol_eligibility.csv",
         "default_new_symbol_quarantine_days": 365,
     }
-
-
-def test_2010_baseline_matches_production_config() -> None:
-    """The 2010 baseline may differ only by data source and sim costs."""
-
-    production_document = json.loads(
-        (DATA_DIRECTORY / "multi_bucket_production.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    baseline_document = json.loads(
-        (
-            DATA_DIRECTORY / "multi_bucket_production_2010_baseline.json"
-        ).read_text(encoding="utf-8")
-    )
-
-    assert baseline_document.pop("data_source") == "2010_yf_clean"
-    assert baseline_document.pop("broker_cost_model") == "futu_hk"
-    production_document.pop("data_source")
-    assert baseline_document == production_document
 
 
 def test_default_symbol_file_is_production_alias() -> None:

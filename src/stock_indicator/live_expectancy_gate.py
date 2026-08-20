@@ -29,11 +29,38 @@ EXPECTANCY_GATE_STATE_SCHEMA_VERSION = 1
 def parse_live_expectancy_gate_config(
     config_document: dict[str, Any],
 ) -> strategy.ExpectancyGateConfig | None:
-    """Parse the production global expectancy circuit breaker."""
+    """Parse the live gate and validate exact soft-priority coverage."""
 
-    return strategy.parse_expectancy_gate_config(
+    gate_config = strategy.parse_expectancy_gate_config(
         config_document.get("expectancy_gate")
     )
+    if gate_config is None or gate_config.priority_override is None:
+        return gate_config
+
+    raw_buckets = config_document.get("buckets")
+    if not isinstance(raw_buckets, list) or not raw_buckets:
+        raise ValueError(
+            "expectancy_gate.priority_override requires a non-empty buckets array"
+        )
+    bucket_labels = {
+        str(raw_bucket.get("label") or "")
+        for raw_bucket in raw_buckets
+        if isinstance(raw_bucket, dict)
+    }
+    priority_labels = set(gate_config.priority_override.priorities)
+    missing_labels = sorted(bucket_labels - priority_labels)
+    unknown_labels = sorted(priority_labels - bucket_labels)
+    if missing_labels or unknown_labels:
+        problem_parts: list[str] = []
+        if missing_labels:
+            problem_parts.append("missing=" + ",".join(missing_labels))
+        if unknown_labels:
+            problem_parts.append("unknown=" + ",".join(unknown_labels))
+        raise ValueError(
+            "expectancy_gate.priority_override.priorities must cover every "
+            "configured bucket exactly (" + "; ".join(problem_parts) + ")"
+        )
+    return gate_config
 
 
 def _config_snapshot(
@@ -41,12 +68,21 @@ def _config_snapshot(
 ) -> dict[str, Any]:
     """Return the state-compatible semantic configuration snapshot."""
 
+    priority_override = gate_config.priority_override
     return {
         "window": gate_config.window,
         "baseline_mean": gate_config.baseline_mean,
         "baseline_sigma": gate_config.baseline_sigma,
         "sigma_multiplier": gate_config.sigma_multiplier,
         "cold_start": gate_config.cold_start,
+        "priority_override": (
+            {
+                "sigma_multiplier": priority_override.sigma_multiplier,
+                "priorities": dict(priority_override.priorities),
+            }
+            if priority_override is not None
+            else None
+        ),
     }
 
 
@@ -67,6 +103,7 @@ def empty_expectancy_gate_state_document(
         "previous_accepted_entry_was_gated": False,
         "closed_episodes": [],
         "expectancy_gated_trade_count": 0,
+        "priority_override_entry_count": 0,
     }
 
 
@@ -309,6 +346,9 @@ def record_accepted_trades_at_path(
                 "expectancy_gated": bool(
                     accepted_trade.get("expectancy_gated", False)
                 ),
+                "expectancy_priority_override": bool(
+                    accepted_trade.get("expectancy_priority_override", False)
+                ),
             }
             state_document["pending_trades"].append(pending_trade)
             state_document["next_acceptance_order"] = acceptance_order + 1
@@ -342,6 +382,10 @@ def record_accepted_trades_at_path(
             state_document[
                 "previous_accepted_entry_was_gated"
             ] = is_expectancy_gated
+            if pending_trade["expectancy_priority_override"]:
+                state_document["priority_override_entry_count"] = int(
+                    state_document.get("priority_override_entry_count", 0)
+                ) + 1
 
         if added_trade_count:
             save_expectancy_gate_state_atomically(
@@ -588,7 +632,7 @@ def build_expectancy_gate_sensor_state(
     state_document: dict[str, Any],
     gate_config: strategy.ExpectancyGateConfig,
 ) -> dict[str, Any]:
-    """Return today's once-per-day global expectancy stop decision."""
+    """Return today's once-per-day stop and soft-tier decisions."""
 
     _validate_state_document(state_document, gate_config)
     rolling_outcomes = state_document["rolling_outcomes"]
@@ -608,6 +652,13 @@ def build_expectancy_gate_sensor_state(
         if not window_full
         else bool(rolling_mean is not None and rolling_mean < gate_config.threshold)
     )
+    soft_threshold = gate_config.priority_override_threshold
+    priority_override_active = bool(
+        window_full
+        and soft_threshold is not None
+        and rolling_mean is not None
+        and rolling_mean < soft_threshold
+    )
     return {
         "status": "ready",
         "count": len(rolling_return_values),
@@ -615,11 +666,16 @@ def build_expectancy_gate_sensor_state(
         "window_full": window_full,
         "rolling_mean": rolling_mean,
         "stop_threshold": gate_config.threshold,
+        "soft_threshold": soft_threshold,
         "gate_closed": gate_closed,
+        "priority_override_active": priority_override_active,
         "open_pending": len(state_document["pending_trades"]),
         "closed_episodes": len(state_document["closed_episodes"]),
         "expectancy_gated_trades": int(
             state_document.get("expectancy_gated_trade_count", 0)
+        ),
+        "priority_override_entries": int(
+            state_document.get("priority_override_entry_count", 0)
         ),
     }
 
@@ -632,21 +688,32 @@ def format_expectancy_gate_sensor_log(
     """Format the machine-readable daily sensor heartbeat."""
 
     rolling_mean = sensor_state.get("rolling_mean")
+    soft_threshold = sensor_state.get("soft_threshold")
     rolling_mean_text = (
         f"{float(rolling_mean):.6f}" if rolling_mean is not None else "None"
+    )
+    soft_threshold_text = (
+        f"{float(soft_threshold):.6f}"
+        if soft_threshold is not None
+        else "None"
     )
     return (
         "[EXPECTANCY_GATE_SENSOR] status=ready "
         f"mean={rolling_mean_text} "
         f"stop_threshold={float(sensor_state['stop_threshold']):.6f} "
+        f"soft_threshold={soft_threshold_text} "
         f"gate_closed={sensor_state['gate_closed']} "
+        "priority_override_active="
+        f"{sensor_state['priority_override_active']} "
         f"window={sensor_state['count']}/{sensor_state['window']} "
         f"window_full={sensor_state['window_full']} "
         f"open_pending={sensor_state['open_pending']} "
         f"fed_this_run={fed_this_run} "
         f"closed_episodes={sensor_state['closed_episodes']} "
         "expectancy_gated_trades="
-        f"{sensor_state['expectancy_gated_trades']}"
+        f"{sensor_state['expectancy_gated_trades']} "
+        "priority_override_entries="
+        f"{sensor_state['priority_override_entries']}"
     )
 
 
@@ -704,6 +771,7 @@ def is_finite_sensor_state(sensor_state: dict[str, Any]) -> bool:
         "rolling_mean",
         "mean",
         "stop_threshold",
+        "soft_threshold",
     ):
         field_value = sensor_state.get(field_name)
         if field_value is not None and not math.isfinite(float(field_value)):

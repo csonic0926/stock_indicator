@@ -14,7 +14,7 @@ from stock_indicator import dashboard, live_expectancy_gate, strategy
 
 
 def _live_config_document(*, cold_start: str = "open") -> dict:
-    """Return a small valid live global expectancy gate config."""
+    """Return a small valid live gate config with exact bucket coverage."""
 
     return {
         "expectancy_gate": {
@@ -24,6 +24,11 @@ def _live_config_document(*, cold_start: str = "open") -> dict:
             "baseline_sigma": 0.1,
             "sigma_multiplier": 1.0,
             "cold_start": cold_start,
+            "priority_override": {
+                "enabled": True,
+                "sigma_multiplier": 0.5,
+                "priorities": {"first": 2, "second": 1},
+            },
         },
         "buckets": [
             {"label": "first"},
@@ -55,6 +60,7 @@ def _accepted_trade(
         "max_hold": 20,
         "wr_gate_phantom": wr_gate_phantom,
         "expectancy_gated": expectancy_gated,
+        "expectancy_priority_override": False,
     }
 
 
@@ -76,15 +82,31 @@ def _write_price_rows(
     )
 
 
+def test_live_config_requires_exact_priority_bucket_coverage() -> None:
+    """A production soft tier must name every bucket exactly once."""
+
+    config_document = _live_config_document()
+    config_document["expectancy_gate"]["priority_override"]["priorities"] = {
+        "first": 1,
+        "unknown": 2,
+    }
+
+    with pytest.raises(
+        ValueError,
+        match=r"missing=second; unknown=unknown",
+    ):
+        live_expectancy_gate.parse_live_expectancy_gate_config(config_document)
+
+
 @pytest.mark.parametrize(
     ("cold_start", "expected_gate_closed"),
     [("open", False), ("closed", True)],
 )
-def test_live_cold_start_controls_global_stop(
+def test_live_cold_start_never_activates_priority_override(
     cold_start: str,
     expected_gate_closed: bool,
 ) -> None:
-    """The global stop follows cold_start before its deque is full."""
+    """Tier 1 follows cold_start while Tier 2 waits for a full deque."""
 
     config_document = _live_config_document(cold_start=cold_start)
     gate_config = live_expectancy_gate.parse_live_expectancy_gate_config(
@@ -100,6 +122,7 @@ def test_live_cold_start_controls_global_stop(
     )
 
     assert sensor_state["gate_closed"] is expected_gate_closed
+    assert sensor_state["priority_override_active"] is False
     assert sensor_state["window_full"] is False
 
 
@@ -239,6 +262,7 @@ def test_live_sensor_feeds_funded_and_both_phantom_sources_strictly_before(
     )
     assert sensor_state["rolling_mean"] == pytest.approx(-0.20)
     assert sensor_state["gate_closed"] is True
+    assert sensor_state["priority_override_active"] is True
 
     assert live_expectancy_gate.advance_expectancy_gate_state(
         state_document=state_document,
@@ -257,6 +281,7 @@ def test_live_sensor_feeds_funded_and_both_phantom_sources_strictly_before(
     )
     assert sensor_state["rolling_mean"] == pytest.approx(0.0)
     assert sensor_state["gate_closed"] is False
+    assert sensor_state["priority_override_active"] is False
 
 
 def test_live_outcome_replay_resets_max_hold_on_cross_bucket_signal(
@@ -355,7 +380,7 @@ def test_dashboard_accepts_matching_once_per_day_sensor_heartbeat(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Typed matching cron output controls the production stop."""
+    """Typed matching cron output controls both production tiers."""
 
     config_path = tmp_path / "multi_bucket_production.json"
     config_path.write_text(
@@ -386,9 +411,11 @@ def test_dashboard_accepts_matching_once_per_day_sensor_heartbeat(
     log_path = tmp_path / "2026-01-07.log"
     log_path.write_text(
         "[EXPECTANCY_GATE_SENSOR] status=ready mean=-0.200000 "
-        "stop_threshold=-0.100000 gate_closed=True window=2/2 "
+        "stop_threshold=-0.100000 soft_threshold=-0.050000 "
+        "gate_closed=True priority_override_active=True window=2/2 "
         "window_full=True open_pending=1 fed_this_run=2 "
-        "closed_episodes=0 expectancy_gated_trades=0\n",
+        "closed_episodes=0 expectancy_gated_trades=0 "
+        "priority_override_entries=0\n",
         encoding="utf-8",
     )
 
@@ -397,6 +424,7 @@ def test_dashboard_accepts_matching_once_per_day_sensor_heartbeat(
 
     assert decision["status"] == "closed"
     assert decision["gate_closed"] is True
+    assert decision["priority_override_active"] is True
 
 
 def test_dashboard_labels_matching_cold_start_as_warming(
@@ -429,9 +457,11 @@ def test_dashboard_labels_matching_cold_start_as_warming(
     log_path = tmp_path / "2026-01-07.log"
     log_path.write_text(
         "[EXPECTANCY_GATE_SENSOR] status=ready mean=None "
-        "stop_threshold=-0.100000 gate_closed=False window=0/2 "
+        "stop_threshold=-0.100000 soft_threshold=-0.050000 "
+        "gate_closed=False priority_override_active=False window=0/2 "
         "window_full=False open_pending=0 fed_this_run=0 "
-        "closed_episodes=0 expectancy_gated_trades=0\n",
+        "closed_episodes=0 expectancy_gated_trades=0 "
+        "priority_override_entries=0\n",
         encoding="utf-8",
     )
 
@@ -486,9 +516,11 @@ def test_dashboard_shows_acceptances_added_after_daily_evaluation(
     log_path = tmp_path / "2026-01-07.log"
     log_path.write_text(
         "[EXPECTANCY_GATE_SENSOR] status=ready mean=None "
-        "stop_threshold=-0.100000 gate_closed=False window=0/2 "
+        "stop_threshold=-0.100000 soft_threshold=-0.050000 "
+        "gate_closed=False priority_override_active=False window=0/2 "
         "window_full=False open_pending=0 fed_this_run=0 "
-        "closed_episodes=0 expectancy_gated_trades=0\n",
+        "closed_episodes=0 expectancy_gated_trades=0 "
+        "priority_override_entries=0\n",
         encoding="utf-8",
     )
 

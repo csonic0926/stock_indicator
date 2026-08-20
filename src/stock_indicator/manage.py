@@ -7,7 +7,6 @@ from __future__ import annotations
 import cmd
 import csv
 import datetime
-import math
 import gc  # TODO: review
 import json
 import logging
@@ -487,6 +486,124 @@ def load_multi_bucket_daily_context(
         symbol_first_eligible_trade_dates=symbol_first_eligible_trade_dates,
         setup_messages=setup_messages,
     )
+
+
+def load_risk_score_priority_overrides(
+    raw_priority_overrides: object | None,
+    raw_risk_score_gate: object | None,
+    bucket_labels: set[str],
+) -> tuple[dict[str, dict[str, int]] | None, set[int], dict[str, int]]:
+    """Load month-keyed bucket priority overrides from risk-score config."""
+
+    if raw_priority_overrides is None:
+        return None, set(), {}
+    if not isinstance(raw_priority_overrides, dict):
+        raise ValueError("risk_score_priority_overrides must be a JSON object")
+
+    raw_scores = raw_priority_overrides.get("scores")
+    if not isinstance(raw_scores, list) or not raw_scores:
+        raise ValueError("risk_score_priority_overrides.scores must be a list")
+    target_scores: set[int] = set()
+    for raw_score in raw_scores:
+        try:
+            target_scores.add(int(raw_score))
+        except (TypeError, ValueError) as parse_error:
+            raise ValueError(
+                "risk_score_priority_overrides.scores must contain integers"
+            ) from parse_error
+
+    raw_priorities = raw_priority_overrides.get("priorities")
+    if not isinstance(raw_priorities, dict) or not raw_priorities:
+        raise ValueError(
+            "risk_score_priority_overrides.priorities must be a JSON object"
+        )
+    priority_by_bucket_label: dict[str, int] = {}
+    for raw_bucket_label, raw_priority in raw_priorities.items():
+        bucket_label = str(raw_bucket_label)
+        if bucket_label not in bucket_labels:
+            raise ValueError(
+                "risk_score_priority_overrides.priorities contains unknown "
+                f"bucket label: {bucket_label}"
+            )
+        try:
+            priority_by_bucket_label[bucket_label] = int(raw_priority)
+        except (TypeError, ValueError) as parse_error:
+            raise ValueError(
+                "risk_score_priority_overrides.priorities values must be integers"
+            ) from parse_error
+
+    risk_score_csv_path_text = raw_priority_overrides.get("csv_path")
+    if not risk_score_csv_path_text and isinstance(raw_risk_score_gate, dict):
+        risk_score_csv_path_text = raw_risk_score_gate.get("csv_path")
+    if not risk_score_csv_path_text:
+        raise ValueError(
+            "risk_score_priority_overrides.csv_path is required when "
+            "risk_score_gate.csv_path is not configured"
+        )
+
+    risk_score_csv_path = _resolve_repository_relative_path(
+        risk_score_csv_path_text
+    )
+    if not risk_score_csv_path.exists():
+        raise ValueError(
+            "risk_score_priority_overrides.csv_path not found: "
+            f"{risk_score_csv_path}"
+        )
+
+    bucket_priority_overrides_by_month: dict[str, dict[str, int]] = {}
+    with risk_score_csv_path.open("r", newline="") as risk_score_file:
+        reader = csv.DictReader(risk_score_file)
+        for row in reader:
+            try:
+                risk_score = int(row["risk_score"])
+                year_month_text = row["year_month"]
+            except (KeyError, TypeError, ValueError):
+                continue
+            if risk_score in target_scores:
+                bucket_priority_overrides_by_month[year_month_text] = dict(
+                    priority_by_bucket_label
+                )
+
+    return (
+        bucket_priority_overrides_by_month,
+        target_scores,
+        priority_by_bucket_label,
+    )
+
+
+def apply_risk_score_priority_override_for_month(
+    config: multi_bucket_today.MultiBucketRunConfig,
+    evaluation_month: str,
+) -> tuple[set[int], dict[str, int]] | None:
+    """Apply configured bucket priorities for one risk-score month.
+
+    The daily cron path evaluates one date at a time, so it only needs the
+    override for ``evaluation_month`` instead of the simulator's full
+    month-keyed mapping.
+    """
+
+    (
+        bucket_priority_overrides_by_month,
+        target_scores,
+        priority_by_bucket_label,
+    ) = load_risk_score_priority_overrides(
+        config.raw_document.get("risk_score_priority_overrides"),
+        config.raw_document.get("risk_score_gate"),
+        set(config.bucket_definitions),
+    )
+    if bucket_priority_overrides_by_month is None:
+        return None
+
+    priority_override_for_month = bucket_priority_overrides_by_month.get(
+        evaluation_month
+    )
+    if priority_override_for_month is None:
+        return target_scores, {}
+
+    for bucket_label, priority_value in priority_override_for_month.items():
+        config.bucket_definitions[bucket_label].entry_priority = priority_value
+
+    return target_scores, priority_by_bucket_label
 
 
 def _resolve_strategy_choice(raw_name: str, allowed: dict) -> str:
@@ -1853,11 +1970,7 @@ class StockShell(cmd.Cmd):
         the production multi_bucket_today command. Snapshots the namespaced
         ADAPTIVE TP/SL virtual trade return history at the boundary of the
         given date and writes it to PATH (default:
-        data/adaptive_state_export.json).
-
-        --export-ft-signal-outcomes writes all-eligible FT-family signal
-        counterfactual outcomes for offline research. It does not enable a
-        funding gate."""
+        data/adaptive_state_export.json)."""
 
         try:
             tokens = shlex.split(argument_line.strip())
@@ -1867,8 +1980,7 @@ class StockShell(cmd.Cmd):
         if not tokens:
             self.stdout.write(
                 "usage: multi_bucket_simulation CONFIG_PATH [START_DATE END_DATE] "
-                "[--export-state-on-date YYYY-MM-DD --export-state-out PATH] "
-                "[--export-ft-signal-outcomes PATH]\n"
+                "[--export-state-on-date YYYY-MM-DD --export-state-out PATH]\n"
                 "See help multi_bucket_simulation for the JSON format.\n"
             )
             return
@@ -1877,7 +1989,6 @@ class StockShell(cmd.Cmd):
         date_range_tokens: list[str] = []
         export_state_on_date_str: str | None = None
         export_state_out_path_text: str | None = None
-        export_ft_signal_outcomes_path_text: str | None = None
         index_position = 1
         while index_position < len(tokens):
             current_token = tokens[index_position]
@@ -1886,12 +1997,6 @@ class StockShell(cmd.Cmd):
                 index_position += 2
             elif current_token == "--export-state-out" and index_position + 1 < len(tokens):
                 export_state_out_path_text = tokens[index_position + 1]
-                index_position += 2
-            elif (
-                current_token == "--export-ft-signal-outcomes"
-                and index_position + 1 < len(tokens)
-            ):
-                export_ft_signal_outcomes_path_text = tokens[index_position + 1]
                 index_position += 2
             elif not current_token.startswith("--"):
                 date_range_tokens.append(current_token)
@@ -1977,50 +2082,17 @@ class StockShell(cmd.Cmd):
                 f"sigma_multiplier={expectancy_gate_config.sigma_multiplier:.6f} "
                 f"threshold={expectancy_gate_config.threshold:.6f}\n"
             )
-        try:
-            ft_expectancy_gate_config = (
-                strategy.parse_ft_family_expectancy_gate_config(
-                    config_document.get("ft_family_expectancy_gate")
-                )
+        if (
+            expectancy_gate_config is not None
+            and expectancy_gate_config.priority_override is not None
+        ):
+            self.stdout.write(
+                "Expectancy priority override: "
+                "sigma_multiplier="
+                f"{expectancy_gate_config.priority_override.sigma_multiplier:.6f} "
+                "soft_threshold="
+                f"{expectancy_gate_config.priority_override_threshold:.6f}\n"
             )
-        except ValueError as ft_expectancy_gate_error:
-            self.stdout.write(f"{ft_expectancy_gate_error}\n")
-            return
-        if ft_expectancy_gate_config is not None:
-            if (
-                ft_expectancy_gate_config.decision_mode
-                == "previous_calendar_period"
-            ):
-                self.stdout.write(
-                    "FT expectancy gate: "
-                    "decision_mode=previous_calendar_period "
-                    "period_months="
-                    f"{ft_expectancy_gate_config.period_months} "
-                    "period_decision_threshold="
-                    f"{ft_expectancy_gate_config.threshold:.6f} "
-                    "period_minimum_samples="
-                    f"{ft_expectancy_gate_config.period_minimum_samples} "
-                    "sensor="
-                    f"{list(ft_expectancy_gate_config.sensor_buckets)} "
-                    "gated="
-                    f"{list(ft_expectancy_gate_config.gated_buckets)}\n"
-                )
-            else:
-                self.stdout.write(
-                    "FT expectancy gate: "
-                    f"window={ft_expectancy_gate_config.window} "
-                    "baseline_mean="
-                    f"{ft_expectancy_gate_config.baseline_mean:.6f} "
-                    "baseline_sigma="
-                    f"{ft_expectancy_gate_config.baseline_sigma:.6f} "
-                    "sigma_multiplier="
-                    f"{ft_expectancy_gate_config.sigma_multiplier:.6f} "
-                    f"threshold={ft_expectancy_gate_config.threshold:.6f} "
-                    "sensor="
-                    f"{list(ft_expectancy_gate_config.sensor_buckets)} "
-                    "gated="
-                    f"{list(ft_expectancy_gate_config.gated_buckets)}\n"
-                )
 
         try:
             maximum_position_count = int(
@@ -2333,6 +2405,7 @@ class StockShell(cmd.Cmd):
             except ValueError as error:
                 self.stdout.write(f"{error}\n")
                 return
+
             bucket_definitions[label] = strategy.ComplexStrategySetDefinition(
                 label=label,
                 buy_strategy_name=buy_strategy_name,
@@ -2499,14 +2572,42 @@ class StockShell(cmd.Cmd):
                     and raw_bucket["min_hold_sl"] is not None
                     else None
                 ),
-                min_hold=(
-                    int(raw_bucket["min_hold"])
-                    if "min_hold" in raw_bucket
-                    and raw_bucket["min_hold"] is not None
-                    else None
-                ),
                 cohort_co_movement_gate=cohort_co_movement_gate_config,
             )
+
+        if (
+            expectancy_gate_config is not None
+            and expectancy_gate_config.priority_override is not None
+        ):
+            configured_bucket_labels = set(bucket_definitions)
+            override_bucket_labels = set(
+                expectancy_gate_config.priority_override.priorities
+            )
+            unknown_override_labels = sorted(
+                override_bucket_labels - configured_bucket_labels
+            )
+            missing_override_labels = sorted(
+                configured_bucket_labels - override_bucket_labels
+            )
+            if unknown_override_labels or missing_override_labels:
+                problem_parts = []
+                if unknown_override_labels:
+                    problem_parts.append(
+                        "unknown bucket label(s): "
+                        + ", ".join(unknown_override_labels)
+                    )
+                if missing_override_labels:
+                    problem_parts.append(
+                        "missing bucket label(s): "
+                        + ", ".join(missing_override_labels)
+                    )
+                self.stdout.write(
+                    "expectancy_gate.priority_override.priorities must cover "
+                    "every configured bucket exactly; "
+                    + "; ".join(problem_parts)
+                    + "\n"
+                )
+                return
 
         if statistics_start_timestamp is not None:
             start_timestamp = statistics_start_timestamp - pandas.DateOffset(years=1)
@@ -2696,42 +2797,11 @@ class StockShell(cmd.Cmd):
                 f"{curve_description}\n"
             )
 
-        # Optional research phantom gate. Production and canonical simulation
-        # configs omit it; enabling requires an explicit opt-in.
+        # Phantom score gate (action 2): ft-family regime score decides
+        # whether gated-bucket entries deploy capital (slot still taken).
         wr_gate_config: strategy.WRGateConfig | None = None
         raw_wr_gate = config_document.get("ft_family_wr_gate")
         if raw_wr_gate is not None:
-            raw_wr_gate_enabled = raw_wr_gate.get("enabled", False)
-            if not isinstance(raw_wr_gate_enabled, bool):
-                self.stdout.write(
-                    "ft_family_wr_gate.enabled must be true or false\n"
-                )
-                return
-            if not raw_wr_gate_enabled:
-                self.stdout.write("WR-gate: disabled (enabled=false)\n")
-                raw_wr_gate = None
-        if raw_wr_gate is not None:
-            supported_wr_gate_keys = {
-                "enabled",
-                "sensor_bucket",
-                "gated_buckets",
-                "window",
-                "score_threshold",
-                "weight_wr",
-                "weight_no_tp",
-                "weight_max_hold",
-                "curve",
-            }
-            unknown_wr_gate_keys = sorted(
-                set(raw_wr_gate) - supported_wr_gate_keys
-            )
-            if unknown_wr_gate_keys:
-                self.stdout.write(
-                    "ft_family_wr_gate contains unknown key(s): "
-                    + ", ".join(unknown_wr_gate_keys)
-                    + "\n"
-                )
-                return
             wr_gate_config = strategy.WRGateConfig(
                 sensor_bucket=str(
                     raw_wr_gate.get(
@@ -2754,13 +2824,25 @@ class StockShell(cmd.Cmd):
                     raw_wr_gate.get("weight_max_hold", 0.0)
                 ),
                 curve=str(raw_wr_gate.get("curve", "score")),
+                risk_score_activation_threshold=(
+                    int(raw_wr_gate["risk_score_activation_threshold"])
+                    if raw_wr_gate.get("risk_score_activation_threshold")
+                    is not None
+                    else None
+                ),
+            )
+            activation_description = (
+                "always-on"
+                if wr_gate_config.risk_score_activation_threshold is None
+                else f"risk_score>={wr_gate_config.risk_score_activation_threshold}"
             )
             self.stdout.write(
                 "WR-gate: "
                 f"sensor={wr_gate_config.sensor_bucket} "
                 f"gated={list(wr_gate_config.gated_buckets)} "
                 f"window={wr_gate_config.window} "
-                f"curve={wr_gate_config.curve}\n"
+                f"curve={wr_gate_config.curve} "
+                f"activation={activation_description}\n"
             )
 
         export_state_at_date_ts: pandas.Timestamp | None = None
@@ -2776,6 +2858,9 @@ class StockShell(cmd.Cmd):
         # order blocking belongs to dashboard.py, not cron/signal rolling.
         risk_score_stop_months: set[str] | None = None
         margin_overrides: dict[str, float] | None = None
+        # Months in which the WR-gate is active (risk score >= its
+        # activation threshold). Empty/None means always-on.
+        wr_gate_active_months: set[str] = set()
         raw_gate = config_document.get("risk_score_gate")
         if raw_gate is not None:
             gate_csv_path_text = str(raw_gate.get("csv_path", ""))
@@ -2821,6 +2906,14 @@ class StockShell(cmd.Cmd):
                         and score >= reduce_threshold
                     ):
                         margin_overrides[row["year_month"]] = reduce_margin
+                    if (
+                        wr_gate_config is not None
+                        and wr_gate_config.risk_score_activation_threshold
+                        is not None
+                        and score
+                        >= wr_gate_config.risk_score_activation_threshold
+                    ):
+                        wr_gate_active_months.add(row["year_month"])
             reduce_description = (
                 "disabled"
                 if reduce_threshold is None
@@ -2831,6 +2924,36 @@ class StockShell(cmd.Cmd):
                 f"Risk-score gate: stop_threshold={stop_threshold} "
                 f"({len(risk_score_stop_months)} stop months), "
                 f"reduce={reduce_description}\n"
+            )
+
+        try:
+            (
+                bucket_priority_overrides_by_month,
+                target_priority_scores,
+                priority_by_bucket_label,
+            ) = load_risk_score_priority_overrides(
+                config_document.get("risk_score_priority_overrides"),
+                raw_gate,
+                set(bucket_definitions),
+            )
+        except ValueError as priority_error:
+            self.stdout.write(f"{priority_error}\n")
+            return
+        if bucket_priority_overrides_by_month is not None:
+            sorted_scores_text = ", ".join(
+                str(risk_score) for risk_score in sorted(target_priority_scores)
+            )
+            sorted_priorities_text = ", ".join(
+                f"{bucket_label}->{priority_value}"
+                for bucket_label, priority_value in sorted(
+                    priority_by_bucket_label.items()
+                )
+            )
+            self.stdout.write(
+                "Risk-score priority override: "
+                f"scores=[{sorted_scores_text}] "
+                f"({len(bucket_priority_overrides_by_month)} months), "
+                f"{sorted_priorities_text}\n"
             )
 
         simulation_data_directory = data_directory
@@ -2897,32 +3020,20 @@ class StockShell(cmd.Cmd):
                     exported_state=exported_state_holder,
                     risk_score_stop_months=risk_score_stop_months,
                     margin_overrides=margin_overrides,
+                    bucket_priority_overrides_by_month=(
+                        bucket_priority_overrides_by_month
+                    ),
                     symbol_first_eligible_trade_dates=(
                         symbol_first_eligible_trade_dates
                     ),
                     wr_synced_sizing=wr_synced_sizing_config,
                     wr_gate=wr_gate_config,
-                    expectancy_gate=expectancy_gate_config,
-                    ft_expectancy_gate=ft_expectancy_gate_config,
-                    ft_signal_outcome_sensor_buckets=(
-                        ft_expectancy_gate_config.sensor_buckets
-                        if (
-                            export_ft_signal_outcomes_path_text is not None
-                            and ft_expectancy_gate_config is not None
-                        )
-                        else (
-                            tuple(
-                                bucket_label
-                                for bucket_label in (
-                                    "fish_tail_production",
-                                    "fish_tail_squeeze",
-                                )
-                                if bucket_label in bucket_definitions
-                            )
-                            if export_ft_signal_outcomes_path_text is not None
-                            else None
-                        )
+                    wr_gate_active_months=(
+                        wr_gate_active_months
+                        if wr_gate_active_months
+                        else None
                     ),
+                    expectancy_gate=expectancy_gate_config,
                 )
         except ValueError as error:
             self.stdout.write(f"{error}\n")
@@ -2949,62 +3060,6 @@ class StockShell(cmd.Cmd):
             except OSError as write_error:
                 self.stdout.write(
                     f"failed to write exported state: {write_error}\n"
-                )
-
-        if export_ft_signal_outcomes_path_text is not None:
-            export_ft_signal_outcomes_path = Path(
-                export_ft_signal_outcomes_path_text
-            ).expanduser()
-            try:
-                export_ft_signal_outcomes_path.parent.mkdir(
-                    parents=True,
-                    exist_ok=True,
-                )
-                with export_ft_signal_outcomes_path.open(
-                    "w",
-                    encoding="utf-8",
-                    newline="",
-                ) as export_file:
-                    field_names = (
-                        "entry_date",
-                        "exit_date",
-                        "percentage_change",
-                        "exit_reason",
-                        "holding_bars",
-                        "max_favorable_excursion_pct",
-                        "max_adverse_excursion_pct",
-                    )
-                    outcome_writer = csv.DictWriter(
-                        export_file,
-                        fieldnames=field_names,
-                    )
-                    outcome_writer.writeheader()
-                    for outcome in (
-                        simulation_metrics.ft_expectancy_sensor_outcomes
-                    ):
-                        outcome_writer.writerow(
-                            {
-                                "entry_date": outcome.entry_date.date().isoformat(),
-                                "exit_date": outcome.exit_date.date().isoformat(),
-                                "percentage_change": outcome.percentage_change,
-                                "exit_reason": outcome.exit_reason,
-                                "holding_bars": outcome.holding_bars,
-                                "max_favorable_excursion_pct": (
-                                    outcome.max_favorable_excursion_pct
-                                ),
-                                "max_adverse_excursion_pct": (
-                                    outcome.max_adverse_excursion_pct
-                                ),
-                            }
-                        )
-                self.stdout.write(
-                    "FT all-signal counterfactual outcomes saved to "
-                    f"{export_ft_signal_outcomes_path}\n"
-                )
-            except OSError as write_error:
-                self.stdout.write(
-                    "failed to write FT all-signal counterfactual outcomes: "
-                    f"{write_error}\n"
                 )
 
         self.stdout.write(
@@ -3080,27 +3135,29 @@ class StockShell(cmd.Cmd):
                 "expectancy_gated_trades="
                 f"{simulation_metrics.expectancy_gated_trade_count}\n"
             )
-        if ft_expectancy_gate_config is not None:
-            ft_episode_descriptions = [
-                (
-                    f"{episode.first_entry_date.date().isoformat()} to "
-                    f"{episode.last_entry_date.date().isoformat()}"
+        if (
+            expectancy_gate_config is not None
+            and expectancy_gate_config.priority_override is not None
+        ):
+            override_days_by_month = (
+                simulation_metrics.expectancy_priority_override_days_by_month
+            )
+            override_month_histogram_text = (
+                "  ".join(
+                    f"{month}:{day_count}"
+                    for month, day_count in sorted(
+                        override_days_by_month.items()
+                    )
                 )
-                for episode in (
-                    simulation_metrics.ft_expectancy_gate_closed_episodes
-                )
-            ]
-            ft_episode_dates_text = (
-                "; ".join(ft_episode_descriptions)
-                if ft_episode_descriptions
+                if override_days_by_month
                 else "none"
             )
             self.stdout.write(
-                "FT expectancy gate summary: "
-                f"closed_episodes={len(ft_episode_descriptions)} "
-                f"({ft_episode_dates_text}), "
-                "ft_expectancy_gated_trades="
-                f"{simulation_metrics.ft_expectancy_gated_trade_count}\n"
+                "Expectancy priority override summary: "
+                f"active_days={sum(override_days_by_month.values())} "
+                f"({override_month_histogram_text}), "
+                "override_entries="
+                f"{simulation_metrics.expectancy_priority_override_trade_count}\n"
             )
         for year, annual_return in sorted(total_metrics.annual_returns.items()):
             total_trade_count = total_metrics.annual_trade_counts.get(year, 0)
@@ -3210,10 +3267,10 @@ class StockShell(cmd.Cmd):
                         trade_record["expectancy_gated"] = (
                             entry_detail.expectancy_gated
                         )
-                    if ft_expectancy_gate_config is not None:
-                        trade_record["ft_expectancy_gated"] = (
-                            entry_detail.ft_expectancy_gated
-                        )
+                        if expectancy_gate_config.priority_override is not None:
+                            trade_record["expectancy_priority_override"] = (
+                                entry_detail.expectancy_priority_override
+                            )
                     trade_records.append(trade_record)
         if trade_records:
             output_directory = Path("logs") / "multi_bucket_simulation_result"
@@ -3272,11 +3329,11 @@ class StockShell(cmd.Cmd):
                     phantom_column_index + 1,
                     "expectancy_gated",
                 )
-            if ft_expectancy_gate_config is not None:
-                trade_detail_columns.insert(
-                    trade_detail_columns.index("phantom") + 1,
-                    "ft_expectancy_gated",
-                )
+                if expectancy_gate_config.priority_override is not None:
+                    trade_detail_columns.insert(
+                        phantom_column_index + 2,
+                        "expectancy_priority_override",
+                    )
             pandas.DataFrame(
                 trade_records,
                 columns=trade_detail_columns,
@@ -3336,6 +3393,7 @@ class StockShell(cmd.Cmd):
             "non-daily backtest cache such as '2010'\n"
             "  - confirmation_mode: 'market', 'limit', or null (no confirmation)\n"
             "  - priority: lower = higher; ties broken by within-bucket quality then insertion order\n"
+            "  - risk_score_priority_overrides can change bucket priority for selected monthly scores\n"
             "  - default max_positions counts only that bucket and can use any global slots\n"
             "  - fill_remaining=true limits a bucket to the portfolio's first max_positions slots\n"
             "  - shared_position_group gives all same-named members one shared any-slot max_positions cap\n"
@@ -3343,8 +3401,6 @@ class StockShell(cmd.Cmd):
             "  - skip_ff12_groups per bucket is optional; values are positive FF group ids removed before ranking\n"
             "  - ff12_data_path is optional; use it for frozen old-universe sector maps\n"
             "  - strategy_id must exist in data/strategy_sets.csv\n"
-            "  - --export-ft-signal-outcomes PATH writes all eligible FT "
-            "signal outcomes without enabling a funding gate\n"
             "  - output CSV: logs/multi_bucket_simulation_result/multi_bucket_simulation_*.csv\n"
         )
 
@@ -5034,6 +5090,38 @@ class StockShell(cmd.Cmd):
                 return
             eval_date_string = date_string
         eval_date_timestamp = pandas.Timestamp(eval_date_string)
+        evaluation_month = eval_date_timestamp.strftime("%Y-%m")
+
+        try:
+            daily_priority_override = (
+                apply_risk_score_priority_override_for_month(
+                    config,
+                    evaluation_month,
+                )
+            )
+        except ValueError as priority_error:
+            self.stdout.write(f"{priority_error}\n")
+            return
+        if daily_priority_override is not None:
+            target_priority_scores, priority_by_bucket_label = (
+                daily_priority_override
+            )
+            if priority_by_bucket_label:
+                score_text = ", ".join(
+                    str(risk_score)
+                    for risk_score in sorted(target_priority_scores)
+                )
+                priority_text = ", ".join(
+                    f"{bucket_label}->{priority_value}"
+                    for bucket_label, priority_value in sorted(
+                        priority_by_bucket_label.items()
+                    )
+                )
+                self.stdout.write(
+                    "Risk-score priority override active: "
+                    f"month={evaluation_month} scores=[{score_text}], "
+                    f"{priority_text}\n"
+                )
 
         # These are counterfactual reference trades used only by ADAPTIVE
         # TP/SL statistics. They are not Futu positions, dashboard
@@ -5176,9 +5264,10 @@ class StockShell(cmd.Cmd):
             "[ADAPTIVE_TP_SL_VIRTUAL_TRADE_HISTORY_STATE] log lines.\n"
             "Honors optional ff12_data_path from the JSON config so live "
             "selection uses the same sector map as the matching simulation.\n"
-            "When expectancy_gate is enabled, advances the separate\n"
+            "Honors optional risk_score_priority_overrides for the evaluated "
+            "month. When expectancy_gate is enabled, advances the separate\n"
             "accepted-entry sensor state and emits [EXPECTANCY_GATE_SENSOR]\n"
-            "for the dashboard's stop decision.\n"
+            "for the dashboard's stop and priority decisions.\n"
         )
 
     def do_data_revision_audit(self, argument_line: str) -> None:  # noqa: D401
