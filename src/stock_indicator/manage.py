@@ -2202,6 +2202,15 @@ class StockShell(cmd.Cmd):
                         f"bucket {label}: max_positions must be positive\n"
                     )
                     return
+            # TODO: review
+            try:
+                shared_position_group = strategy.parse_shared_position_group(
+                    raw_bucket.get("shared_position_group"),
+                    bucket_label=label,
+                )
+            except ValueError as error:
+                self.stdout.write(f"{error}\n")
+                return
             try:
                 skipped_fama_french_groups = multi_bucket_today.parse_skip_ff12_groups(
                     raw_bucket.get("skip_ff12_groups"),
@@ -2349,6 +2358,7 @@ class StockShell(cmd.Cmd):
                 entry_priority=entry_priority,
                 maximum_positions=bucket_maximum_positions,
                 fill_remaining=bool(raw_bucket.get("fill_remaining", False)),
+                shared_position_group=shared_position_group,
                 skipped_fama_french_groups=skipped_fama_french_groups,
                 additional_above_ranges=(
                     [
@@ -3285,7 +3295,7 @@ class StockShell(cmd.Cmd):
         self.stdout.write(
             "multi_bucket_simulation CONFIG_PATH [START_DATE END_DATE]\n"
             "Run a portfolio simulation over N strategy buckets defined in a JSON file.\n"
-            "Each bucket has its own SL/TP, dollar-volume filter, priority, and optional per-bucket cap.\n"
+            "Each bucket has its own SL/TP, dollar-volume filter, priority, and position-limit mode.\n"
             "All buckets share a global max_position_count and compete for slots first-come-first-served,\n"
             "with bucket priority as the tiebreaker (lower number = higher priority).\n"
             "\n"
@@ -3326,7 +3336,10 @@ class StockShell(cmd.Cmd):
             "non-daily backtest cache such as '2010'\n"
             "  - confirmation_mode: 'market', 'limit', or null (no confirmation)\n"
             "  - priority: lower = higher; ties broken by within-bucket quality then insertion order\n"
-            "  - max_positions per bucket is optional; null means no per-bucket cap\n"
+            "  - default max_positions counts only that bucket and can use any global slots\n"
+            "  - fill_remaining=true limits a bucket to the portfolio's first max_positions slots\n"
+            "  - shared_position_group gives all same-named members one shared any-slot max_positions cap\n"
+            "  - max_positions=null means the global cap when no shared group is configured\n"
             "  - skip_ff12_groups per bucket is optional; values are positive FF group ids removed before ranking\n"
             "  - ff12_data_path is optional; use it for frozen old-universe sector maps\n"
             "  - strategy_id must exist in data/strategy_sets.csv\n"

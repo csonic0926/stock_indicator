@@ -837,12 +837,18 @@ class ComplexStrategySetDefinition:
     # Multi-bucket extensions (ignored by run_complex_simulation A/B path):
     # - entry_priority: lower number = wins entry contention first (used by
     #   run_multi_bucket_simulation as a tiebreaker in the event sort key).
-    # - maximum_positions: per-bucket position cap; when None, the bucket is
-    #   only limited by the global maximum_position_count.
-    # - fill_remaining: when True, this bucket can only open when the TOTAL
-    #   open position count (across all buckets) is below its maximum_positions.
-    #   This mimics the complex simulation B-set behaviour where B fills
-    #   positions that A didn't use, rather than having its own independent cap.
+    # - maximum_positions: cap value interpreted by the selected position
+    #   limit mode; when None in default mode, only the global cap applies.
+    # TODO: review
+    # Position limits have three mutually exclusive modes:
+    # - default: this bucket can use any global slots until its own
+    #   maximum_positions count is reached;
+    # - fill_remaining=True: this bucket can only use the first
+    #   maximum_positions slots in the whole portfolio;
+    # - shared_position_group: every bucket with the same group name shares
+    #   one any-slot maximum_positions count.
+    # The shared mode is allocation-generic: no strategy or bucket names are
+    # embedded in the allocator.
     # - additional_above_ranges: when set, the bucket's above_pv entry filter
     #   becomes OR-of-ranges: trade entries fire when above_pv is in the
     #   primary range (from strategy_name) OR in any of these additional
@@ -852,6 +858,7 @@ class ComplexStrategySetDefinition:
     entry_priority: int = 0
     maximum_positions: int | None = None
     fill_remaining: bool = False
+    shared_position_group: str | None = None
     additional_above_ranges: list[tuple[float, float]] | None = None
     # When set, force-exit any open trade at the bar after `max_hold` bars
     # have been held (next bar open). Empirically derived from winner
@@ -884,6 +891,67 @@ class ComplexStrategySetDefinition:
     # The gate is intentionally per-bucket because it is an entry-premise
     # filter for fish-head/vacuum-turn style buckets, not a global rule.
     cohort_co_movement_gate: "CohortCoMovementGateConfig | None" = None
+
+
+# TODO: review
+def parse_shared_position_group(
+    raw_group_name: Any,
+    *,
+    bucket_label: str,
+) -> str | None:
+    """Parse an optional generic shared-position group name."""
+
+    if raw_group_name is None:
+        return None
+    if not isinstance(raw_group_name, str) or not raw_group_name.strip():
+        raise ValueError(
+            f"bucket {bucket_label}: shared_position_group must be a "
+            "non-empty string or null"
+        )
+    return raw_group_name.strip()
+
+
+# TODO: review
+def resolve_shared_position_group_limits(
+    set_definitions: Dict[str, ComplexStrategySetDefinition],
+) -> Dict[str, int]:
+    """Validate and return the cap for each shared any-slot group.
+
+    A grouped bucket uses ``maximum_positions`` as the shared group cap, not
+    as an independent bucket cap. Every member must repeat the same cap so a
+    configuration cannot silently depend on bucket order.
+    """
+
+    group_limits: Dict[str, int] = {}
+    for bucket_label, set_definition in set_definitions.items():
+        group_name = set_definition.shared_position_group
+        if group_name is None:
+            continue
+        if set_definition.fill_remaining:
+            raise ValueError(
+                f"bucket {bucket_label}: shared_position_group cannot be "
+                "combined with fill_remaining"
+            )
+        if set_definition.maximum_positions is None:
+            raise ValueError(
+                f"bucket {bucket_label}: shared_position_group requires an "
+                "explicit max_positions"
+            )
+        if set_definition.maximum_positions <= 0:
+            raise ValueError(
+                f"bucket {bucket_label}: max_positions must be positive"
+            )
+        existing_group_limit = group_limits.get(group_name)
+        if (
+            existing_group_limit is not None
+            and existing_group_limit != set_definition.maximum_positions
+        ):
+            raise ValueError(
+                f"shared_position_group {group_name!r} has inconsistent "
+                "max_positions values"
+            )
+        group_limits[group_name] = set_definition.maximum_positions
+    return group_limits
 
 
 # TODO: review
@@ -2790,7 +2858,8 @@ def run_complex_simulation(
     ``entry_priority`` integer (lower = higher priority) that breaks ties in
     the event sort order. The B-specific hardcoding is disabled so any number
     of buckets can share a global slot pool on a first-come-first-served
-    basis, with priority as the secondary ordering key.
+    basis, with priority as the secondary ordering key. Buckets may also name
+    a ``shared_position_group`` to share one any-slot cap across the group.
 
     ``start_date`` and ``end_date`` bound the causal simulation. When the
     statistics dates are supplied, trades before ``statistics_start_date``
@@ -2861,6 +2930,14 @@ def run_complex_simulation(
             and _set_definition.min_hold < 0
         ):
             raise ValueError("bucket min_hold must be >= 0")
+    # TODO: review
+    shared_position_group_limits = resolve_shared_position_group_limits(
+        set_definitions
+    )
+    if shared_position_group_limits and not multi_bucket_mode:
+        raise ValueError(
+            "shared_position_group requires multi_bucket_mode=True"
+        )
     if ft_expectancy_gate is not None:
         for _gate_bucket_label in (
             *ft_expectancy_gate.sensor_buckets,
@@ -3018,13 +3095,72 @@ def run_complex_simulation(
     accepted_trades_by_set: Dict[str, List[Trade]] = {
         label: [] for label in set_definitions
     }
-    open_position_counts_by_set: Dict[str, int] = {label: 0 for label in set_definitions}
+    open_position_counts_by_set: Dict[str, int] = {
+        label: 0 for label in set_definitions
+    }
+    # TODO: review
+    shared_position_group_by_set: Dict[str, str] = {
+        label: definition.shared_position_group
+        for label, definition in set_definitions.items()
+        if definition.shared_position_group is not None
+    }
+    open_position_counts_by_shared_group: Dict[str, int] = {
+        group_name: 0 for group_name in shared_position_group_limits
+    }
     open_trade_keys: Dict[Tuple[str, int], str] = {}
     accepted_trade_keys: set[Tuple[str, int]] = set()
     # Track open positions per symbol for max_same_symbol enforcement.
     open_symbol_counts: Dict[str, int] = {}
     # Map trade_id -> symbol for decrementing on close.
     open_trade_symbols: Dict[int, str] = {}
+
+    def _increment_open_position_count(bucket_label: str) -> None:
+        """Record one accepted position in its bucket and optional group."""
+
+        open_position_counts_by_set[bucket_label] += 1
+        group_name = shared_position_group_by_set.get(bucket_label)
+        if group_name is not None:
+            open_position_counts_by_shared_group[group_name] += 1
+
+    def _decrement_open_position_count(bucket_label: str) -> None:
+        """Release one position from its bucket and optional shared group."""
+
+        open_position_counts_by_set[bucket_label] = max(
+            0,
+            open_position_counts_by_set[bucket_label] - 1,
+        )
+        group_name = shared_position_group_by_set.get(bucket_label)
+        if group_name is not None:
+            open_position_counts_by_shared_group[group_name] = max(
+                0,
+                open_position_counts_by_shared_group[group_name] - 1,
+            )
+
+    def _entry_position_limit_reached(
+        bucket_label: str,
+        current_open_total: int,
+    ) -> bool:
+        """Apply the configured bucket, prefix, or shared-group cap."""
+
+        position_limit = position_limits_by_set[bucket_label]
+        if not multi_bucket_mode:
+            if (
+                bucket_label.upper() == "B"
+                and current_open_total >= position_limit
+            ):
+                return True
+            return open_position_counts_by_set[bucket_label] >= position_limit
+
+        set_definition = set_definitions[bucket_label]
+        if set_definition.fill_remaining:
+            return current_open_total >= position_limit
+        group_name = shared_position_group_by_set.get(bucket_label)
+        if group_name is not None:
+            return (
+                open_position_counts_by_shared_group[group_name]
+                >= shared_position_group_limits[group_name]
+            )
+        return open_position_counts_by_set[bucket_label] >= position_limit
     # Event tuple layout:
     #   (date, event_type, bucket_priority, entry_priority, insertion_counter,
     #    label, trade)
@@ -3808,9 +3944,7 @@ def run_complex_simulation(
                         continue
                 if close_key in open_trade_keys:
                     open_trade_keys.pop(close_key, None)
-                    open_position_counts_by_set[close_label] = max(
-                        0, open_position_counts_by_set[close_label] - 1
-                    )
+                    _decrement_open_position_count(close_label)
                     same_day_close_count += 1
                     if use_evict_oldest:
                         open_trade_entry_dates.pop(orig_trade_id, None)
@@ -4205,9 +4339,7 @@ def run_complex_simulation(
                     )
                     # Clean up open tracking.
                     open_trade_keys.pop(evict_key, None)
-                    open_position_counts_by_set[evict_label] = max(
-                        0, open_position_counts_by_set[evict_label] - 1
-                    )
+                    _decrement_open_position_count(evict_label)
                     open_trade_entry_dates.pop(evict_tid, None)
                     evict_sym = open_trade_symbols.pop(evict_tid, None)
                     if evict_sym and evict_sym in open_symbol_counts:
@@ -4247,16 +4379,7 @@ def run_complex_simulation(
                     # Eviction is deliberate (not subject to lookahead like
                     # TP/SL closes), so do NOT increment same_day_close_count.
                     current_open_total = len(open_trade_keys) + same_day_close_count
-                if (
-                    not multi_bucket_mode
-                    and label.upper() == "B"
-                    and current_open_total >= position_limits_by_set[label]
-                ):
-                    continue
-                if multi_bucket_mode and set_definitions[label].fill_remaining:
-                    if current_open_total >= position_limits_by_set[label]:
-                        continue
-                elif open_position_counts_by_set[label] >= position_limits_by_set[label]:
+                if _entry_position_limit_reached(label, current_open_total):
                     continue
 
                 # Check max_same_symbol limit.
@@ -4347,7 +4470,7 @@ def run_complex_simulation(
                 accepted_trade_keys.add(trade_key)
                 open_trade_keys[trade_key] = label
                 open_trade_entry_dates[trade_identifier] = event_date
-                open_position_counts_by_set[label] += 1
+                _increment_open_position_count(label)
                 # Track same-symbol count.
                 if trade_sym:
                     open_trade_symbols[trade_identifier] = trade_sym
@@ -4501,13 +4624,10 @@ def run_complex_simulation(
         ) in events:
             trade_identifier = id(trade)
             trade_key = (label, trade_identifier)
-            normalized_label = label.upper()
             if event_type == 0:
                 if trade_key in open_trade_keys:
                     open_trade_keys.pop(trade_key, None)
-                    open_position_counts_by_set[label] = max(
-                        0, open_position_counts_by_set[label] - 1
-                    )
+                    _decrement_open_position_count(label)
             else:
                 if trade_key in accepted_trade_keys:
                     continue
@@ -4544,22 +4664,11 @@ def run_complex_simulation(
                 current_open_total = len(open_trade_keys)
                 if current_open_total >= maximum_position_count:
                     continue
-                if (
-                    not multi_bucket_mode
-                    and normalized_label == "B"
-                    and current_open_total >= position_limits_by_set[label]
-                ):
-                    continue
-                if multi_bucket_mode and set_definitions[label].fill_remaining:
-                    # fill_remaining bucket: can only open when total open
-                    # positions (across all buckets) is below this bucket's max.
-                    if current_open_total >= position_limits_by_set[label]:
-                        continue
-                elif open_position_counts_by_set[label] >= position_limits_by_set[label]:
+                if _entry_position_limit_reached(label, current_open_total):
                     continue
                 accepted_trade_keys.add(trade_key)
                 open_trade_keys[trade_key] = label
-                open_position_counts_by_set[label] += 1
+                _increment_open_position_count(label)
                 accepted_trades_by_set[label].append(trade)
                 _apply_expectancy_gate_to_accepted_entry(
                     label,

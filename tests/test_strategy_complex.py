@@ -1183,6 +1183,220 @@ def test_run_complex_simulation_enforces_shared_cap(
     assert metrics.overall_metrics.maximum_concurrent_positions == 2
 
 
+# TODO: review
+@pytest.mark.parametrize("adaptive_tp_sl_enabled", [False, True])
+def test_multi_bucket_shared_position_group_uses_one_any_slot_cap(
+    monkeypatch: pytest.MonkeyPatch,
+    adaptive_tp_sl_enabled: bool,
+) -> None:
+    """Grouped buckets should share capacity without being tied to early slots."""
+
+    head_trades = [
+        _build_trade("2024-01-01", "2024-01-20", symbol="HEAD_ONE"),
+        _build_trade("2024-01-02", "2024-01-20", symbol="HEAD_TWO"),
+        _build_trade("2024-01-03", "2024-01-20", symbol="HEAD_THREE"),
+    ]
+    high_dispersion_trades = [
+        _build_trade("2024-01-04", "2024-01-06", symbol="HIGH_ONE"),
+    ]
+    standard_trades = [
+        _build_trade("2024-01-05", "2024-01-10", symbol="STANDARD_ONE"),
+        _build_trade("2024-01-05", "2024-01-11", symbol="STANDARD_BLOCKED"),
+        _build_trade("2024-01-07", "2024-01-12", symbol="STANDARD_LATE"),
+    ]
+    artifacts_by_strategy_name = {
+        "head_strategy": _build_artifacts(head_trades),
+        "high_dispersion_strategy": _build_artifacts(high_dispersion_trades),
+        "standard_strategy": _build_artifacts(standard_trades),
+    }
+
+    def fake_generate(
+        *arguments: object,
+        **keyword_arguments: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        buy_strategy_name = keyword_arguments.get("buy_strategy_name")
+        if buy_strategy_name is None:
+            buy_strategy_name = arguments[1]
+        return artifacts_by_strategy_name[str(buy_strategy_name)]
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "head": strategy.ComplexStrategySetDefinition(
+            label="head",
+            buy_strategy_name="head_strategy",
+            sell_strategy_name="head_strategy",
+            entry_priority=1,
+            maximum_positions=7,
+        ),
+        "high_dispersion": strategy.ComplexStrategySetDefinition(
+            label="high_dispersion",
+            buy_strategy_name="high_dispersion_strategy",
+            sell_strategy_name="high_dispersion_strategy",
+            entry_priority=2,
+            maximum_positions=2,
+            shared_position_group="ordinary_tail",
+        ),
+        "standard": strategy.ComplexStrategySetDefinition(
+            label="standard",
+            buy_strategy_name="standard_strategy",
+            sell_strategy_name="standard_strategy",
+            entry_priority=3,
+            maximum_positions=2,
+            shared_position_group="ordinary_tail",
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=7,
+        multi_bucket_mode=True,
+        adaptive_tp_sl=(
+            strategy.AdaptiveTPSLConfig(
+                window=20,
+                min_samples=100,
+                min_tp=1.0,
+                min_sl=1.0,
+                disable_sl_trigger=True,
+            )
+            if adaptive_tp_sl_enabled
+            else None
+        ),
+    )
+
+    assert metrics.metrics_by_set["head"].total_trades == 3
+    assert metrics.metrics_by_set["high_dispersion"].total_trades == 1
+    assert metrics.metrics_by_set["standard"].total_trades == 2
+    assert metrics.overall_metrics.total_trades == 6
+    assert metrics.overall_metrics.maximum_concurrent_positions == 5
+
+
+# TODO: review
+def test_shared_position_group_rejects_conflicting_limit_modes() -> None:
+    """A shared any-slot group must not also use the prefix-slot mode."""
+
+    definitions = {
+        "grouped": strategy.ComplexStrategySetDefinition(
+            label="grouped",
+            buy_strategy_name="grouped_strategy",
+            sell_strategy_name="grouped_strategy",
+            maximum_positions=2,
+            fill_remaining=True,
+            shared_position_group="shared_group",
+        ),
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="cannot be combined with fill_remaining",
+    ):
+        strategy.resolve_shared_position_group_limits(definitions)
+
+
+# TODO: review
+def test_shared_position_group_requires_consistent_caps() -> None:
+    """Every member must declare the same shared maximum position count."""
+
+    definitions = {
+        "first": strategy.ComplexStrategySetDefinition(
+            label="first",
+            buy_strategy_name="first_strategy",
+            sell_strategy_name="first_strategy",
+            maximum_positions=2,
+            shared_position_group="shared_group",
+        ),
+        "second": strategy.ComplexStrategySetDefinition(
+            label="second",
+            buy_strategy_name="second_strategy",
+            sell_strategy_name="second_strategy",
+            maximum_positions=3,
+            shared_position_group="shared_group",
+        ),
+    }
+
+    with pytest.raises(ValueError, match="inconsistent max_positions"):
+        strategy.resolve_shared_position_group_limits(definitions)
+
+
+# TODO: review
+def test_multi_bucket_preserves_independent_and_prefix_position_modes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Independent buckets use late slots while prefix buckets cannot."""
+
+    artifacts_by_strategy_name = {
+        "head_strategy": _build_artifacts([
+            _build_trade("2024-01-01", "2024-01-20", symbol="HEAD_ONE"),
+            _build_trade("2024-01-02", "2024-01-20", symbol="HEAD_TWO"),
+            _build_trade("2024-01-03", "2024-01-20", symbol="HEAD_THREE"),
+        ]),
+        "independent_strategy": _build_artifacts([
+            _build_trade("2024-01-04", "2024-01-10", symbol="INDEPENDENT"),
+        ]),
+        "prefix_strategy": _build_artifacts([
+            _build_trade("2024-01-05", "2024-01-10", symbol="PREFIX"),
+        ]),
+    }
+
+    def fake_generate(
+        *arguments: object,
+        **keyword_arguments: object,
+    ) -> strategy.StrategyEvaluationArtifacts:
+        buy_strategy_name = keyword_arguments.get("buy_strategy_name")
+        if buy_strategy_name is None:
+            buy_strategy_name = arguments[1]
+        return artifacts_by_strategy_name[str(buy_strategy_name)]
+
+    monkeypatch.setattr(
+        strategy,
+        "_generate_strategy_evaluation_artifacts",
+        fake_generate,
+    )
+    _stub_metrics_functions(monkeypatch)
+
+    definitions = {
+        "head": strategy.ComplexStrategySetDefinition(
+            label="head",
+            buy_strategy_name="head_strategy",
+            sell_strategy_name="head_strategy",
+            entry_priority=1,
+            maximum_positions=7,
+        ),
+        "independent": strategy.ComplexStrategySetDefinition(
+            label="independent",
+            buy_strategy_name="independent_strategy",
+            sell_strategy_name="independent_strategy",
+            entry_priority=2,
+            maximum_positions=2,
+        ),
+        "prefix": strategy.ComplexStrategySetDefinition(
+            label="prefix",
+            buy_strategy_name="prefix_strategy",
+            sell_strategy_name="prefix_strategy",
+            entry_priority=3,
+            maximum_positions=2,
+            fill_remaining=True,
+        ),
+    }
+
+    metrics = strategy.run_complex_simulation(
+        Path("/tmp"),
+        definitions,
+        maximum_position_count=7,
+        multi_bucket_mode=True,
+    )
+
+    assert metrics.metrics_by_set["head"].total_trades == 3
+    assert metrics.metrics_by_set["independent"].total_trades == 1
+    assert metrics.metrics_by_set["prefix"].total_trades == 0
+
+
 def test_evict_oldest_keeps_evicted_exit_from_far_future_settlement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

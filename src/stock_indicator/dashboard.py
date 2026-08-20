@@ -1070,6 +1070,9 @@ def _load_current_bucket_entry_limits(
             "entry_priority": bucket_definition.entry_priority,
             "maximum_positions": maximum_positions,
             "fill_remaining": bucket_definition.fill_remaining,
+            "shared_position_group": (
+                bucket_definition.shared_position_group
+            ),
             "max_same_symbol": config.max_same_symbol,
             "fuel_priority_threshold": (
                 bucket_definition.fuel_priority_threshold
@@ -1129,13 +1132,64 @@ def _count_live_positions_by_bucket(
     return bucket_counts
 
 
+# TODO: review
+def _count_live_positions_by_shared_group(
+    *,
+    bucket_position_counts: dict[str, int],
+    current_bucket_entry_limits: dict[str, dict[str, Any]],
+) -> dict[str, int]:
+    """Aggregate current bucket positions into configured shared groups."""
+
+    shared_group_counts: dict[str, int] = {}
+    counted_bucket_labels: set[str] = set()
+    for entry_limit in current_bucket_entry_limits.values():
+        bucket_label = str(entry_limit.get("bucket") or "")
+        if not bucket_label or bucket_label in counted_bucket_labels:
+            continue
+        counted_bucket_labels.add(bucket_label)
+        group_name = entry_limit.get("shared_position_group")
+        if not group_name:
+            continue
+        normalized_group_name = str(group_name)
+        shared_group_counts[normalized_group_name] = (
+            shared_group_counts.get(normalized_group_name, 0)
+            + bucket_position_counts.get(bucket_label, 0)
+        )
+    return shared_group_counts
+
+
+# TODO: review
+def _increment_live_position_counts(
+    *,
+    bucket_label: str,
+    bucket_position_counts: dict[str, int],
+    shared_position_group_counts: dict[str, int],
+    current_bucket_entry_limits: dict[str, dict[str, Any]],
+) -> None:
+    """Record one preview allocation in its bucket and shared group."""
+
+    if not bucket_label:
+        return
+    bucket_position_counts[bucket_label] = (
+        bucket_position_counts.get(bucket_label, 0) + 1
+    )
+    entry_limit = current_bucket_entry_limits.get(bucket_label, {})
+    group_name = entry_limit.get("shared_position_group")
+    if group_name:
+        normalized_group_name = str(group_name)
+        shared_position_group_counts[normalized_group_name] = (
+            shared_position_group_counts.get(normalized_group_name, 0) + 1
+        )
+
+
 def _entry_limit_skip_reason(
     *,
     entry_limit: dict[str, Any] | None,
     bucket_position_counts: dict[str, int],
+    shared_position_group_counts: dict[str, int],
     occupied_position_count: int,
 ) -> str | None:
-    """Return a skip reason when a BUY would violate its bucket cap."""
+    """Return a skip reason for bucket, prefix, or shared-group limits."""
     if not entry_limit:
         return None
     bucket_label = str(entry_limit.get("bucket") or "")
@@ -1144,6 +1198,21 @@ def _entry_limit_skip_reason(
     try:
         maximum_positions = int(entry_limit.get("maximum_positions"))
     except (TypeError, ValueError):
+        return None
+
+    group_name = entry_limit.get("shared_position_group")
+    if group_name:
+        normalized_group_name = str(group_name)
+        current_group_positions = shared_position_group_counts.get(
+            normalized_group_name,
+            0,
+        )
+        if current_group_positions >= maximum_positions:
+            return (
+                f"shared position group {normalized_group_name} "
+                f"max_positions={maximum_positions} already filled "
+                f"(current: {current_group_positions})"
+            )
         return None
 
     if bool(entry_limit.get("fill_remaining")):
@@ -2106,6 +2175,10 @@ def api_preview_orders():
         open_phantom_positions=open_phantom_positions,
         pending_buy_entries=pending_buy_entries,
     )
+    shared_position_group_counts = _count_live_positions_by_shared_group(
+        bucket_position_counts=bucket_position_counts,
+        current_bucket_entry_limits=current_bucket_entry_limits,
+    )
 
     # Slot cap based on REAL Futu portfolio PLUS phantom-held slots (this
     # is the order layer's job — cron's signal layer emits Top N
@@ -2241,6 +2314,7 @@ def api_preview_orders():
             bucket_skip_reason := _entry_limit_skip_reason(
                 entry_limit=current_bucket_entry_limits.get(bucket_key),
                 bucket_position_counts=bucket_position_counts,
+                shared_position_group_counts=shared_position_group_counts,
                 occupied_position_count=occupied_position_count,
             )
         ):
@@ -2314,10 +2388,12 @@ def api_preview_orders():
             slots_remaining -= 1
             occupied_position_count += 1
             bucket_label = str(order_dict.get("bucket") or "")
-            if bucket_label:
-                bucket_position_counts[bucket_label] = (
-                    bucket_position_counts.get(bucket_label, 0) + 1
-                )
+            _increment_live_position_counts(
+                bucket_label=bucket_label,
+                bucket_position_counts=bucket_position_counts,
+                shared_position_group_counts=shared_position_group_counts,
+                current_bucket_entry_limits=current_bucket_entry_limits,
+            )
             occupied_symbol_counts[broker_symbol] = (
                 occupied_symbol_counts.get(broker_symbol, 0) + 1
             )
@@ -2325,10 +2401,12 @@ def api_preview_orders():
             slots_remaining -= 1
             occupied_position_count += 1
             bucket_label = str(order_dict.get("bucket") or "")
-            if bucket_label:
-                bucket_position_counts[bucket_label] = (
-                    bucket_position_counts.get(bucket_label, 0) + 1
-                )
+            _increment_live_position_counts(
+                bucket_label=bucket_label,
+                bucket_position_counts=bucket_position_counts,
+                shared_position_group_counts=shared_position_group_counts,
+                current_bucket_entry_limits=current_bucket_entry_limits,
+            )
             occupied_symbol_counts[broker_symbol] = (
                 occupied_symbol_counts.get(broker_symbol, 0) + 1
             )

@@ -130,6 +130,73 @@ def test_load_multi_bucket_config_preserves_bucket_sigma_overrides(
     )
 
 
+# TODO: review
+def test_load_multi_bucket_config_preserves_shared_position_groups(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The shared any-slot allocation mode must survive config parsing."""
+
+    config_path = tmp_path / "multi_bucket_config.json"
+    config_path.write_text(
+        json.dumps({
+            "max_position_count": 7,
+            "buckets": [
+                {
+                    "label": "high_dispersion",
+                    "strategy_id": "fish_tail_blow_off_top",
+                    "dollar_volume_filter": (
+                        "dollar_volume>0.02%,Top500,Pick5"
+                    ),
+                    "max_positions": 4,
+                    "shared_position_group": "ordinary_tail",
+                },
+                {
+                    "label": "standard",
+                    "strategy_id": "fish_tail_blow_off_top",
+                    "dollar_volume_filter": (
+                        "dollar_volume>0.02%,Top500,Pick5"
+                    ),
+                    "max_positions": 4,
+                    "shared_position_group": "ordinary_tail",
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        multi_bucket_today,
+        "load_strategy_set_mapping",
+        lambda: {
+            "fish_tail_blow_off_top": (
+                "fish_tail_buy",
+                "fish_tail_sell",
+            ),
+        },
+    )
+    monkeypatch.setattr(
+        multi_bucket_today,
+        "load_strategy_entry_filters",
+        lambda: {},
+    )
+
+    loaded_config = multi_bucket_today.load_multi_bucket_config(config_path)
+
+    assert (
+        loaded_config.bucket_definitions[
+            "high_dispersion"
+        ].shared_position_group
+        == "ordinary_tail"
+    )
+    assert (
+        loaded_config.bucket_definitions["standard"].shared_position_group
+        == "ordinary_tail"
+    )
+    assert strategy.resolve_shared_position_group_limits(
+        loaded_config.bucket_definitions
+    ) == {"ordinary_tail": 4}
+
+
 def _build_test_bucket(
     *,
     bucket_label: str,

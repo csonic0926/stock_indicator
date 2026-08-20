@@ -33,17 +33,21 @@ def test_build_risk_report_content_includes_score_and_gate_impact() -> None:
     """Monthly risk report should expose score, recommendation, and gate status."""
     historical_risk_scores_module = load_historical_risk_scores_module()
     report_content = historical_risk_scores_module.build_risk_report_content(
+        # TODO: review
         (
-            "2026-06",
+            "2026-08",
             25,
             25,
-            "Known Apr CPI/PCE inflation; FSB private-credit and AI-valuation risk",
+            (
+                "Known June CPI/PCE elevated; FOMC hold amid energy risk; "
+                "resilient banks"
+            ),
             "H",
         ),
-        generated_date_text="2026-06-01",
+        generated_date_text="2026-08-01",
     )
 
-    assert "# Risk Report: 2026-06" in report_content
+    assert "# Risk Report: 2026-08" in report_content
     assert "- Risk score: 50" in report_content
     assert "- Recommendation: reduce" in report_content
     assert "Duration remains 25" in report_content
@@ -55,13 +59,14 @@ def test_write_latest_risk_report_writes_month_named_file() -> None:
     historical_risk_scores_module = load_historical_risk_scores_module()
     with TemporaryDirectory() as temporary_directory_name:
         report_directory = Path(temporary_directory_name)
+        # TODO: review
         report_path = historical_risk_scores_module.write_latest_risk_report(
             report_directory,
-            generated_date_text="2026-06-01",
+            generated_date_text="2026-08-01",
         )
 
-        assert report_path == report_directory / "2026-06.md"
+        assert report_path == report_directory / "2026-08.md"
         assert report_path.exists()
-        assert "Known Apr CPI/PCE inflation" in report_path.read_text(
+        assert "Known June CPI/PCE elevated" in report_path.read_text(
             encoding="utf-8"
         )

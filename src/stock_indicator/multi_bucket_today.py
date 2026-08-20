@@ -368,6 +368,11 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
                 raise ValueError(
                     f"bucket {label}: max_positions must be positive"
                 )
+        # TODO: review
+        shared_position_group = strategy.parse_shared_position_group(
+            raw_bucket.get("shared_position_group"),
+            bucket_label=label,
+        )
         skipped_fama_french_groups = parse_skip_ff12_groups(
             raw_bucket.get("skip_ff12_groups"),
             bucket_label=label,
@@ -502,6 +507,7 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
             entry_priority=entry_priority,
             maximum_positions=bucket_maximum_positions,
             fill_remaining=bool(raw_bucket.get("fill_remaining", False)),
+            shared_position_group=shared_position_group,
             skipped_fama_french_groups=skipped_fama_french_groups,
             exit_alpha_factor=exit_alpha_factor_value,
             shape_slope_min=shape_slope_min_value,
@@ -650,6 +656,8 @@ def load_multi_bucket_config(config_path: Path) -> MultiBucketRunConfig:
             ),
             cohort_co_movement_gate=cohort_co_movement_gate_config,
         )
+
+    strategy.resolve_shared_position_group_limits(bucket_definitions)
 
     adaptive_tp_sl_config: strategy.AdaptiveTPSLConfig | None = None
     raw_adaptive = document.get("adaptive_tp_sl")

@@ -683,6 +683,71 @@ def test_preview_orders_cold_start_keeps_old_positions_and_sizes_new_buy_by_seve
     ]
 
 
+# TODO: review
+def test_shared_position_group_counts_members_without_counting_other_buckets(
+) -> None:
+    """Live group occupancy should sum only buckets in the named group."""
+
+    entry_limits = {
+        "head": {
+            "bucket": "head",
+            "maximum_positions": 7,
+            "shared_position_group": None,
+        },
+        "high_dispersion": {
+            "bucket": "high_dispersion",
+            "maximum_positions": 4,
+            "shared_position_group": "ordinary_tail",
+        },
+        "standard": {
+            "bucket": "standard",
+            "maximum_positions": 4,
+            "shared_position_group": "ordinary_tail",
+        },
+    }
+
+    group_counts = dashboard._count_live_positions_by_shared_group(
+        bucket_position_counts={
+            "head": 3,
+            "high_dispersion": 1,
+            "standard": 2,
+        },
+        current_bucket_entry_limits=entry_limits,
+    )
+
+    assert group_counts == {"ordinary_tail": 3}
+
+
+# TODO: review
+def test_shared_position_group_cap_uses_any_global_slots() -> None:
+    """A grouped candidate may use a late slot until its group cap is full."""
+
+    entry_limit = {
+        "bucket": "standard",
+        "maximum_positions": 4,
+        "fill_remaining": False,
+        "shared_position_group": "ordinary_tail",
+    }
+
+    assert dashboard._entry_limit_skip_reason(
+        entry_limit=entry_limit,
+        bucket_position_counts={"standard": 2},
+        shared_position_group_counts={"ordinary_tail": 3},
+        occupied_position_count=6,
+    ) is None
+
+    skip_reason = dashboard._entry_limit_skip_reason(
+        entry_limit=entry_limit,
+        bucket_position_counts={"standard": 2},
+        shared_position_group_counts={"ordinary_tail": 4},
+        occupied_position_count=6,
+    )
+
+    assert skip_reason is not None
+    assert "shared position group ordinary_tail" in skip_reason
+    assert "current: 4" in skip_reason
+
+
 def test_preview_orders_blocks_buy_when_live_bucket_is_at_cap(
     tmp_path: Path,
     monkeypatch,
