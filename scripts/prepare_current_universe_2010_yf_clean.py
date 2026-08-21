@@ -34,11 +34,24 @@ SYMBOLS_PATH = DATA_DIRECTORY / "symbols.txt"
 TARGET_DIRECTORY = DATA_DIRECTORY / "stock_data_2010_yf_clean"
 CURRENT_DAILY_DIRECTORY = DATA_DIRECTORY / "stock_data"
 LOCAL_HISTORY_SOURCE_DIRECTORIES = [
+    DATA_DIRECTORY / "stock_data_1994_clean",
     DATA_DIRECTORY / "stock_data_1994",
+    DATA_DIRECTORY / "stock_data_2014_clean",
     DATA_DIRECTORY / "stock_data_2014",
 ]
 AUDIT_PATH = DATA_DIRECTORY / "stock_data_2010_yf_clean_prepare_audit.csv"
 EXPECTED_PRICE_COLUMNS = ["close", "high", "low", "open", "volume"]
+# TODO: review
+PRICE_SCALE_RATIO_LOWER_BOUND = 0.5
+PRICE_SCALE_RATIO_UPPER_BOUND = 2.0
+PRICE_SCALE_MISMATCH_MINIMUM_ROWS = 2
+PRICE_SCALE_MISMATCH_FRACTION = 0.05
+# TODO: review
+# A full refresh replaces the whole series, so a short or late response
+# silently destroys history. These bound how much shorter than the existing
+# file a replacement may be before it is refused.
+FULL_REFRESH_MINIMUM_ROW_FRACTION = 0.95
+FULL_REFRESH_START_DATE_TOLERANCE_DAYS = 7
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -138,7 +151,10 @@ def write_price_csv(price_frame: pandas.DataFrame, csv_path: Path) -> None:
     output_frame.to_csv(csv_path)
 
 
-def trim_to_start_date(price_frame: pandas.DataFrame, start_date: str) -> pandas.DataFrame:
+def trim_to_start_date(
+    price_frame: pandas.DataFrame,
+    start_date: str,
+) -> pandas.DataFrame:
     """Return rows on or after ``start_date``."""
 
     if price_frame.empty:
@@ -149,7 +165,9 @@ def trim_to_start_date(price_frame: pandas.DataFrame, start_date: str) -> pandas
 def merge_price_frames(price_frames: list[pandas.DataFrame]) -> pandas.DataFrame:
     """Merge price frames with later frames overriding duplicate dates."""
 
-    non_empty_frames = [price_frame for price_frame in price_frames if not price_frame.empty]
+    non_empty_frames = [
+        price_frame for price_frame in price_frames if not price_frame.empty
+    ]
     if not non_empty_frames:
         return pandas.DataFrame(columns=EXPECTED_PRICE_COLUMNS)
     merged_frame = pandas.concat(non_empty_frames).sort_index()
@@ -157,6 +175,97 @@ def merge_price_frames(price_frames: list[pandas.DataFrame]) -> pandas.DataFrame
     merged_frame = merged_frame[EXPECTED_PRICE_COLUMNS]
     merged_frame.index.name = "Date"
     return merged_frame
+
+
+def price_frames_have_scale_mismatch(
+    historical_frame: pandas.DataFrame,
+    daily_frame: pandas.DataFrame,
+) -> bool:
+    """Return whether daily rows are unsafe to merge into historical rows.
+
+    Yahoo can revise split-adjusted historical prices after a split. If only a
+    recent daily cache is merged into a longer backtest file, overlap dates can
+    reveal a mix of old and new price bases. In that case the symbol needs a
+    full network refresh instead of a row-level merge.
+    """
+
+    if (
+        historical_frame.empty
+        or daily_frame.empty
+        or "close" not in historical_frame.columns
+        or "close" not in daily_frame.columns
+    ):
+        return False
+    common_index = historical_frame.index.intersection(daily_frame.index)
+    if common_index.empty:
+        return False
+    ratio_values: list[float] = []
+    for common_timestamp in common_index:
+        historical_close = historical_frame.at[common_timestamp, "close"]
+        daily_close = daily_frame.at[common_timestamp, "close"]
+        try:
+            historical_close_float = float(historical_close)
+            daily_close_float = float(daily_close)
+        except (TypeError, ValueError):
+            continue
+        if (
+            not pandas.notna(historical_close_float)
+            or not pandas.notna(daily_close_float)
+            or historical_close_float <= 0
+            or daily_close_float <= 0
+        ):
+            continue
+        ratio_values.append(daily_close_float / historical_close_float)
+    if not ratio_values:
+        return False
+    ratio_series = pandas.Series(ratio_values)
+    mismatch_count = int(
+        (
+            (ratio_series <= PRICE_SCALE_RATIO_LOWER_BOUND)
+            | (ratio_series >= PRICE_SCALE_RATIO_UPPER_BOUND)
+        ).sum()
+    )
+    minimum_mismatch_count = max(
+        PRICE_SCALE_MISMATCH_MINIMUM_ROWS,
+        int(len(ratio_series) * PRICE_SCALE_MISMATCH_FRACTION),
+    )
+    return mismatch_count >= minimum_mismatch_count
+
+
+# TODO: review
+def full_refresh_rejection_reason(
+    downloaded_frame: pandas.DataFrame,
+    existing_frame: pandas.DataFrame,
+) -> str | None:
+    """Return why a full refresh must not overwrite the target, or None.
+
+    A corporate action legitimately changes every price in the series, so a
+    replacement cannot be checked by comparing values. It can be checked for
+    coverage: a truncated or empty Yahoo response is the failure that turns a
+    refresh into data loss, and it always shows up as fewer rows or a later
+    first date than the file already on disk.
+    """
+
+    if downloaded_frame.empty:
+        return "download returned no rows"
+    if existing_frame.empty:
+        return None
+    minimum_row_count = len(existing_frame) * FULL_REFRESH_MINIMUM_ROW_FRACTION
+    if len(downloaded_frame) < minimum_row_count:
+        return (
+            f"download has {len(downloaded_frame)} rows, under "
+            f"{FULL_REFRESH_MINIMUM_ROW_FRACTION:.0%} of the existing "
+            f"{len(existing_frame)}"
+        )
+    latest_acceptable_start = existing_frame.index.min() + pandas.Timedelta(
+        days=FULL_REFRESH_START_DATE_TOLERANCE_DAYS
+    )
+    if downloaded_frame.index.min() > latest_acceptable_start:
+        return (
+            f"download starts {downloaded_frame.index.min().date()}, later "
+            f"than the existing {existing_frame.index.min().date()}"
+        )
+    return None
 
 
 def first_and_last_date(price_frame: pandas.DataFrame) -> tuple[str, str]:
@@ -170,7 +279,10 @@ def first_and_last_date(price_frame: pandas.DataFrame) -> tuple[str, str]:
     )
 
 
-def build_local_history_frame(symbol: str, start_date: str) -> tuple[pandas.DataFrame, str]:
+def build_local_history_frame(
+    symbol: str,
+    start_date: str,
+) -> tuple[pandas.DataFrame, str]:
     """Return the best local long-history frame for ``symbol``."""
 
     for source_directory in LOCAL_HISTORY_SOURCE_DIRECTORIES:
@@ -207,16 +319,32 @@ def seed_symbol_from_local_sources(
         if daily_path.exists()
         else pandas.DataFrame(columns=EXPECTED_PRICE_COLUMNS)
     )
-    merged_frame = merge_price_frames(
-        [existing_frame, long_history_frame, daily_frame],
+    historical_frame = merge_price_frames(
+        [existing_frame, long_history_frame],
     )
+    daily_scale_mismatch = price_frames_have_scale_mismatch(
+        historical_frame,
+        daily_frame,
+    )
+    if daily_scale_mismatch:
+        LOGGER.warning(
+            "%s daily cache uses an incompatible adjusted price scale; "
+            "requesting full Yahoo refresh instead of partial merge",
+            symbol,
+        )
+        merged_frame = historical_frame
+    else:
+        merged_frame = merge_price_frames([historical_frame, daily_frame])
     if not merged_frame.empty:
         write_price_csv(merged_frame, target_path)
     first_date, last_date = first_and_last_date(merged_frame)
     needs_network_backfill = (
-        long_history_source == ""
-        and not merged_frame.empty
-        and first_date > start_date
+        daily_scale_mismatch
+        or (
+            long_history_source == ""
+            and not merged_frame.empty
+            and first_date > start_date
+        )
     )
     return {
         "symbol": symbol,
@@ -225,6 +353,7 @@ def seed_symbol_from_local_sources(
         "row_count_after_local": len(merged_frame),
         "first_date_after_local": first_date,
         "last_date_after_local": last_date,
+        "daily_scale_mismatch": daily_scale_mismatch,
         "needs_network_backfill": needs_network_backfill,
         "network_status": "not_requested",
         "network_error": "",
@@ -240,19 +369,43 @@ def backfill_symbol_from_yahoo(
     start_date: str,
     end_date: str,
 ) -> dict[str, Any]:
-    """Backfill one symbol from Yahoo using the target CSV as cache."""
+    """Backfill one symbol from Yahoo with a full requested history download."""
 
     target_path = TARGET_DIRECTORY / f"{symbol}.csv"
+    existing_frame = (
+        read_price_csv(target_path) if target_path.exists() else pandas.DataFrame()
+    )
     try:
         downloaded_frame = download_history(
             symbol,
             start=start_date,
             end=end_date,
-            cache_path=target_path,
         )
-        normalized_frame = normalize_price_frame(downloaded_frame.reset_index())
-        if not normalized_frame.empty:
-            write_price_csv(trim_to_start_date(normalized_frame, start_date), target_path)
+        normalized_frame = trim_to_start_date(
+            normalize_price_frame(downloaded_frame.reset_index()),
+            start_date,
+        )
+        rejection_reason = full_refresh_rejection_reason(
+            normalized_frame,
+            existing_frame,
+        )
+        if rejection_reason is not None:
+            LOGGER.warning(
+                "%s full refresh rejected (%s); keeping %d existing rows",
+                symbol,
+                rejection_reason,
+                len(existing_frame),
+            )
+            first_date, last_date = first_and_last_date(existing_frame)
+            return {
+                "symbol": symbol,
+                "network_status": "rejected",
+                "network_error": rejection_reason,
+                "row_count_final": len(existing_frame),
+                "first_date_final": first_date,
+                "last_date_final": last_date,
+            }
+        write_price_csv(normalized_frame, target_path)
         final_frame = read_price_csv(target_path)
         first_date, last_date = first_and_last_date(final_frame)
         return {
@@ -264,7 +417,11 @@ def backfill_symbol_from_yahoo(
             "last_date_final": last_date,
         }
     except Exception as error:  # noqa: BLE001
-        final_frame = read_price_csv(target_path) if target_path.exists() else pandas.DataFrame()
+        final_frame = (
+            read_price_csv(target_path)
+            if target_path.exists()
+            else pandas.DataFrame()
+        )
         first_date, last_date = first_and_last_date(final_frame)
         return {
             "symbol": symbol,
@@ -304,6 +461,7 @@ def write_audit(records: list[dict[str, Any]], audit_path: Path = AUDIT_PATH) ->
         "row_count_after_local",
         "first_date_after_local",
         "last_date_after_local",
+        "daily_scale_mismatch",
         "needs_network_backfill",
         "network_status",
         "network_error",
@@ -340,7 +498,11 @@ def main() -> None:
         )
         audit_records.append(record)
         if symbol_index % 250 == 0 or symbol_index == len(current_symbols):
-            LOGGER.info("Local fill progress: %d/%d", symbol_index, len(current_symbols))
+            LOGGER.info(
+                "Local fill progress: %d/%d",
+                symbol_index,
+                len(current_symbols),
+            )
 
     records_by_symbol = {str(record["symbol"]): record for record in audit_records}
     network_symbols = [
@@ -392,7 +554,9 @@ def main() -> None:
     LOGGER.info("Extra after: %d", len(extra_after))
     LOGGER.info("Audit written: %s", AUDIT_PATH)
     if missing_after:
-        raise SystemExit(f"Missing current symbols after preparation: {missing_after[:20]}")
+        raise SystemExit(
+            f"Missing current symbols after preparation: {missing_after[:20]}"
+        )
 
 
 if __name__ == "__main__":
